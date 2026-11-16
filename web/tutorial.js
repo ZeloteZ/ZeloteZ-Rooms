@@ -50,6 +50,11 @@ const pages = {
     step(".friend-requests h2, .friend-views label:nth-of-type(2)", "Manage requests", "Anfragen verwalten",
       "Accept or decline incoming requests here. Confirmed friends can be invited into your private rooms.", "Hier nimmst du Anfragen an oder lehnst sie ab. Bestätigte Freunde kannst du in deine privaten Räume einladen."),
   ],
+  direct: [
+    step(".direct-heading .primary", "Start a private conversation", "Eine private Unterhaltung beginnen",
+      "Choose a friend here or use Message on your friends page. Only the two of you receive the keys to open the chat.",
+      "Wähle hier einen Freund oder nutze „Nachricht“ auf der Freundeseite. Nur ihr beide bekommt die Schlüssel für den Chat."),
+  ],
   invites: [
     step(".invite-create select", "Create a link", "Link erstellen",
       "Set how long the invite is valid. Each link lets one person create an account.", "Wähle, wie lange die Einladung gültig ist. Mit jedem Link kann eine Person ein Konto erstellen."),

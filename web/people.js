@@ -1,5 +1,5 @@
 import { t } from "./i18n.js";
-import { api, button, closeDialog, copyField, el, field, form, identifier, localizedTime, notify, personRow, select, showDialog, status, tell } from "./ui.js";
+import { api, button, closeDialog, copyField, el, field, form, identifier, localizedTime, notify, openDirect, personRow, select, showDialog, status, tell } from "./ui.js";
 
 const relationships = {
   friend: ["Friend", "Befreundet"],
@@ -59,7 +59,17 @@ export async function renderFriends({ signal }) {
     } else if (person.relationship === "outgoing") {
       controls = [action(person, "remove", t("Withdraw", "Zurückziehen"))];
     } else if (person.relationship === "friend") {
-      controls = [action(person, "remove", t("Remove", "Entfernen"), "danger")];
+      controls = [button(t("Message", "Nachricht"), async event => {
+        const control = event.currentTarget;
+        control.disabled = true;
+        try {
+          await openDirect(person.id, signal);
+        } catch (error) {
+          if (!signal.aborted) tell(feedback, error.message, "error");
+        } finally {
+          control.disabled = false;
+        }
+      }), action(person, "remove", t("Remove", "Entfernen"), "danger")];
     } else {
       controls = [action(person, "request", t("Add friend", "Freund hinzufügen"), "primary")];
     }
@@ -93,7 +103,8 @@ export async function renderFriends({ signal }) {
     el("fieldset", { class: "friend-views" },
       el("legend", { class: "sr-only" }, t("Friends view", "Freunde-Ansicht")),
       views.map(([value, label], index) => el("label", {},
-        el("input", { type: "radio", name: "friend-view", value, checked: index === 0, class: "sr-only" }),
+        el("input", { type: "radio", name: "friend-view", value,
+          checked: index === (initial.people?.some(person => person.relationship === "incoming") ? 1 : 0), class: "sr-only" }),
         el("span", {}, label)))),
     el("div", { class: "secondary-panels friend-panels" },
       el("section", { class: "panel people-panel friend-search" },

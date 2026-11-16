@@ -3,6 +3,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktop", true);
+if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktopNotifications", {
+  notify: input => ipcRenderer.invoke("rooms:desktop-notify", input),
+});
 
 if (process.isMainFrame && process.argv.includes("--rooms-native-capture")) {
   const capture = {

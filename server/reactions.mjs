@@ -61,7 +61,7 @@ function createStore(db, { reactions, messages, deletions, parent, sharedHistory
   }
 }
 
-export function createReactions(db, { requireSession, streams }) {
+export function createReactions(db, { requireSession, streams, assertChatWritable = () => {} }) {
   const text = createStore(db, {
     reactions: 'message_reactions', messages: 'messages', deletions: 'message_deletions',
     parent: 'channel_id', sharedHistory: true,
@@ -71,7 +71,9 @@ export function createReactions(db, { requireSession, streams }) {
     parent: 'stream_id', sharedHistory: false,
   })
   const chatMembership = db.prepare(`SELECT 1 FROM channels c JOIN topic_members m ON m.topic_id = c.topic_id
-    WHERE c.id = ? AND c.type = 'chat' AND m.user_id = ? AND m.joined_at IS NOT NULL`)
+    LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
+    WHERE c.id = ? AND c.type = 'chat' AND m.user_id = ? AND m.joined_at IS NOT NULL
+    AND (d.id IS NULL OR (c.id = d.channel_id AND m.user_id IN (d.first_id, d.second_id)))`)
 
   return {
     async handle(request, response, { pathname, searchParams }) {
@@ -104,6 +106,7 @@ export function createReactions(db, { requireSession, streams }) {
           typeof payload.body !== 'string' || !validBody.test(payload.body))) throw invalid()
         transaction(db, () => {
           if (authorizedUser() !== userId) throw unavailable()
+          if (chat && method === 'PUT') assertChatWritable(parentId, userId)
           store.change(parentId, userId, message, id, payload)
         })
         response.writeHead(204).end()

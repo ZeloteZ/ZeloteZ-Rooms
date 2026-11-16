@@ -70,7 +70,8 @@ export function createHistory(db, { requireSession }) {
     SELECT member.topic_id, c.id, member.user_id, member.joined_at,
       (SELECT max(seq) FROM messages WHERE channel_id = c.id)
     FROM topic_members member JOIN channels c ON c.topic_id = member.topic_id AND c.type = 'chat'
-    WHERE member.joined_at IS NOT NULL ${targetFilter} AND EXISTS (
+    WHERE member.joined_at IS NOT NULL ${targetFilter}
+    AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = member.topic_id) AND EXISTS (
       SELECT 1 FROM messages m WHERE m.channel_id = c.id AND m.created_at <= member.joined_at AND ${needsKey('member.user_id')})
     ON CONFLICT(channel_id, recipient_id) DO UPDATE SET complete = 0`
 
@@ -158,7 +159,8 @@ export function createHistory(db, { requireSession }) {
 
   const chatFor = db.prepare(`SELECT c.topic_id FROM channels c JOIN topic_members tm
     ON tm.topic_id = c.topic_id AND tm.user_id = ? AND tm.joined_at IS NOT NULL
-    WHERE c.id = ? AND c.type = 'chat'`)
+    WHERE c.id = ? AND c.type = 'chat'
+    AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = c.topic_id)`)
   const receiver = db.prepare(`SELECT user_id AS id, joined_at FROM topic_members
     WHERE topic_id = ? AND user_id = ? AND joined_at IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = topic_members.user_id)`)
@@ -199,6 +201,7 @@ export function createHistory(db, { requireSession }) {
       AND recipient.joined_at = j.admitted_at
     JOIN users u ON u.id = j.recipient_id
     WHERE j.complete = 0 AND j.recipient_id <> actor.user_id
+      AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = j.topic_id)
       AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = j.recipient_id)`
   const resumeJob = db.prepare(`${pendingJobs} AND j.id = ?`)
   const nextJob = db.prepare(`${pendingJobs} AND j.id > ? AND EXISTS (

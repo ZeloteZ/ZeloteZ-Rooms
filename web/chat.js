@@ -204,6 +204,8 @@ export function renderChat(context, channel, edit) {
     el("div", { class: "write-row" }, attach, mentions.node, send),
     fileInput, feedback, el("p", { class: "composer-shortcuts", id: "message-shortcuts" },
       t("Enter to send · Shift + Enter for a new line", "Enter zum Senden · Umschalt + Enter für eine neue Zeile")));
+  const unavailable = el("p", { class: "direct-read-only subtle", hidden: true },
+    t("You can send messages while you’re friends.", "Ihr könnt Nachrichten schreiben, solange ihr befreundet seid."));
   list.append(empty);
   let files = [];
   let recipients = [];
@@ -221,6 +223,7 @@ export function renderChat(context, channel, edit) {
   let locating = false;
   let highlighted;
   let highlightTimer;
+  let canSend = context.direct?.canSend ?? true;
 
   function releaseAttachment(attachment) {
     loadedBytes -= loadedAttachments.get(attachment) ?? 0;
@@ -259,11 +262,26 @@ export function renderChat(context, channel, edit) {
   }
 
   function updateSend() {
-    const busy = !initialized || sending || input.disabled;
+    const busy = !canSend || !initialized || sending || input.disabled;
     send.disabled = busy || (!input.value.trim() && !files.length);
     fileInput.disabled = busy || files.length >= maxFiles;
     attach.disabled = fileInput.disabled;
     for (const remove of attachments.querySelectorAll("button")) remove.disabled = busy;
+  }
+
+  function updateDirect(canWrite) {
+    canSend = canWrite;
+    input.disabled = !canWrite;
+    composer.hidden = !canWrite;
+    unavailable.hidden = canWrite;
+    updateSend();
+  }
+
+  function reportRead() {
+    if (!context.direct || signal.aborted || !list.isConnected || document.hidden ||
+        pendingFocus || locating || list.scrollHeight - list.clientHeight - list.scrollTop >= 64) return;
+    const sequence = Number(list.lastElementChild?.dataset.sequence);
+    if (Number.isSafeInteger(sequence) && sequence > 0) context.direct.onRead(sequence);
   }
 
   function sizeInput() {
@@ -368,7 +386,7 @@ export function renderChat(context, channel, edit) {
     }
     const body = { id, envelope, attachmentIds: named.map(file => file.id) };
     const notified = draft.mentionedUserIds.filter(userId => recipients.some(recipient => recipient.id === userId));
-    if (notified.length) body.mentionedUserIds = notified;
+    if (notified.length && !context.direct) body.mentionedUserIds = notified;
     return api(messageEndpoint, { method: "POST", body, signal });
   }
 
@@ -653,13 +671,14 @@ export function renderChat(context, channel, edit) {
         if (await loadGrantedHistory()) delay = 1000;
       }
       setConnection("");
+      if (context.direct) requestAnimationFrame(reportRead);
     } catch (error) {
       if (!signal.aborted) {
         setConnection(error.status === 403 ? t("You no longer have access to this chat.", "Du hast keinen Zugriff mehr auf diesen Chat.") : t("Reconnecting to the chat.", "Der Chat wird gerade neu verbunden."), "error");
         if (error.status === 403 || error.status === 404) {
           input.disabled = true;
           updateSend();
-          context.refresh();
+          (context.direct?.onUnavailable ?? context.refresh)();
           return;
         }
       }
@@ -679,11 +698,18 @@ export function renderChat(context, channel, edit) {
 
   const pane = el("section", { class: "panel conversation" },
     el("div", { class: "conversation-heading section-heading" },
-      el("div", { class: "stack chat-title" }, el("h2", {}, "# " + channel.title), el("span", { class: "tag" }, t("End-to-end encrypted", "Ende-zu-Ende-verschlüsselt"))),
+      el("div", { class: "stack chat-title" }, el("h2", {}, context.direct ? context.direct.name : "# " + channel.title),
+        el("span", { class: "tag" }, t("End-to-end encrypted", "Ende-zu-Ende-verschlüsselt"))),
       edit),
     el("div", { class: "chat-controls stack" }, older, connection),
     list,
-    composer);
+    composer, context.direct && unavailable);
+  if (context.direct) {
+    updateDirect(canSend);
+    context.direct.events.addEventListener("change", event => updateDirect(event.detail), { signal });
+    list.addEventListener("scroll", reportRead, { signal, passive: true });
+    document.addEventListener("visibilitychange", reportRead, { signal });
+  }
   pane.addEventListener("open-message", event => requestMessage(event.detail?.messageId), { signal });
   requestMessage(context.messageId);
   poll();

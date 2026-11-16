@@ -1,5 +1,33 @@
 import { t } from "./i18n.js";
-import { api, button, el, identifier, localizedTime, personMark, status, tell, topicHref } from "./ui.js";
+import { api, button, directHref, el, identifier, localizedTime, personMark, status, tell, topicHref } from "./ui.js";
+
+function describe(entry) {
+  const name = entry.actor.displayName;
+  if (entry.kind === "friend-request") {
+    return { route: "#/friends", title: t("Friend request", "Freundschaftsanfrage"),
+      caption: t("{name} sent you a friend request", "{name} hat dir eine Freundschaftsanfrage geschickt", { name }) };
+  }
+  if (entry.kind === "direct-message") {
+    return { route: directHref(entry.conversationId, entry.messageId), title: t("Direct message", "Direktnachricht"),
+      caption: t("New message from {name}", "Neue Nachricht von {name}", { name }) };
+  }
+  const where = entry.roomTitle + " · " + entry.channelTitle;
+  if (entry.kind === "live") {
+    return { route: topicHref(entry.roomId, entry.channelId, { streamId: entry.streamId }),
+      title: t("Live now", "Jetzt live"), caption: t("{name} went live", "{name} ist live gegangen", { name }), where };
+  }
+  return { route: topicHref(entry.roomId, entry.channelId, {
+    messageId: entry.messageId, streamId: entry.source === "stream" ? entry.streamId : undefined,
+  }), title: t("Mention", "Erwähnung"), caption: t("{name} mentioned you", "{name} hat dich erwähnt", { name }), where };
+}
+
+function desktopDelivery() {
+  const electron = window.roomsDesktopNotifications;
+  if (typeof electron?.notify === "function") return payload => electron.notify(payload);
+  const gtk = window.webkit?.messageHandlers?.roomsCapture;
+  if (typeof gtk?.postMessage === "function") return payload => gtk.postMessage({ action: "notification", ...payload });
+  return null;
+}
 
 export function mountNotifications(dock, signal, openCurrent) {
   const title = t("Notifications", "Benachrichtigungen");
@@ -21,13 +49,12 @@ export function mountNotifications(dock, signal, openCurrent) {
   let marking = false;
   let unread = 0;
   let lastList;
+  const desktop = desktopDelivery();
+  const seen = new Set();
+  let ready = false;
 
   function item(entry) {
-    const name = entry.actor.displayName;
-    const caption = t("{name} mentioned you", "{name} hat dich erwähnt", { name });
-    const route = topicHref(entry.roomId, entry.channelId, {
-      messageId: entry.messageId, streamId: entry.source === "stream" ? entry.streamId : undefined,
-    });
+    const { caption, route, where } = describe(entry);
     const link = el("a", { href: route, class: "notification-link", "data-notification-id": entry.id,
       "data-unread": entry.readAt ? undefined : "", onclick: event => {
         menu.open = false;
@@ -40,11 +67,30 @@ export function mountNotifications(dock, signal, openCurrent) {
     personMark(entry.actor),
     el("span", { class: "notification-description" },
       el("strong", {}, caption),
-      el("span", { class: "notification-location" }, entry.roomTitle, " · ", entry.channelTitle),
+      where && el("span", { class: "notification-location" }, where),
       el("time", { datetime: entry.createdAt }, localizedTime(entry.createdAt))),
     entry.readAt ? null : el("span", { class: "notification-dot", role: "img",
       "aria-label": t("Unread", "Ungelesen") }));
     return el("li", {}, link);
+  }
+
+  function deliver(entries) {
+    if (!desktop) return;
+    for (const entry of [...entries].reverse()) {
+      const id = String(entry.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (!ready || Date.now() - Date.parse(entry.createdAt) > 120000) continue;
+      const { caption, title, route, where } = describe(entry);
+      const body = where ? caption + " · " + where : caption;
+      try {
+        Promise.resolve(desktop({ id, kind: entry.kind, title, body: body.slice(0, 180), href: route })).catch(() => {});
+      } catch {
+        // Native notifications can be unavailable while a desktop window is closing.
+      }
+    }
+    while (seen.size > 512) seen.delete(seen.values().next().value);
+    ready = true;
   }
 
   async function markRead(id) {
@@ -77,6 +123,7 @@ export function mountNotifications(dock, signal, openCurrent) {
     try {
       const data = await api("notifications", { signal });
       if (signal.aborted) return;
+      deliver(data.notifications);
       unread = data.unreadCount;
       badge.hidden = unread === 0;
       badge.textContent = unread > 99 ? "99+" : String(unread);
@@ -99,7 +146,7 @@ export function mountNotifications(dock, signal, openCurrent) {
       if (!signal.aborted) tell(feedback, error.message, "error");
     } finally {
       loading = false;
-      if (!signal.aborted) timer = setTimeout(refresh, refreshAgain ? 0 : document.hidden ? 30000 : 7000);
+      if (!signal.aborted) timer = setTimeout(refresh, refreshAgain ? 0 : desktop ? 5000 : document.hidden ? 30000 : 7000);
       refreshAgain = false;
     }
   }

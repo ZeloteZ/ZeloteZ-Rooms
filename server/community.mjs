@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { channelList, initializeChannelOrder } from './channel-management.mjs'
+import { createDirect } from './direct.mjs'
 import { json, readBytes, readJson, RequestError, transaction } from './http.mjs'
 import { responseLocale } from './locale.mjs'
 
@@ -130,7 +131,8 @@ function initializeChatStorage(db) {
   })
 }
 
-export function createCommunity(db, { requireSession, appearance, recordMentions = () => {} }) {
+export function createCommunity(db, { requireSession, appearance, recordMentions = () => {},
+  recordFriendRequest = () => {}, recordDirectMessage = () => {}, recordDirectRead = () => {} }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS friendships (
       first_id TEXT NOT NULL REFERENCES users(id), second_id TEXT NOT NULL REFERENCES users(id),
@@ -181,26 +183,33 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   `)
   initializeChatStorage(db)
   initializeChannelOrder(db)
+  const direct = createDirect(db, appearance.profile)
 
   const topicSelect = `SELECT t.*, m.role, m.approved, m.joined_at, m.visited_at, m.favorite,
     EXISTS (SELECT 1 FROM topic_designers d WHERE d.topic_id = t.id AND d.user_id = m.user_id) AS design_grant
     FROM topics t LEFT JOIN topic_members m ON m.topic_id = t.id AND m.user_id = ?`
-  const topicById = db.prepare(`${topicSelect} WHERE t.id = ? AND (t.visibility = 'public' OR m.user_id IS NOT NULL)`)
-  const visibleTopics = `${topicSelect} WHERE (t.visibility = 'public' OR m.user_id IS NOT NULL)`
+  const listedTopic = 'NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = t.id)'
+  const visibleTopics = `${topicSelect} WHERE ${listedTopic} AND (t.visibility = 'public' OR m.user_id IS NOT NULL)`
+  const topicById = db.prepare(`${visibleTopics} AND t.id = ?`)
   const listTopics = db.prepare(`${visibleTopics} AND (? IS NULL OR (t.created_at, t.id) < (?, ?))
     ORDER BY t.created_at DESC, t.id DESC LIMIT ?`)
-  const favoriteTopics = db.prepare(`${topicSelect} WHERE m.joined_at IS NOT NULL AND m.favorite = 1 ORDER BY m.visited_at DESC, t.id DESC`)
-  const recentTopics = db.prepare(`${topicSelect} WHERE m.joined_at IS NOT NULL AND m.visited_at IS NOT NULL
+  const favoriteTopics = db.prepare(`${topicSelect} WHERE ${listedTopic} AND m.joined_at IS NOT NULL AND m.favorite = 1 ORDER BY m.visited_at DESC, t.id DESC`)
+  const recentTopics = db.prepare(`${topicSelect} WHERE ${listedTopic} AND m.joined_at IS NOT NULL AND m.visited_at IS NOT NULL
     ORDER BY m.visited_at DESC, t.id DESC LIMIT 8`)
-  const countRooms = db.prepare('SELECT count(*) AS count FROM topics')
-  const countOwnedRooms = db.prepare('SELECT count(*) AS count FROM topics WHERE owner_id = ?')
+  const countRooms = db.prepare(`SELECT count(*) AS count FROM topics t WHERE ${listedTopic}`)
+  const countOwnedRooms = db.prepare(`SELECT count(*) AS count FROM topics t WHERE owner_id = ? AND ${listedTopic}`)
   const storageFor = db.prepare('SELECT messages, bytes FROM chat_storage WHERE scope = ?')
-  const findChannel = db.prepare(`SELECT c.*, m.role, t.stream_policy AS topic_stream_policy FROM channels c
+  const findChannel = db.prepare(`SELECT c.*, CASE WHEN d.id IS NULL THEN m.role ELSE 'member' END AS role,
+    t.stream_policy AS topic_stream_policy FROM channels c
     JOIN topics t ON t.id = c.topic_id
     JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL
-    WHERE c.id = ? AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = m.user_id)`)
+    LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
+    WHERE c.id = ? AND (d.id IS NULL OR (c.id = d.channel_id AND m.user_id IN (d.first_id, d.second_id)))
+    AND NOT EXISTS (SELECT 1 FROM disabled_accounts disabled WHERE disabled.user_id = m.user_id)`)
   const recipientKeys = db.prepare(`SELECT u.id, u.public_key FROM topic_members m JOIN users u ON u.id = m.user_id
-    WHERE m.topic_id = ? AND m.joined_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = u.id)
+    LEFT JOIN direct_conversations d ON d.topic_id = m.topic_id
+    WHERE m.topic_id = ? AND m.joined_at IS NOT NULL AND (d.id IS NULL OR u.id IN (d.first_id, d.second_id))
+    AND NOT EXISTS (SELECT 1 FROM disabled_accounts disabled WHERE disabled.user_id = u.id)
     ORDER BY u.id`)
   const channelTopic = db.prepare('SELECT topic_id FROM channels WHERE id = ?')
   const listChannels = db.prepare(channelList)
@@ -261,22 +270,25 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     assertId(target)
     if (target === user.id || !db.prepare('SELECT 1 FROM users WHERE id = ?').get(target)) throw missing()
     const [first, second] = [user.id, target].sort()
-    const relationship = db.prepare('SELECT * FROM friendships WHERE first_id = ? AND second_id = ?').get(first, second)
-    if (action === 'request') {
-      if (relationship) throw new RequestError(409, 'Für diese Person gibt es schon eine Anfrage oder Verbindung.')
-      db.prepare('INSERT INTO friendships(first_id, second_id, requester_id) VALUES (?, ?, ?)').run(first, second, user.id)
-    } else if (action === 'accept') {
-      if (!relationship || relationship.accepted || relationship.requester_id === user.id) throw missing()
-      db.prepare('UPDATE friendships SET accepted = 1 WHERE first_id = ? AND second_id = ?').run(first, second)
-    } else {
-      transaction(db, () => {
+    transaction(db, () => {
+      if (action !== 'remove' && db.prepare('SELECT 1 FROM disabled_accounts WHERE user_id = ?').get(target)) throw missing()
+      const relationship = db.prepare('SELECT * FROM friendships WHERE first_id = ? AND second_id = ?').get(first, second)
+      if (action === 'request') {
+        if (relationship) throw new RequestError(409, 'Für diese Person gibt es schon eine Anfrage oder Verbindung.')
+        db.prepare('INSERT INTO friendships(first_id, second_id, requester_id) VALUES (?, ?, ?)').run(first, second, user.id)
+        recordFriendRequest({ recipientId: target, senderId: user.id })
+      } else if (action === 'accept') {
+        if (!relationship || relationship.accepted || relationship.requester_id === user.id) throw missing()
+        db.prepare('UPDATE friendships SET accepted = 1 WHERE first_id = ? AND second_id = ?').run(first, second)
+      } else {
         db.prepare('DELETE FROM friendships WHERE first_id = ? AND second_id = ?').run(first, second)
-        db.prepare(`DELETE FROM topic_members WHERE role <> 'owner' AND (
+        db.prepare(`DELETE FROM topic_members WHERE role <> 'owner'
+          AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = topic_members.topic_id) AND (
           (user_id = ? AND topic_id IN (SELECT id FROM topics WHERE owner_id = ? AND visibility = 'private')) OR
           (user_id = ? AND topic_id IN (SELECT id FROM topics WHERE owner_id = ? AND visibility = 'private'))
         )`).run(user.id, target, target, user.id)
-      })
-    }
+      }
+    })
   }
 
   function people(userId, query) {
@@ -499,7 +511,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       FROM messages m JOIN channels c ON c.id = m.channel_id JOIN topics t ON t.id = c.topic_id
       JOIN topic_members tm ON tm.topic_id = t.id AND tm.user_id = ? AND tm.joined_at IS NOT NULL
       JOIN users u ON u.id = m.user_id ${joinHistory}
-      WHERE ${undeleted} AND (g.revision IS NOT NULL OR ${originalAccess})
+      WHERE ${listedTopic} AND ${undeleted} AND (g.revision IS NOT NULL OR ${originalAccess})
       ORDER BY m.seq DESC LIMIT 16`).all(userId, userId, userId).map(row => ({
       ...showMessage(row), topicId: row.topic_id, topicTitle: row.topic_title,
       channelId: row.channel_id, channelTitle: row.channel_title,
@@ -524,9 +536,10 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     attempts.count++
     posting.set(user.id, attempts)
 
-    const envelope = validateEnvelope(input.envelope, recipientKeys.all(channel.topic_id))
     const createdAt = new Date(time).toISOString()
-    const seq = transaction(db, () => {
+    const { seq, envelope } = transaction(db, () => {
+      const conversation = direct.assertCanSend(channel.id, user.id)
+      const envelope = validateEnvelope(input.envelope, recipientKeys.all(channel.topic_id))
       checkChatStorage(user.id, Buffer.byteLength(envelope), 1)
       const result = db.prepare('INSERT INTO messages(id,channel_id,user_id,envelope,created_at) VALUES (?,?,?,?,?)')
         .run(input.id, channel.id, user.id, envelope, createdAt)
@@ -535,8 +548,10 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       for (const id of ids) if (linkFile.run(input.id, id, channel.id, user.id, time - stagingTime).changes !== 1) {
         throw new RequestError(409, 'Ein Anhang fehlt oder wurde schon versendet. Lade ihn erneut hoch.')
       }
-      recordMentions({ channelId: channel.id, senderId: user.id, messageId: input.id, mentionedUserIds: input.mentionedUserIds })
-      return Number(result.lastInsertRowid)
+      if (conversation) recordDirectMessage({ conversationId: conversation.id, recipientId: conversation.peerId,
+        channelId: channel.id, senderId: user.id, messageId: input.id })
+      else recordMentions({ channelId: channel.id, senderId: user.id, messageId: input.id, mentionedUserIds: input.mentionedUserIds })
+      return { seq: Number(result.lastInsertRowid), envelope }
     })
     return showMessage({ id: input.id, seq, user_id: user.id, display_name: user.displayName, created_at: createdAt, envelope })
   }
@@ -581,6 +596,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
 
   async function putFile(request, user, channel, fileId) {
     assertId(fileId)
+    direct.assertCanSend(channel.id, user.id)
     if (request.headers['content-type'] !== 'application/octet-stream') throw new RequestError(415, 'Nur verschlüsselte Dateien sind erlaubt.')
     if (uploading.has(user.id) || uploading.size >= 4) throw new RequestError(429, 'Warte, bis andere Uploads abgeschlossen sind.')
     uploading.add(user.id)
@@ -592,6 +608,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       const now = Date.now()
       expiredAttachments.run(now - stagingTime)
       transaction(db, () => {
+        direct.assertCanSend(channel.id, currentUser.id)
         const previous = db.prepare('SELECT channel_id,user_id,message_id,size FROM attachments WHERE id = ?').get(fileId)
         if (previous && (previous.channel_id !== channel.id || previous.user_id !== user.id || previous.message_id)) {
           throw new RequestError(409, 'Dieser Anhang wurde bereits verwendet.')
@@ -640,6 +657,14 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     } else if (resource === 'friends' && id && !action && method === 'POST') {
       mutateFriend(user, id, select(body.action, ['request', 'accept', 'remove']))
       json(response, 200, { ok: true })
+    } else if (resource === 'direct' && !action && !file) {
+      if (!id && method === 'GET') json(response, 200, { conversations: direct.list(user.id) })
+      else if (!id && method === 'POST') json(response, 200, { conversation: direct.open(user.id, body.userId) })
+      else if (id && method === 'GET') json(response, 200, { conversation: direct.get(user.id, id) })
+      else if (id && method === 'PATCH') {
+        direct.read(user.id, id, body.throughSeq, recordDirectRead)
+        response.writeHead(204).end()
+      } else return false
     } else if (resource === 'topics' && !id) {
       if (method === 'GET') json(response, 200, topicPage(user.id, searchParams.get('before')))
       else if (method === 'POST') json(response, 201, { topic: createTopic(user, body, responseLocale(response)) })
@@ -702,7 +727,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     return true
   }
 
-  return { handle, channelAccess, homeActivity,
+  return { handle, channelAccess, homeActivity, assertChatWritable: direct.assertCanSend,
     chatKeys: channelId => {
       const channel = channelTopic.get(channelId)
       return channel ? recipientKeys.all(channel.topic_id) : []

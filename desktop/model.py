@@ -11,17 +11,16 @@ STREAM_ID = re.compile(r"[a-f0-9]{32}")
 
 
 def server_origin(text):
-    value = text.strip().rstrip("/")
-    if any(char.isspace() or char in "\\%" for char in value):
+    value = text.strip()
+    if not re.fullmatch(r"https?://[^\s\\/%?#@]+/?", value, re.IGNORECASE):
         raise ValueError
     url = urlsplit(value)
     port = url.port
-    if (not url.hostname or port == 0 or url.username is not None or url.path or url.query or url.fragment
+    if (not url.hostname or port == 0 or url.username is not None or url.path not in ("", "/")
             or (url.scheme != "https" and
                 (url.scheme != "http" or url.hostname not in ("localhost", "127.0.0.1", "::1")))):
         raise ValueError
-    host = url.hostname.encode("idna").decode("ascii")
-    host = f"[{host}]" if ":" in host else host
+    host = f"[{ip_address(url.hostname).compressed}]" if ":" in url.hostname else url.hostname.encode("idna").decode("ascii")
     if port and port != (443 if url.scheme == "https" else 80):
         host += f":{port}"
     return f"{url.scheme}://{host}"

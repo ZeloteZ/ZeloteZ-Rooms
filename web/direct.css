@@ -1,0 +1,56 @@
+.direct-page {
+  block-size: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: clamp(7px, 1.4dvh, 14px);
+}
+.direct-heading { margin: 0; flex-wrap: nowrap; }
+.direct-heading h1 { flex: 1 1 auto; min-inline-size: 0; }
+.direct-heading .button { flex: none; }
+.direct-back { display: none; }
+.direct-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 29%) minmax(0, 1fr);
+  gap: clamp(8px, 1.6vw, 18px);
+  min-block-size: 0;
+  grid-row: 3;
+}
+.direct-sidebar { min-block-size: 0; padding: 5px; display: flex; }
+.direct-inbox { overflow: auto; list-style: none; padding: 0; margin: 0; min-inline-size: 0; inline-size: 100%; }
+.direct-empty { padding: 12px; }
+.direct-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 3px;
+  padding: 8px;
+  border-radius: 10px;
+  color: inherit;
+}
+.direct-entry:hover, .direct-entry[aria-current] { background: #242735; }
+.direct-entry-person, .direct-entry-state { display: grid; gap: 3px; min-inline-size: 0; }
+.direct-entry-person > * { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.direct-entry-state { justify-items: end; }
+.direct-entry-state time { font-size: .7rem; }
+.direct-unread { border-radius: 20px; background: #333b64; color: #e1e6ff; font-size: .72rem; padding: 2px 6px; }
+.direct-welcome { display: grid; align-content: center; justify-items: center; text-align: center; padding: 18px; }
+.direct-welcome h2 { margin-block-end: 4px; }
+.direct-page .conversation {
+  min-block-size: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(2.5rem, 1fr) auto;
+  overflow: auto;
+}
+.direct-page .message-list { min-block-size: 0; max-block-size: none; scrollbar-gutter: stable; }
+.direct-page .message-list:focus-visible { outline-offset: -2px; }
+.direct-read-only { margin: 0; padding: 12px; border-top: 1px solid var(--line); }
+
+@media (max-width: 700px) {
+  .direct-layout { grid-template-columns: minmax(0, 1fr); }
+  .direct-page[data-conversation] .direct-sidebar, .direct-welcome { display: none; }
+  .direct-back { display: inline-flex; }
+  .direct-heading h1 { font-size: clamp(1.12rem, 4.3vw, 1.65rem); }
+  .direct-page .conversation-heading, .direct-page .message-form { padding-block: 7px; }
+  .direct-page .composer-shortcuts { display: none; }
+}

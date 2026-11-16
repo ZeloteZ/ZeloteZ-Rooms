@@ -10,6 +10,40 @@ DEFAULT_LANGUAGE = "en"
 CATALOGS = {
     "de": {
         "Server settings": "Servereinstellungen",
+        "Desktop settings": "Desktop-Einstellungen",
+        "Desktop app": "Desktop-App",
+        "Appearance for desktop settings and capture windows.": "Darstellung für Desktop-Einstellungen und Aufnahmefenster.",
+        "Appearance": "Darstellung",
+        "System": "System",
+        "Dark": "Dunkel",
+        "Light": "Hell",
+        "Language for the desktop controls.": "Sprache der Desktop-Bedienelemente.",
+        "Your Rooms instance": "Deine Rooms-Instanz",
+        "Current server · {origin}": "Aktueller Server · {origin}",
+        "Server address": "Serveradresse",
+        "Desktop notifications": "Desktop-Benachrichtigungen",
+        "Show system notifications for activity in Rooms.": "Zeigt Systembenachrichtigungen für Aktivitäten in Rooms an.",
+        "Minimize when closing": "Beim Schließen minimieren",
+        "Keep ZeloteZ Rooms running in the taskbar when you close the window.": "ZeloteZ Rooms bleibt in der Taskleiste, wenn du das Fenster schließt.",
+        "Quit ZeloteZ Rooms": "ZeloteZ Rooms beenden",
+        "Keep ZeloteZ Rooms running?": "ZeloteZ Rooms weiterlaufen lassen?",
+        "Minimize": "Minimieren",
+        "Open ZeloteZ Rooms": "ZeloteZ Rooms öffnen",
+        "Open it from the taskbar. To quit, use Desktop settings or Ctrl+Q.": "Öffne die App über die Taskleiste. Beenden kannst du sie in den Desktop-Einstellungen oder mit Strg+Q.",
+        "Check the address, then connect when you’re ready.": "Prüfe die Adresse und verbinde dich, wenn du bereit bist.",
+        "Check address": "Adresse prüfen",
+        "Checking server …": "Server wird geprüft …",
+        "Checking another address. Try again in a moment.": "Eine andere Adresse wird gerade geprüft. Versuche es gleich erneut.",
+        "Rooms instance verified. You can connect now.": "Rooms-Instanz erkannt. Du kannst dich jetzt verbinden.",
+        "This Rooms instance is already open.": "Diese Rooms-Instanz ist bereits geöffnet.",
+        "Check this server before connecting.": "Prüfe diesen Server vor dem Verbinden.",
+        "Check your saved server before connecting.": "Prüfe deinen gespeicherten Server, bevor du dich verbindest.",
+        "This address did not identify itself as a ZeloteZ Rooms instance.": "Unter dieser Adresse wurde keine ZeloteZ Rooms-Instanz erkannt.",
+        "This Rooms instance uses an unsupported desktop protocol.": "Diese Rooms-Instanz verwendet ein nicht unterstütztes Desktop-Protokoll.",
+        "Couldn’t verify the server. Check the address, certificate and connection.": "Der Server konnte nicht geprüft werden. Prüfe Adresse, Zertifikat und Verbindung.",
+        "The server sent an unexpected page.": "Der Server hat eine unerwartete Seite gesendet.",
+        "The server tried to redirect the connection.": "Der Server hat versucht, die Verbindung weiterzuleiten.",
+        "The desktop settings couldn’t be saved.": "Die Desktop-Einstellungen konnten nicht gespeichert werden.",
         "Connect to your server": "Mit deinem Server verbinden",
         "Connect": "Verbinden",
         "Back": "Zurück",
@@ -144,31 +178,39 @@ CATALOGS = {
 }
 
 
-def language_path():
+def settings_directory():
     configuration = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(configuration) / "zelotez-rooms" / "language"
+    return Path(configuration) / "zelotez-rooms"
+
+
+def read_setting(name, fallback):
+    try:
+        return (settings_directory() / name).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return fallback
+
+
+def save_setting(name, value):
+    destination = settings_directory() / name
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent, delete=False) as temporary:
+        try:
+            temporary.write(value + "\n")
+            temporary.close()
+            os.replace(temporary.name, destination)
+        finally:
+            Path(temporary.name).unlink(missing_ok=True)
 
 
 def configured_language():
-    try:
-        requested = language_path().read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError):
-        return DEFAULT_LANGUAGE
+    requested = read_setting("language", DEFAULT_LANGUAGE)
     return requested if requested in dict(LANGUAGES) else DEFAULT_LANGUAGE
 
 
 def save_language(language):
     if language not in dict(LANGUAGES):
         raise ValueError("Unsupported language")
-    destination = language_path()
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent, delete=False) as temporary:
-        try:
-            temporary.write(language + "\n")
-            temporary.close()
-            os.replace(temporary.name, destination)
-        finally:
-            Path(temporary.name).unlink(missing_ok=True)
+    save_setting("language", language)
 
 
 LANGUAGE = configured_language()

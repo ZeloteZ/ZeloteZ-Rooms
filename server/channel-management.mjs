@@ -34,7 +34,8 @@ export function initializeChannelOrder(db) {
 }
 
 export function createChannelManagement(db, { requireSession }) {
-  const members = db.prepare('SELECT role FROM topic_members WHERE user_id = ? AND topic_id = ? AND joined_at IS NOT NULL')
+  const members = db.prepare(`SELECT m.role FROM topic_members m WHERE m.user_id = ? AND m.topic_id = ? AND m.joined_at IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = m.topic_id)`)
   const getChannel = db.prepare('SELECT topic_id, type FROM channels WHERE id = ?')
   const channels = db.prepare(channelList)
   const setPosition = db.prepare('UPDATE channels SET position = ? WHERE id = ? AND topic_id = ?')

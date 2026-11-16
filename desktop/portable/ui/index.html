@@ -13,15 +13,52 @@
       <div class="brand"><img src="icon.png" width="24" height="24" alt="">ZeloteZ Rooms</div>
       <h1 id="heading"></h1>
       <p class="note" id="description"></p>
+      <section id="preferences" hidden>
+        <div class="settings-card">
+          <label class="settings-row" for="language">
+            <span><strong id="language-label"></strong><small id="language-detail"></small></span>
+            <select id="language"><option value="system"></option><option value="en">English</option><option value="de">Deutsch</option></select>
+          </label>
+          <label class="settings-row" for="appearance">
+            <span><strong id="appearance-label"></strong><small id="appearance-detail"></small></span>
+            <select id="appearance"><option value="dark"></option><option value="system"></option><option value="light"></option></select>
+          </label>
+          <label class="settings-row" for="notifications">
+            <span><strong id="notifications-label"></strong><small id="notifications-detail"></small></span>
+            <input type="checkbox" role="switch" id="notifications" aria-labelledby="notifications-label" aria-describedby="notifications-detail">
+          </label>
+          <label class="settings-row" for="keepRunning">
+            <span><strong id="keep-running-label"></strong><small id="keep-running-detail"></small></span>
+            <input type="checkbox" role="switch" id="keepRunning" aria-labelledby="keep-running-label" aria-describedby="keep-running-detail">
+          </label>
+        </div>
+        <div class="settings-card">
+          <div class="settings-row"><span><strong id="current-server-label"></strong><small id="current-server" class="origin"></small></span>
+            <button id="change-server" type="button"></button>
+          </div>
+        </div>
+        <p class="error status" id="preferences-status" role="status" hidden></p>
+        <div class="actions"><button id="done" class="primary" type="button"></button></div>
+      </section>
       <form id="server-form" hidden>
-        <label id="address-label" for="address"></label>
-        <input id="address" type="url" required maxlength="2048" placeholder="https://rooms.example.com" spellcheck="false">
-        <p class="error" id="error" role="status" hidden></p>
+        <div class="settings-card address-card">
+          <label id="address-label" for="address"></label>
+          <input id="address" type="url" required maxlength="2048" placeholder="https://rooms.example.com" spellcheck="false" aria-describedby="address-status">
+          <p class="status" id="address-status" role="status"></p>
+        </div>
         <div class="actions">
-          <button id="server-cancel" type="button" hidden></button>
-          <button class="primary" id="connect" type="submit"></button>
+          <button id="back" type="button" hidden></button>
+          <button class="primary" id="check" type="submit"></button>
+          <button class="primary" id="connect" type="button" disabled hidden></button>
         </div>
       </form>
+      <section id="tray-hint" hidden>
+        <div class="settings-card tray-note" id="tray-note"></div>
+        <div class="actions">
+          <button id="tray-cancel" type="button"></button>
+          <button id="tray-confirm" class="primary" type="button"></button>
+        </div>
+      </section>
       <section id="source-picker" hidden>
         <div class="sources" id="sources" aria-label="Capture sources"></div>
         <p class="error" id="picker-error" role="status" hidden></p>

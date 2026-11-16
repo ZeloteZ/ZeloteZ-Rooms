@@ -273,6 +273,18 @@ export function topicHref(id, channelId = null, { messageId, streamId } = {}) {
   return query.size ? base + "?" + query : base;
 }
 
+export function directHref(id, messageId) {
+  if (!id) return "#/direct";
+  const path = "#/direct/" + identifier(id);
+  return messageId ? path + "?message=" + identifier(messageId) : path;
+}
+
+export async function openDirect(userId, signal) {
+  const { conversation } = await api("direct", { method: "POST", body: { userId }, signal });
+  signal?.throwIfAborted();
+  location.hash = directHref(conversation.id);
+}
+
 export const plainTime = new Intl.DateTimeFormat(locale(), { dateStyle: "medium", timeStyle: "short" });
 
 export function localizedTime(value) {

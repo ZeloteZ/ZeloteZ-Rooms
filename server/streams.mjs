@@ -363,6 +363,13 @@ export function createStreams(db, config, {
       const now = Date.now()
       pruneViewerLeases(now)
       closeInvalid(getOpen.all(), now, online)
+      if (config.onLive && online?.playback.size) {
+        for (const row of getOpen.all()) {
+          if (row.publisher_id && online.playback.has(row.id)) {
+            config.onLive({ channelId: row.channel_id, streamId: row.id, senderId: row.user_id })
+          }
+        }
+      }
       for (const [id, publisher] of browserPublishers) {
         if (publisher.until <= now || getBroadcast.get(id)?.ended_at !== null) browserPublishers.delete(id)
       }

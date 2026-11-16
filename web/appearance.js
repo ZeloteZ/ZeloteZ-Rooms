@@ -226,19 +226,23 @@ function attachmentPreference(profile) {
 
 export function editProfile(user, onChange, languageControl, onResetTutorials) {
   const signal = dialogLifetime();
-  const person = { nameColor: null, autoLoadAttachments: true, autoLoadAttachmentMaxBytes: null, ...user };
+  const person = { nameColor: null, autoLoadAttachments: true, autoLoadAttachmentMaxBytes: null, notifyLive: false, ...user };
   const mark = personMark(person);
   const name = personName(person, { class: "appearance-profile-name" });
   const color = optColor(t("Name color", "Namensfarbe"), "#abb8ff", person.nameColor, preview);
   const icon = imageEditor("avatar", t("Profile picture", "Profilbild"), person.avatarUrl, signal, preview);
   const attachments = attachmentPreference(person);
+  const liveNotifications = el("input", { type: "checkbox", checked: person.notifyLive });
   function preview() {
     const next = { ...person, id: undefined, nameColor: color.value(), avatarUrl: icon.savedPath() };
     paintPersonMark(mark, next, icon.previewPath());
     paintPersonName(name, next);
   }
   const fields = el("fieldset", { class: "appearance-fields appearance-profile-fields stack" },
-    icon.node, color.node, attachments.node, languageControl);
+    icon.node, color.node, attachments.node,
+    el("label", { class: "inline" }, liveNotifications,
+      t("Notify me when someone goes live in a room I’ve joined", "Benachrichtige mich über Live-Starts in Räumen, denen ich beigetreten bin")),
+    languageControl);
   const tutorialFeedback = status();
   showDialog(t("Your profile", "Dein Profil"), form([
     el("div", { class: "appearance-profile-preview" }, mark,
@@ -249,7 +253,7 @@ export function editProfile(user, onChange, languageControl, onResetTutorials) {
         tell(tutorialFeedback, t("Tutorials will restart when you close your profile.", "Die Rundgänge starten erneut, sobald du dein Profil schließt."));
       }, { class: "ghost", "data-tutorial": "reset" }), tutorialFeedback),
   ], t("Save profile", "Profil speichern"), async () => {
-    const values = { nameColor: color.value(), ...attachments.value() };
+    const values = { nameColor: color.value(), ...attachments.value(), notifyLive: liveNotifications.checked };
     const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== person[key]));
     fields.disabled = true;
     try {

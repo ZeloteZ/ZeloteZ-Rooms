@@ -33,17 +33,21 @@ const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profile
   revokeBroadcasts: userId => streams.revokeUser(userId) })
 const { requireSession } = auth
 const recordMentions = input => notifications.recordMentions(input)
-const community = createCommunity(db, { requireSession, appearance, recordMentions })
+const community = createCommunity(db, { requireSession, appearance, recordMentions,
+  recordFriendRequest: input => notifications.recordFriendRequest(input),
+  recordDirectMessage: input => notifications.recordDirectMessage(input),
+  recordDirectRead: input => notifications.recordDirectRead(input),
+})
 const channelManagement = createChannelManagement(db, { requireSession })
 const history = createHistory(db, { requireSession })
 const streams = createStreams(db, {
   publicOrigin: origin.origin, ingestBase: process.env.STREAM_INGEST_BASE, mediaApiUrl: process.env.MEDIAMTX_API_URL,
-  mediaWebrtcUrl: process.env.MEDIAMTX_WEBRTC_URL,
+  mediaWebrtcUrl: process.env.MEDIAMTX_WEBRTC_URL, onLive: input => notifications.recordLive(input),
 }, { requireSession, sessionKey: auth.sessionKey, isSessionActive: auth.isSessionActive,
   channelAccess: community.channelAccess, profileFor, readJson, json, RequestError })
 const streamChat = createStreamChat(db, { requireSession, community, streams, profileFor, recordMentions })
-const notifications = createNotifications(db, { requireSession, streams, profileFor })
-const reactions = createReactions(db, { requireSession, streams })
+const notifications = createNotifications(db, { requireSession, streams, profileFor, notifyLive: appearance.notifyLive })
+const reactions = createReactions(db, { requireSession, streams, assertChatWritable: community.assertChatWritable })
 const voice = createVoice(db, { mediaUrl: process.env.MEDIAMTX_WEBRTC_URL }, {
   requireSession, sessionKey: auth.sessionKey, isSessionActive: auth.isSessionActive,
   channelAccess: community.channelAccess, profileFor, readJson, json, RequestError,
@@ -79,6 +83,11 @@ const publicApi = service(async (request, response) => {
   const url = new URL(request.url, 'http://gateway')
   const path = url.pathname
   if (request.method === 'GET' && path === '/api/health') return json(response, 200, { ok: true })
+  if (request.method === 'GET' && path === '/api/desktop/instance') {
+    const nonce = url.searchParams.get('nonce')
+    if (!nonce || !/^[a-f0-9]{32}$/.test(nonce)) return json(response, 400, { error: 'Invalid nonce' })
+    return json(response, 200, { product: 'zelotez-rooms', protocol: 1, origin: origin.origin, nonce })
+  }
   if (request.method === 'GET' && path === '/_internal/stream-view') return streams.checkViewer(request, response)
   if (path.startsWith('/api/')) {
     if (!['GET', 'HEAD'].includes(request.method)) assertOrigin(request, origin.origin)

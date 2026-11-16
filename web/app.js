@@ -1,5 +1,6 @@
 import { renderTopic, renderTopics } from "./rooms.js";
 import { renderAdmin, renderFriends } from "./people.js";
+import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
 import { renderHowItWorks } from "./how-it-works.js";
 import { startHistorySharing } from "./history.js";
@@ -45,6 +46,7 @@ let pendingInvite = invite;
 const routes = { topics: "rooms", themen: "rooms", freunde: "friends", einladungen: "invites", "so-funktionierts": "help" };
 const navLabels = {
   rooms: t("Rooms", "Räume"), friends: t("Friends", "Freunde"), invites: t("Invites", "Einladungen"),
+  direct: t("Messages", "Nachrichten"),
   help: t("How it works", "So funktioniert’s"),
 };
 
@@ -260,6 +262,7 @@ async function render(force = false) {
   try {
     let page;
     if (route.page === "friends") page = await renderFriends(context);
+    else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
     else if (route.page === "invites" && user.admin) page = await renderAdmin(context);
     else if (route.page === "help") page = renderHowItWorks();
     else if (route.page === "rooms" && route.topicId) {
