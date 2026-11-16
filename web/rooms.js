@@ -428,7 +428,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
   const manager = owner || topic.role === "admin";
   const room = el("div", { class: "topic-view", "data-joined": topic.joined === true });
   applyTopicDesign(room, topic.appearance);
-  const hero = el("div", { class: "panel room-hero section-heading" },
+  const hero = el("div", { class: "panel room-hero section-heading", "data-tutorial": "room-hero" },
     el("div", { class: "room-title" },
       el("div", { class: "inline" }, el("a", { href: "#/rooms", class: "subtle" }, t("All rooms", "Alle Räume")), tag(topic)),
       el("h1", { title: topic.title }, topic.title)),
@@ -470,9 +470,9 @@ export async function renderTopic(context, topicId, selectedId, target) {
   drawChannels();
   picker.addEventListener("change", () => { location.hash = topicHref(topic.id, picker.value); });
   const activityToggle = button(t("Activity", "Aktivität"), () => showActivity(!layout.hasAttribute("data-activity-view")), {
-    class: "room-activity-toggle", "aria-pressed": "false", "aria-controls": "room-activity",
+    class: "room-activity-toggle", "aria-pressed": "false", "aria-controls": "room-activity", "data-tutorial": "room-activity",
   });
-  const sidebar = el("aside", { class: "panel channel-sidebar" },
+  const sidebar = el("aside", { class: "panel channel-sidebar", "data-tutorial": "channel-picker" },
     el("div", { class: "section-heading room-channel-tools" }, el("h2", {}, "Channels"),
       picker, activityToggle,
       manager && el("div", { class: "room-channel-manage" },

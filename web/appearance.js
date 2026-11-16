@@ -8,6 +8,13 @@ const imageSlots = [
   ["banner", "bannerUrl", "Banner", "Banner"],
   ["background", "chatBackgroundUrl", "Chat background", "Chat-Hintergrund"],
 ];
+const imagePresets = [
+  { id: "aurora", en: "Aurora", de: "Polarlicht" },
+  { id: "ember", en: "Ember", de: "Glut" },
+  { id: "tide", en: "Deep Blue", de: "Tiefblau" },
+  { id: "bloom", en: "Night Bloom", de: "Nachtblüte" },
+];
+let appearanceDialog;
 
 function hexColor(value) {
   return typeof value === "string" && /^#[0-9a-f]{6}$/iu.test(value) ? value.toLowerCase() : null;
@@ -47,10 +54,16 @@ export function applyTopicDesign(node, appearance, previews = {}) {
 }
 
 function dialogLifetime(parentSignal) {
+  appearanceDialog?.abort();
   const controller = new AbortController();
+  appearanceDialog = controller;
+  const dialog = document.querySelector("#dialog");
   const abort = () => controller.abort();
-  document.querySelector("#dialog").addEventListener("close", abort, { once: true, signal: controller.signal });
-  parentSignal?.addEventListener("abort", abort, { once: true, signal: controller.signal });
+  dialog.addEventListener("close", () => {
+    if (!dialog.open) abort();
+  }, { signal: controller.signal });
+  if (parentSignal?.aborted) abort();
+  else parentSignal?.addEventListener("abort", abort, { once: true, signal: controller.signal });
   return controller.signal;
 }
 
@@ -82,14 +95,14 @@ function optColor(label, defaultColor, current, update) {
   };
 }
 
-function imageEditor(label, stored, signal, update) {
+function imageEditor(slot, label, stored, signal, update) {
   let current = validAppearanceImageUrl(stored);
   let preview;
   let change;
   const thumbnail = el("div", { class: "appearance-image-preview", "aria-hidden": "true" });
   const note = status();
   const input = el("input", { type: "file", accept: imageTypes.join(","), hidden: true });
-  const selectFile = button(t("Choose", "Auswählen"), () => input.click(), {
+  const selectFile = button(t("Upload", "Hochladen"), () => input.click(), {
     "aria-label": t("Choose {label}", "{label} auswählen", { label }),
   });
   const remove = button(t("Remove", "Entfernen"), () => {
@@ -97,14 +110,30 @@ function imageEditor(label, stored, signal, update) {
     change = current ? null : undefined;
     sync();
   }, { class: "ghost", "aria-label": t("Remove {label}", "{label} entfernen", { label }) });
+  const presets = imagePresets.map(({ id, en, de }) => ({ path: `/presets/${slot}/${id}.webp`, title: t(en, de) }));
+  const presetButtons = presets.map(preset => button([
+    el("img", { src: preset.path, alt: "", loading: "lazy", decoding: "async" }), el("span", {}, preset.title),
+  ], () => {
+    clearPreview();
+    change = preset;
+    sync();
+  }, { class: "appearance-preset", "aria-pressed": "false" }));
+  const gallery = el("details", { class: "appearance-presets" },
+    el("summary", { class: "button ghost", "aria-label": t("Presets for {label}", "Vorlagen für {label}", { label }) },
+      t("Presets", "Vorlagen")),
+    el("div", { class: "appearance-preset-grid", "data-slot": slot }, presetButtons));
 
   function clearPreview() {
     if (preview) URL.revokeObjectURL(preview);
     preview = undefined;
   }
 
+  function previewPath() {
+    return preview ?? change?.path;
+  }
+
   function path() {
-    return change === null ? null : preview ?? current;
+    return change === null ? null : previewPath() ?? current;
   }
 
   function sync(shouldNotify = true) {
@@ -112,7 +141,10 @@ function imageEditor(label, stored, signal, update) {
     thumbnail.toggleAttribute("data-has-image", Boolean(image));
     setStyle(thumbnail, "--appearance-preview-image", urlValue(image));
     remove.disabled = !image;
-    tell(note, change instanceof File ? change.name : change === null ? t("Will be removed", "Wird entfernt") : "");
+    for (const [index, option] of presetButtons.entries()) {
+      option.setAttribute("aria-pressed", String(change === presets[index]));
+    }
+    tell(note, change instanceof File ? change.name : change === null ? t("Will be removed", "Wird entfernt") : change?.title ?? "");
     if (shouldNotify) update();
   }
 
@@ -134,13 +166,17 @@ function imageEditor(label, stored, signal, update) {
   return {
     node: el("div", { class: "appearance-image-field stack" },
       el("strong", {}, label), thumbnail, input,
-      el("div", { class: "appearance-image-actions inline" }, selectFile, remove), note),
+      el("div", { class: "appearance-image-actions inline" }, selectFile, remove), gallery, note),
     savedPath: () => path(),
-    previewPath: () => preview,
+    previewPath,
     async save(endpoint, consume) {
       if (change === undefined) return;
-      const result = await api(endpoint, change === null ? { method: "DELETE", signal }
-        : { method: "PUT", body: change, binary: true, signal });
+      let options = { method: "DELETE", signal };
+      if (change !== null) {
+        const body = change instanceof File ? change : await loadPreset(change.path, signal);
+        options = { method: "PUT", body, binary: true, signal };
+      }
+      const result = await api(endpoint, options);
       current = validAppearanceImageUrl(consume(result));
       change = undefined;
       clearPreview();
@@ -149,22 +185,37 @@ function imageEditor(label, stored, signal, update) {
   };
 }
 
-export function editProfile(user, onChange, languageControl) {
+async function loadPreset(path, signal) {
+  const response = await fetch(path, { signal, credentials: "same-origin", redirect: "error" });
+  if (response.ok && response.headers.get("Content-Type")?.split(";")[0].trim() === "image/webp") {
+    const image = await response.blob();
+    if (image.size && image.size <= fileLimit) return image;
+  }
+  throw new Error(t("The image preset couldn’t be loaded.", "Die Bildvorlage konnte nicht geladen werden."));
+}
+
+export function editProfile(user, onChange, languageControl, onResetTutorials) {
   const signal = dialogLifetime();
   const person = { ...user };
   const mark = personMark(person);
   const name = personName(person, { class: "appearance-profile-name" });
   const color = optColor(t("Name color", "Namensfarbe"), "#abb8ff", person.nameColor, preview);
-  const icon = imageEditor(t("Profile picture", "Profilbild"), person.avatarUrl, signal, preview);
+  const icon = imageEditor("avatar", t("Profile picture", "Profilbild"), person.avatarUrl, signal, preview);
   function preview() {
     const next = { ...person, id: undefined, nameColor: color.value(), avatarUrl: icon.savedPath() };
     paintPersonMark(mark, next, icon.previewPath());
     paintPersonName(name, next);
   }
   const fields = el("fieldset", { class: "appearance-fields appearance-profile-fields stack" }, icon.node, color.node, languageControl);
+  const tutorialFeedback = status();
   showDialog(t("Your profile", "Dein Profil"), form([
     el("div", { class: "appearance-profile-preview" }, mark,
       el("div", {}, name, el("p", { class: "subtle" }, "@" + user.username))), fields,
+    onResetTutorials && el("div", { class: "inline" },
+      button(t("Reset tutorials", "Rundgänge zurücksetzen"), () => {
+        onResetTutorials();
+        tell(tutorialFeedback, t("Tutorials will restart when you close your profile.", "Die Rundgänge starten erneut, sobald du dein Profil schließt."));
+      }, { class: "ghost", "data-tutorial": "reset" }), tutorialFeedback),
   ], t("Save profile", "Profil speichern"), async () => {
     fields.disabled = true;
     try {
@@ -208,7 +259,7 @@ export function editTopicDesign(context, topic, onChange) {
   opacity.addEventListener("input", preview);
   const editors = imageSlots.map(([slot, key, english, german]) => {
     const label = t(english, german);
-    return { slot, key, label, editor: imageEditor(label, appearance[key], signal, preview) };
+    return { slot, key, label, editor: imageEditor(slot, label, appearance[key], signal, preview) };
   });
   const fieldValues = () => ({ accentColor: accent.value(), surfaceColor: surface.value(),
     chatBackgroundMode: layout.value, chatBackgroundOpacity: Number(opacity.value) });

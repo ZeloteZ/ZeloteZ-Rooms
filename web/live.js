@@ -481,7 +481,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     ["system", t("System audio", "Systemton")],
   ], "none") : null;
   if (portableAudio) portableShare.element.append(field(t("Stream audio", "Streamton"), portableAudio));
-  const reserve = button(t("Share screen", "Bildschirm teilen"), requestStream, { class: "primary", hidden: true });
+  const reserve = button(t("Share screen", "Bildschirm teilen"), requestStream, { class: "primary", hidden: true, "data-tutorial": "live-share" });
   const audio = el("input", { type: "checkbox" });
   const audioOption = el("label", { class: "inline subtle", hidden: true }, audio,
     t("Include tab or app audio when available", "Tab- oder Anwendungston teilen, wenn verfügbar"));
@@ -762,8 +762,13 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchHint),
     el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
-    el("div", { class: "live-channel-people", id: "live-channel-people" }, streamsSection, voiceMount),
-    el("aside", { class: "live-channel-chat", id: "live-channel-chat", "aria-label": t("Stream chat", "Streamchat") }, chat, chatEmpty)));
+    el("section", {
+      class: "panel live-channel-people", id: "live-channel-people", "data-tutorial": "live-people",
+      "aria-label": t("Voice & streams", "Sprache & Streams"),
+    }, voiceMount, streamsSection),
+    el("aside", {
+      class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat", "aria-label": t("Stream chat", "Streamchat"),
+    }, chat, chatEmpty)));
   node.addEventListener("open-message", event => {
     destination = event.detail?.streamId ? event.detail : null;
     selectDestination();

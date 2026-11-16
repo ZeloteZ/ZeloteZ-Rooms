@@ -8,6 +8,7 @@ import { createLivePlayer } from "./live.js";
 import { createScreenShareController } from "./screen-share.js";
 import { createNativeBroadcast } from "./native-broadcast.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
+import { createTutorials } from "./tutorial.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
 import { api, button, closeDialog, el, field, form, paintPersonMark, paintPersonName, requireLoginOnExpiry, select } from "./ui.js";
 
@@ -35,6 +36,7 @@ let player;
 let voice;
 let screenShare;
 let nativeBroadcast;
+let tutorials;
 const invite = takeInvite();
 let pendingInvite = invite;
 
@@ -123,7 +125,8 @@ profileEditor.addEventListener("click", () => {
     if (user !== account) return;
     Object.assign(user, profile);
     paintOwnProfile();
-  }, languageChooser());
+  }, languageChooser(), () => tutorials?.reset());
+  tutorials?.openProfile(document.querySelector("#dialog-content"));
 });
 
 async function showWorkspace(nextUser) {
@@ -135,6 +138,7 @@ async function showWorkspace(nextUser) {
   voice = createVoicePanel({ user, signal }, voiceDock);
   screenShare = createScreenShareController({ signal }, broadcastDock);
   nativeBroadcast = createNativeBroadcast(signal, nativeBroadcastDock);
+  tutorials = createTutorials(user.id, signal);
   mountNotifications(notificationDock, signal, render);
   startHistorySharing(signal, user.id);
   pendingInvite = null;
@@ -159,6 +163,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
   voice = null;
   screenShare = null;
   nativeBroadcast = null;
+  tutorials = null;
   view = null;
   activeTopic = null;
   user = null;
@@ -215,12 +220,26 @@ function showAuth(note = "", preset = "", showInvite = false) {
         () => showAuth("", "", !startRegister), { class: "ghost" }), languageChooser()));
 }
 
+function showTutorial(route, page) {
+  if (page.matches(".home-dashboard")) tutorials?.visit("home", page);
+  else if (page.matches(".topic-view")) {
+    if (!page.hasAttribute("data-joined")) {
+      tutorials?.visit("join", page);
+      return;
+    }
+    const channel = route.channelId && (page.querySelector(".room-layout[data-live-channel]") ? "live"
+      : page.querySelector(".conversation") ? "chat" : null);
+    tutorials?.visit(channel || "room", page);
+  } else tutorials?.visit(route.page, page);
+}
+
 async function render(force = false) {
   if (!user) return;
   const route = getRoute();
   setNav(route.page);
   if (force !== true && route.page === "rooms" && route.topicId && activeTopic?.id === route.topicId) {
     activeTopic.view.select(route.channelId, route.target);
+    showTutorial(route, activeTopic.view.node);
     return;
   }
   player.setLocation();
@@ -247,6 +266,7 @@ async function render(force = false) {
     if (!signal.aborted) {
       workspace.replaceChildren(page);
       player.refreshPlacement();
+      showTutorial(route, page);
     }
   } catch (error) {
     if (!signal.aborted) {
@@ -266,6 +286,7 @@ document.querySelector(".skip-link").addEventListener("click", event => {
   document.querySelector("#content").focus({ preventScroll: true });
 });
 window.addEventListener("hashchange", () => {
+  tutorials?.leave();
   const invitation = takeInvite();
   if (invitation !== null) {
     pendingInvite = invitation;

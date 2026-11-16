@@ -132,7 +132,9 @@ export function validAppearanceImageUrl(value) {
 }
 
 function previewImageUrl(value) {
-  if (typeof value !== "string" || !value.startsWith("blob:")) return null;
+  if (typeof value !== "string") return null;
+  if (/^\/presets\/avatar\/[a-z0-9-]{1,32}\.webp$/u.test(value)) return value;
+  if (!value.startsWith("blob:")) return null;
   try {
     return new URL(value).origin === location.origin ? value : null;
   } catch {

@@ -85,6 +85,27 @@
 .appearance-image-actions { gap: 3px; align-items: stretch; }
 .appearance-image-actions .button { min-height: 34px; padding-inline: 7px; font-size: .78rem; }
 .appearance-image-field .status { font-size: .75rem; }
+.appearance-presets summary { justify-self: start; min-height: 32px; padding: 4px 8px; font-size: .78rem; list-style: none; }
+.appearance-presets summary::-webkit-details-marker { display: none; }
+.appearance-presets[open] summary { border-color: var(--line-strong); }
+.appearance-preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 7px; }
+.appearance-preset-grid[data-slot="avatar"] { grid-template-columns: repeat(auto-fit, minmax(min(100%, 66px), 1fr)); }
+.appearance-preset-grid .appearance-preset {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  align-items: start;
+  align-content: start;
+  padding: 4px;
+  font-size: .72rem;
+  line-height: 1.25;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.appearance-preset img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 5px; }
+.appearance-preset-grid[data-slot="avatar"] img { aspect-ratio: 1; }
+.appearance-preset-grid[data-slot="banner"] img { aspect-ratio: 5 / 2; }
+.appearance-preset[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--raised)); }
 .appearance-profile-fields .appearance-image-preview { display: none; }
 .appearance-color-field { padding: 8px 10px; background: #13141b; border: 1px solid var(--line); border-radius: 11px; }
 .appearance-color-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; }
