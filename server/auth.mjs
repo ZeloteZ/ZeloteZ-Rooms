@@ -169,7 +169,7 @@ function assertExpectedAccount(req, user) {
   throw error
 }
 
-function requestAddress(req, trustProxyIp) {
+export function requestAddress(req, trustProxyIp) {
   const forwarded = req.headers['x-real-ip']
   const address = trustProxyIp && isIP(forwarded) ? forwarded : req.socket.remoteAddress
   if (isIP(address) !== 6) return address ?? 'unknown'

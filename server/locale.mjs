@@ -24,6 +24,7 @@ const catalogs = {
       'Das Bild konnte nicht verarbeitet werden. Wähle ein statisches Bild mit höchstens 16 Megapixeln.':
         'Choose a still image of up to 16 megapixels.',
       'Das Passwort konnte nicht verarbeitet werden.': 'The password could not be processed.',
+      'Das Passwort für diesen Stream-Raum fehlt oder stimmt nicht.': 'The password for this stream room is missing or incorrect.',
       'Deine Teilnahme am Talk ist abgelaufen.': 'Your voice chat session has expired.',
       'Der Benutzername braucht 3 bis 32 Zeichen. Erlaubt sind Buchstaben von A bis Z, Zahlen, Punkt, Bindestrich und Unterstrich.':
         'Use 3 to 32 letters (A–Z), digits, periods, hyphens, or underscores for your username.',
@@ -66,6 +67,8 @@ const catalogs = {
       'Dieser Anhang wurde bereits verwendet.': 'This attachment has already been used.',
       'Dieser Benutzername ist schon vergeben.': 'This username is already taken.',
       'Dieser Bereich ist nicht verfügbar.': 'This area is unavailable.',
+      'Dieser Stream-Raum ist nicht verfügbar.': 'This stream room is unavailable.',
+      'Dieser temporäre Raum gehört bereits zu einer Freigabe.': 'This temporary room already belongs to a stream or watch party.',
       'Dieser Chat oder dieses Mitglied ist nicht verfügbar.': 'This chat or member is unavailable.',
       'Dieses Bild oder Thema ist nicht verfügbar.': 'This image or room is unavailable.',
       'Dieses Thema hat bereits 50 Kanäle.': 'This room already has 50 channels.',
@@ -76,7 +79,9 @@ const catalogs = {
       'Du darfst in diesem Channel nicht streamen.': 'You do not have permission to stream in this channel.',
       'Du hast hier bereits einen Stream vorbereitet oder gestartet.': 'You already have a stream set up or running in this channel.',
       'Du hast bereits einen Stream vorbereitet oder gestartet.': 'You already have a stream set up or running.',
+      'Du hast bereits einen temporären Stream-Raum.': 'You already have a temporary stream room.',
       'Alle Streamplätze sind gerade belegt.': 'All stream slots are currently in use.',
+      'Alle temporären Stream-Räume sind belegt.': 'All temporary stream rooms are currently in use.',
       'Du hast die maximale Anzahl an Reaktionen für diese Nachricht erreicht.': 'You have reached the reaction limit for this message.',
       'Du kannst nur bestätigte Freunde für das Thema freigeben.': 'Access to this room is limited to confirmed friends.',
       'Ein Anhang fehlt oder wurde schon versendet. Lade ihn erneut hoch.': 'An attachment is missing or has already been sent. Upload it again.',

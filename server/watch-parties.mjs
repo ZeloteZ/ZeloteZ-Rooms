@@ -64,6 +64,7 @@ function mediaRange(header, size) {
 }
 
 export function createWatchParties({ dataDir, requireSession, sessionKey, isSessionActive, channelAccess,
+  isTemporaryChannel = () => false, assertTemporarySource = () => {}, noteTemporarySource = () => {},
   now = () => Math.floor(performance.timeOrigin + performance.now()) }) {
   const folder = join(dataDir, 'watch-videos')
   mkdirSync(folder, { recursive: true, mode: 0o700 })
@@ -130,16 +131,20 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     for (const channel of parties.keys()) activeParty(channel, time)
     for (const file of retiredFiles) removeFile(file)
     for (const read of reads) {
-      if (!isSessionActive(read.session, read.userId) || !channelAccess(read.userId, read.party.channelId)?.canView) read.abort.abort()
+      if (!read.isActive()) read.abort.abort()
     }
+  }
+
+  function playbackState(party) {
+    return { id: party.id, source: party.source, title: party.title,
+      position: party.position, playing: party.playing, updatedAt: party.updatedAt, revision: party.revision }
   }
 
   function snapshot(actor, access, party, time) {
     const canStop = Boolean(party && (party.hostId === actor.id || access.canManage))
     const visible = party && (party.state === 'ready' || canStop)
     return { party: visible ? {
-      id: party.id, source: party.source, hostId: party.hostId, state: party.state, title: party.title,
-      position: party.position, playing: party.playing, updatedAt: party.updatedAt, revision: party.revision,
+      ...playbackState(party), hostId: party.hostId, state: party.state,
       ...(party.source === 'youtube' ? { videoId: party.videoId } : { mime: party.mime,
         ...(party.state === 'uploading' ? { offset: party.offset, size: party.size } :
           { mediaUrl: `${watchPath(party.channelId, party.id)}/media` }) }),
@@ -150,6 +155,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const entries = []
     const time = now()
     for (const channelId of parties.keys()) {
+      if (isTemporaryChannel(channelId)) continue
       const party = activeParty(channelId, time)
       if (party?.state !== 'ready') continue
       const access = channelAccess(userId, channelId)
@@ -158,6 +164,26 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       entries.push({ id: party.id, source: party.source, title: party.title, topicId, topicTitle, channelId, channelTitle })
     }
     return entries
+  }
+
+  function hasGuestSource(channelId, ownerId) {
+    return activeParty(channelId, now())?.hostId === ownerId
+  }
+
+  function guestParty(scope, time) {
+    if (!isTemporaryChannel(scope.channelId) || !['youtube', 'local'].includes(scope.source)) return null
+    const party = activeParty(scope.channelId, time)
+    return party?.state === 'ready' && party.hostId === scope.ownerId && party.source === scope.source ? party : null
+  }
+
+  function guestSnapshot(scope) {
+    const serverTime = now()
+    const party = guestParty(scope, serverTime)
+    return { serverTime, party: party ? {
+      ...playbackState(party), ...(party.source === 'youtube' ? { videoId: party.videoId } : {
+        mime: party.mime, mediaUrl: `/api/guest/${scope.roomId}/media/${party.id}`,
+      }),
+    } : null }
   }
 
   function specificParty(channelId, id, time) {
@@ -200,6 +226,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     if (parties.size >= maxParties || (source === 'local' && reservedBytes + size > maxStorage)) {
       throw new RequestError(503, 'Es ist gerade kein Platz für eine weitere Watchparty frei.')
     }
+    assertTemporarySource(channelId, current.id, source)
     chargeStart(current.id, time)
     const id = randomUUID()
     const party = { id, channelId, hostId: current.id, hostSession: sessionKey(request), source,
@@ -213,6 +240,12 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     }
     if (party.file) reservedBytes += size
     parties.set(channelId, party)
+    try {
+      noteTemporarySource(channelId, current.id)
+    } catch (error) {
+      retire(party)
+      throw error
+    }
     return json(response, 201, snapshot(current, access, party, time))
   }
 
@@ -290,18 +323,17 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     }
   }
 
-  async function serve(request, response, actor, party) {
+  async function serve(request, response, party, { key, verifyAccess, isActive }) {
     if (party.state !== 'ready' || !party.file) throw missing()
     const range = mediaRange(request.headers.range, party.size)
     const headers = { 'Accept-Ranges': 'bytes' }
     if (!range) return response.writeHead(416, { ...headers, 'Content-Range': `bytes */${party.size}` }).end()
-    const key = sessionKey(request)
     const wantsBody = request.method !== 'HEAD'
     if (wantsBody && (reads.size >= maxMediaReads || [...reads].filter(read => read.session === key).length >= maxMediaReadsPerSession)) {
       throw tooBusy()
     }
     const { start, end, partial } = range
-    const read = { party, userId: actor.id, session: key, abort: new AbortController() }
+    const read = { party, session: key, isActive, abort: new AbortController() }
     if (wantsBody) reads.add(read)
     let file
     try {
@@ -309,8 +341,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
         if (error.code === 'ENOENT') throw missing()
         throw error
       })
-      if (requireSession(request).id !== actor.id) throw missing()
-      accessTo(actor, party.channelId)
+      verifyAccess()
       specificParty(party.channelId, party.id, now())
       if (response.destroyed) return
       if (read.abort.signal.aborted) throw missing()
@@ -325,6 +356,25 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       reads.delete(read)
       await file?.close()
     }
+  }
+
+  function serveMemberMedia(request, response, actor, party) {
+    const key = sessionKey(request)
+    return serve(request, response, party, { key,
+      verifyAccess() {
+        if (requireSession(request).id !== actor.id) throw missing()
+        accessTo(actor, party.channelId)
+      },
+      isActive: () => isSessionActive(key, actor.id) && channelAccess(actor.id, party.channelId)?.canView,
+    })
+  }
+
+  function serveGuestMedia(request, response, scope, partyId, isActive) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') throw new RequestError(405, 'Diese Anfrage wird hier nicht unterstützt.')
+    const party = guestParty(scope, now())
+    if (party?.id !== partyId || party.source !== 'local' || !isActive()) throw missing()
+    const key = scope.guestKey.session ?? `guest:${scope.guestKey.token}`
+    return serve(request, response, party, { key, isActive, verifyAccess() { if (!isActive()) throw missing() } })
   }
 
   async function control(request, response, actor, party) {
@@ -368,7 +418,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     else if (!partyId && method === 'POST') await start(request, response, actor, channelId)
     else if (partyId) {
       const party = specificParty(channelId, partyId, time)
-      if (resource === 'media' && (method === 'GET' || method === 'HEAD')) await serve(request, response, actor, party)
+      if (resource === 'media' && (method === 'GET' || method === 'HEAD')) await serveMemberMedia(request, response, actor, party)
       else if (resource === 'upload' && method === 'PUT') await upload(request, response, url, actor, party)
       else if (resource === 'metadata' && method === 'PATCH') await addMetadata(request, response, actor, party)
       else if (!resource && method === 'PATCH') await control(request, response, actor, party)
@@ -387,5 +437,5 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     for (const party of parties.values()) retire(party)
   }
 
-  return { handle, homeActivity, close }
+  return { handle, homeActivity, hasGuestSource, guestSnapshot, serveGuestMedia, close }
 }

@@ -14,6 +14,7 @@ ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In
 - **Moderation und Konten.** Du kannst eigene Nachrichten löschen. Raumersteller und Raum-Admins können Nachrichten anderer Mitglieder mit einer Begründung löschen oder zwischen den Textkanälen desselben Raums verschieben. Der Betreiber kann unter **Einladungen → Konten** Konten sperren und ihre Sitzungen samt Streams beenden.
 - **Sprache und Streams.** Über **Sprachchat betreten** hörst du zunächst zu. Zum Sprechen schaltest du das Mikrofon ein und erlaubst den Zugriff. Bildschirmfreigabe und Zuschauen funktionieren unabhängig vom Sprachchat. Beim Wechsel zwischen Seiten bleiben die Bedienelemente neben deinem Profil erreichbar. Der Player bietet direkte Wiedergabe per WebRTC und gepufferte Wiedergabe per HLS.
 - **Gemeinsam Videos schauen.** Über **Video teilen** kannst du im Live-Kanal YouTube einbetten oder eine MP4- oder WebM-Datei bis 256 MiB hochladen. Abspielen, Pausieren und Spulen wirken für alle. Die Lautstärke stellt jede Person selbst ein.
+- **Jetzt streamen.** Wähle in der Rooms-Übersicht Bildschirm, YouTube oder eine lokale Datei und nutze einen bestehenden Live-Kanal oder einen temporären Raum. Temporäre Räume können für angemeldete Mitglieder unter **Gerade live** erscheinen und einen passwortgeschützten Zuschauerlink für Gäste anbieten.
 - **Ein eigener Look.** Lege Profilbild und Namensfarbe fest. Berechtigte Mitglieder können Räume mit Titelbild, Banner, Chat-Hintergrund und eigenen Farben gestalten. Für Bilder stehen Vorlagen und eigene JPEG-, PNG- und WebP-Dateien bis 8 MiB zur Auswahl.
 - **Orientierung beim ersten Besuch.** Die Rundgänge erklären die wichtigsten Bedienelemente. Du kannst sie im Profil zurücksetzen. Rooms startet auf Englisch. Beim Anmelden und im Profil kannst du **Deutsch** wählen.
 
@@ -28,6 +29,8 @@ Dein Passwort entsperrt deinen privaten Kontoschlüssel. Sobald der Schlüssel g
 **Sprache und Live-Video** sind auf dem Transportweg verschlüsselt. MediaMTX empfängt und verteilt die Übertragungen. Bei Bedarf wandelt FFmpeg das Audioformat für die Wiedergabe um. Die mitgelieferte Konfiguration deaktiviert Aufzeichnungen.
 
 In einer Watchparty liefert YouTube den eingebetteten Player und das Video direkt an die Zuschauer. Hochgeladene Videos speichert Rooms vorübergehend im Original und liefert sie nur an Zuschauer mit Kanalzugriff aus.
+
+Der Gastlink eines temporären Raums gewährt Zugriff auf dessen Wiedergabe. Das Passwort steht im URL-Fragment und wird gegen eine Sitzung für diesen Raum eingetauscht. Unter **Stream-Zugriff** lässt sich der Link widerrufen oder ersetzen.
 
 ## Selbst hosten
 

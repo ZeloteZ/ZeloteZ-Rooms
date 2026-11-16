@@ -15,6 +15,7 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 - **Talk and watch together.** A live channel brings voice, streams, and stream chat into one view. Choose **Join voice chat** to listen, then enable your microphone when you want to speak. Voice and playback controls stay in the header as you browse. Viewers can choose direct WebRTC playback or buffered HLS.
 - **Share a screen.** Choose **Share screen** in a live channel. Supported browsers can share a screen, window, or tab. The desktop app also supports region capture. On Linux you can share audio from one application or a whole playback device using PipeWire.
 - **Start a watch party.** Use **Share video** in a live channel to share a YouTube embed or upload an original MP4 or WebM up to 256 MiB. Viewers share play, pause, and seek controls and adjust volume individually.
+- **Stream now.** Choose a screen, YouTube video, or local file from the Rooms overview. Use an existing live channel or open a temporary room. Temporary rooms can appear in **Live now** for signed-in members or offer a password-protected viewer link for guests.
 - **Change the look.** Choose a profile picture and name color. Give a room its own cover, banner, colors, and chat background. Built-in image presets are available for profile pictures and room images. You can also upload JPEG, PNG, or WebP images up to 8 MiB.
 - **Find your way around.** First-visit guides introduce the main views and can be reset in your profile. The interface is available in English and German.
 
@@ -45,3 +46,5 @@ The server handles room and channel names, membership, senders, timestamps, file
 Voice and live video are encrypted in transit. MediaMTX relays live media and FFmpeg adapts audio for playback where needed. Server-side recording is disabled.
 
 For watch parties, YouTube serves its own embedded player and video directly to each viewer. Rooms stores uploaded watch-party videos temporarily in their original form and restricts playback to viewers with access to the channel.
+
+A temporary room’s guest link grants playback for that room. Its password is carried in the URL fragment, then exchanged for a room-scoped session. The host can revoke it or replace it from **Stream access**.

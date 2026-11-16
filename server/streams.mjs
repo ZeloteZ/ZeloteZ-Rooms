@@ -90,6 +90,9 @@ export function createStreams(db, config, {
   channelAccess, profileFor = () => ({}), readJson, json, RequestError,
 }) {
   const site = new URL(config.publicOrigin)
+  const isTemporaryChannel = config.isTemporaryChannel ?? (() => false)
+  const assertTemporarySource = config.assertTemporarySource ?? (() => {})
+  const noteTemporarySource = config.noteTemporarySource ?? (() => {})
   const ingest = ingestUrl(site, config.ingestBase)
   const mediaApi = new URL(config.mediaApiUrl || 'http://mediamtx:9997')
   const mediaWebrtc = new URL(config.mediaWebrtcUrl || 'http://mediamtx:8889')
@@ -413,11 +416,14 @@ export function createStreams(db, config, {
   }
 
   async function homeActivity(userId) {
-    if (!getVisible.all(userId, Date.now()).length) return { streams: [], streamsAvailable: true }
+    if (!getVisible.all(userId, Date.now()).some(row => !isTemporaryChannel(row.channel_id))) {
+      return { streams: [], streamsAvailable: true }
+    }
     let playback
     try { ({ playback } = await onlineStreams()) } catch { return { streams: [], streamsAvailable: false } }
     const now = Date.now()
-    const streams = getVisible.all(userId, now).filter(row => playback.has(row.id) && validBroadcast(row, now)).slice(0, 16)
+    const streams = getVisible.all(userId, now)
+      .filter(row => !isTemporaryChannel(row.channel_id) && playback.has(row.id) && validBroadcast(row, now)).slice(0, 16)
       .map(row => ({ ...publicStream(row, true, playback.get(row.id)), topicId: row.topic_id, topicTitle: row.topic_title,
         channelId: row.channel_id, channelTitle: row.channel_title }))
     return { streams, streamsAvailable: true }
@@ -431,6 +437,19 @@ export function createStreams(db, config, {
     rows = getChannel.all(channelId)
     closeInvalid(rows, Date.now(), online)
     return { rows: getChannel.all(channelId), playback: online.playback }
+  }
+
+  function hasGuestSource(channelId, ownerId) {
+    const now = Date.now()
+    return getChannel.all(channelId).some(row => row.user_id === ownerId && validBroadcast(row, now))
+  }
+
+  async function guestSnapshot(scope) {
+    if (scope.source !== 'screen' || !isTemporaryChannel(scope.channelId)) return null
+    const { rows, playback } = await channelStatus(scope.channelId)
+    const row = rows.find(row => row.user_id === scope.ownerId && row.publisher_id && playback.has(row.id))
+    return row ? { id: row.id, live: true, hasAudio: playback.get(row.id),
+      playlistUrl: `/api/guest/${scope.roomId}/hls/live/${row.id}/index.m3u8` } : null
   }
 
   async function stopBroadcast(row) {
@@ -630,14 +649,22 @@ export function createStreams(db, config, {
       if (!isSessionActive(session, user.id)) throw new RequestError(404, 'Stream nicht gefunden.')
       const connectUntil = now + (mode === 'browser' ? browserConnectLifetime : connectLifetime)
       closeInvalid(getOpen.all(), now)
+      assertTemporarySource(channelId, user.id, 'screen')
       if (!insert.run(id, channelId, user.id, digest(key), now, connectUntil, now + publishLifetime, mode,
         session, broadcastLimit, user.id).changes) {
         if (openForUser.get(user.id)) throw new RequestError(409, 'Du hast bereits einen Stream vorbereitet oder gestartet.')
         throw new RequestError(503, 'Alle Streamplätze sind gerade belegt.')
       }
+      if (mode === 'browser') browserPublishers.set(id, { session, key, until: connectUntil })
+      try {
+        noteTemporarySource(channelId, user.id)
+      } catch (error) {
+        browserPublishers.delete(id)
+        end.run(now, id)
+        throw error
+      }
       const stream = publicStream({ id, user_id: user.id, display_name: user.displayName, created_at: now }, false)
       if (mode === 'browser') {
-        browserPublishers.set(id, { session, key, until: connectUntil })
         json(response, 201, { stream, whipUrl: `/api/streams/${id}/whip`, iceServers: [] })
         return true
       }
@@ -711,6 +738,14 @@ export function createStreams(db, config, {
     response.writeHead(access ? 204 : 403).end()
   }
 
+  function checkGuestViewer(request, response, scope) {
+    const streamId = request.headers['x-stream-id']
+    const row = typeof streamId === 'string' && streamIdPattern.test(streamId) && getBroadcast.get(streamId)
+    const allowed = scope.source === 'screen' && isTemporaryChannel(scope.channelId) && row?.publisher_id &&
+      row.channel_id === scope.channelId && row.user_id === scope.ownerId && validBroadcast(row, Date.now())
+    response.writeHead(allowed ? 204 : 403).end()
+  }
+
   function close() {
     closed = true
     clearInterval(ticker)
@@ -718,6 +753,6 @@ export function createStreams(db, config, {
     if (pendingRelayStops.size) void flushPlaybackStops()
   }
 
-  return { handle, handleMedia, checkViewer, homeActivity, viewersFor, chatChannel,
+  return { handle, handleMedia, checkViewer, checkGuestViewer, guestSnapshot, hasGuestSource, homeActivity, viewersFor, chatChannel,
     revokeUser: userId => endForUser.run(Date.now(), userId), close }
 }

@@ -38,6 +38,17 @@ function watchLink(party) {
     el("span", { class: "tag" }, source)));
 }
 
+function temporaryLink(room) {
+  const source = room.source === "screen" ? t("Live stream", "Livestream")
+    : room.source === "youtube" ? "YouTube" : t("Local video", "Lokales Video");
+  return el("li", {}, el("a", {
+    class: "home-activity-card", href: "#/watch/" + encodeURIComponent(room.publicId), "data-feed-id": "temporary-" + room.publicId,
+  }, el("span", { class: "avatar", "aria-hidden": "true" }, "▶"),
+    el("span", { class: "home-activity-copy" }, el("span", { class: "home-live-person home-activity-snippet" }, room.title || source),
+      el("span", { class: "home-activity-location" }, t("Temporary room", "Temporärer Raum"))),
+    el("span", { class: "tag live" }, source)));
+}
+
 function talkLink(room) {
   const names = room.members.slice(0, 3).map(member => personName({ ...member, id: member.userId }));
   const extra = room.members.length - names.length;
@@ -97,7 +108,8 @@ export function renderHomeActivity({ signal }) {
         const members = room.members.filter(member => !wasVoiceReleased(member.id));
         return members.length ? [{ ...room, members }] : [];
       });
-      const liveCards = [...result.streams.map(streamLink), ...(result.watchParties ?? []).map(watchLink), ...talkRooms.map(talkLink)];
+      const liveCards = [...result.streams.map(streamLink), ...(result.watchParties ?? []).map(watchLink),
+        ...(result.quickRooms ?? []).map(temporaryLink), ...talkRooms.map(talkLink)];
       setList(streams, streamNote, liveCards, result.streamsAvailable
         ? t("Nobody is streaming or talking in your rooms right now.", "In deinen Räumen streamt oder spricht gerade niemand.")
         : t("Live status is unavailable right now.", "Der Live-Status ist gerade nicht erreichbar."));

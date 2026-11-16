@@ -3,6 +3,8 @@ import { renderAdmin, renderFriends } from "./people.js";
 import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
 import { renderHowItWorks } from "./how-it-works.js";
+import { renderGuestViewer } from "./guest-viewer.js";
+import { clearQuickLinks, quickSource } from "./quick-start.js";
 import { startHistorySharing } from "./history.js";
 import { mountNotifications } from "./notifications.js";
 import { startPresence } from "./presence.js";
@@ -32,6 +34,7 @@ const notificationDock = document.querySelector("#notification-dock");
 const profileUpdates = new EventTarget();
 const sessionChanges = typeof BroadcastChannel === "function" ? new BroadcastChannel("zelotez-rooms-session") : null;
 const desktopLogin = window.roomsDesktopLogin;
+const roomIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 
 let user = null;
 let view;
@@ -97,10 +100,16 @@ function getRoute() {
     const message = params.get("message");
     const stream = params.get("stream");
     const watch = params.get("watch");
+    const shareSource = quickSource(params.get("share"));
+    if (params.has("share")) {
+      params.delete("share");
+      history.replaceState(null, "", "#/" + path + (params.size ? "?" + params : ""));
+    }
     const target = {
-      messageId: /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(message ?? "") ? message : undefined,
+      messageId: roomIdPattern.test(message ?? "") ? message : undefined,
       streamId: /^[a-f0-9]{32}$/u.test(stream ?? "") ? stream : undefined,
-      watchId: /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(watch ?? "") ? watch : undefined,
+      watchId: roomIdPattern.test(watch ?? "") ? watch : undefined,
+      shareSource,
     };
     return { page: Object.hasOwn(routes, page) ? routes[page] : page, topicId, channelId, target };
   } catch {
@@ -165,6 +174,7 @@ async function showWorkspace(nextUser) {
 }
 
 function showAuth(note = "", preset = "", showInvite = false) {
+  clearQuickLinks();
   if (user) window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
   if (user) window.roomsNativeCapture?.close().catch(() => {});
   if (view) view.abort();
@@ -248,6 +258,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
 }
 
 function showTutorial(route, page) {
+  if (route.page === "watch" || page.hasAttribute("data-temporary")) return;
   if (page.matches(".home-dashboard")) tutorials?.visit("home", page);
   else if (page.matches(".topic-view")) {
     if (!page.hasAttribute("data-joined")) {
@@ -263,7 +274,7 @@ function showTutorial(route, page) {
 async function render(force = false) {
   if (!user) return;
   const route = getRoute();
-  setNav(route.page);
+  setNav(route.page === "watch" ? "rooms" : route.page);
   if (force !== true && route.page === "rooms" && route.topicId && activeTopic?.id === route.topicId) {
     activeTopic.view.select(route.channelId, route.target);
     showTutorial(route, activeTopic.view.node);
@@ -284,6 +295,9 @@ async function render(force = false) {
     else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
     else if (route.page === "invites" && user.admin) page = await renderAdmin(context);
     else if (route.page === "help") page = renderHowItWorks();
+    else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
+      page = renderGuestViewer({ publicId: route.topicId, signal, member: true });
+    }
     else if (route.page === "rooms" && route.topicId) {
       const topic = await renderTopic(context, route.topicId, route.channelId, route.target);
       if (signal.aborted) return;

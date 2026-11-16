@@ -1,0 +1,37 @@
+.home-room-actions { flex: none; flex-wrap: nowrap; }
+
+.quick-sources, .quick-options { display: grid; gap: 8px; }
+.quick-choice.button {
+  min-block-size: 58px;
+  display: grid;
+  justify-content: stretch;
+  justify-items: start;
+  gap: 4px;
+  padding: 10px 13px;
+  text-align: start;
+}
+.quick-choice small, .quick-option small { display: block; color: var(--muted); font-size: .83rem; font-weight: 400; }
+.quick-destinations { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 6px; }
+.quick-destinations .button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.quick-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.quick-option input { flex: none; }
+.quick-option strong { display: block; margin-bottom: 3px; font-size: .88rem; }
+.quick-guest-link { padding: 12px; border: 1px solid var(--line-strong); border-radius: 11px; }
+
+.topic-view[data-temporary] { min-block-size: 0; }
+[data-temporary-live] .live-channel-body {
+  grid-template: "watch" minmax(9rem, 1fr) "support" auto / minmax(0, 1fr);
+}
+[data-temporary-live] .live-channel-body:has(.watch-youtube-frame) { grid-template-rows: minmax(22rem, 1fr) auto; }
+[data-temporary-live] .live-channel-body:not(:has(.live-channel-people:not([hidden]))) { grid-template-rows: minmax(9rem, 1fr) 0; }
+[data-temporary-live] .live-channel-people:not([hidden]) { grid-area: support; grid-template: minmax(0, auto) / minmax(0, 1fr); }
+[data-temporary-live] .live-channel-streams { border: 0; }

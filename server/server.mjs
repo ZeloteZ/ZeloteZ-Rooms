@@ -11,6 +11,7 @@ import { assertOrigin, json, readJson, RequestError } from './http.mjs'
 import { setResponseLocale } from './locale.mjs'
 import { createNotifications } from './notifications.mjs'
 import { createPresence } from './presence.mjs'
+import { createQuickRooms } from './quick-rooms.mjs'
 import { createReactions } from './reactions.mjs'
 import { createStreams } from './streams.mjs'
 import { createStreamChat } from './stream-chat.mjs'
@@ -46,21 +47,30 @@ const community = createCommunity(db, { requireSession, appearance, recordMentio
   updateMovedMention: input => notifications.updateMovedMention(input),
   requeueMovedHistory: input => history.requeueMovedHistory(input),
 })
-const channelManagement = createChannelManagement(db, { requireSession })
+const temporaryChannels = {
+  isTemporaryChannel: channelId => quickRooms.isTemporaryChannel(channelId),
+  assertTemporarySource: (channelId, userId, source) => quickRooms.assertTemporarySource(channelId, userId, source),
+  noteTemporarySource: (channelId, userId) => quickRooms.noteTemporarySource(channelId, userId),
+}
+const channelManagement = createChannelManagement(db, { requireSession, isTemporaryTopic: topicId => quickRooms.isTemporaryTopic(topicId) })
 const presence = createPresence(db, auth)
-const watchParties = createWatchParties({ ...auth, dataDir: process.env.WATCH_MEDIA_DIR || dataDir, channelAccess: community.channelAccess })
+const watchParties = createWatchParties({ ...auth, ...temporaryChannels, dataDir: process.env.WATCH_MEDIA_DIR || dataDir,
+  channelAccess: community.channelAccess })
 const history = createHistory(db, { requireSession })
 const streams = createStreams(db, {
+  ...temporaryChannels,
   publicOrigin: origin.origin, ingestBase: process.env.STREAM_INGEST_BASE, mediaApiUrl: process.env.MEDIAMTX_API_URL,
   mediaWebrtcUrl: process.env.MEDIAMTX_WEBRTC_URL, onLive: input => notifications.recordLive(input),
 }, { requireSession, sessionKey: auth.sessionKey, isSessionActive: auth.isSessionActive,
   channelAccess: community.channelAccess, profileFor, readJson, json, RequestError })
+const quickRooms = createQuickRooms(db, { publicOrigin: origin.origin, trustProxyIp, auth, community, streams, watchParties })
 const streamChat = createStreamChat(db, { requireSession, community, streams, profileFor, recordMentions })
 const notifications = createNotifications(db, { requireSession, streams, profileFor, notifyLive: appearance.notifyLive })
 const reactions = createReactions(db, { requireSession, streams, assertChatWritable: community.assertChatWritable })
 const voice = createVoice(db, { mediaUrl: process.env.MEDIAMTX_WEBRTC_URL }, {
   requireSession, sessionKey: auth.sessionKey, isSessionActive: auth.isSessionActive,
-  channelAccess: community.channelAccess, profileFor, readJson, json, RequestError,
+  channelAccess: (userId, channelId) => quickRooms.isTemporaryChannel(channelId) ? null : community.channelAccess(userId, channelId),
+  profileFor, readJson, json, RequestError,
 })
 
 function service(handler) {
@@ -99,16 +109,22 @@ const publicApi = service(async (request, response) => {
     return json(response, 200, { product: 'zelotez-rooms', protocol: 1, origin: origin.origin, nonce })
   }
   if (request.method === 'GET' && path === '/_internal/stream-view') return streams.checkViewer(request, response)
+  if (request.method === 'GET' && path === '/_internal/guest-stream-view') return quickRooms.checkGuestViewer(request, response)
   if (path.startsWith('/api/')) {
     if (!['GET', 'HEAD'].includes(request.method)) assertOrigin(request, origin.origin)
+    if (path.startsWith('/api/guest/')) {
+      if (await quickRooms.handleGuest(request, response, path)) return
+      return json(response, 404, { error: 'Nicht gefunden.' })
+    }
     if (await auth.handle(request, response, path)) return
     const user = requireSession(request)
     if (request.method === 'GET' && path === '/api/home/activity') {
-      const live = await streams.homeActivity(user.id)
+      const [live, temporary] = await Promise.all([streams.homeActivity(user.id), quickRooms.homeActivity()])
       requireSession(request)
       return json(response, 200, { ...live, activities: community.homeActivity(user.id),
-        talkRooms: voice.homeActivity(user.id), watchParties: watchParties.homeActivity(user.id) })
+        talkRooms: voice.homeActivity(user.id), watchParties: watchParties.homeActivity(user.id), quickRooms: temporary })
     }
+    if (await quickRooms.handle(request, response, path)) return
     if (await appearance.handle(request, response, path, requireSession)) return
     if (await tutorials.handle(request, response, path)) return
     if (await presence.handle(request, response, path)) return
@@ -145,6 +161,7 @@ function shutdown() {
   streams.close()
   community.close()
   presence.close()
+  quickRooms.close()
   voice.close()
   watchParties.close()
   let servers = 2

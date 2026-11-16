@@ -21,7 +21,9 @@ async function fixture(t) {
   db.exec('CREATE TABLE topic_designers (topic_id TEXT, user_id TEXT)')
   const community = createCommunity(db, { ...auth, appearance: { profile: () => ({}) } })
   let now = 100_000
-  const watch = createWatchParties({ ...auth, dataDir, channelAccess: community.channelAccess, now: () => now })
+  const temporary = new Set()
+  const watch = createWatchParties({ ...auth, dataDir, channelAccess: community.channelAccess,
+    isTemporaryChannel: id => temporary.has(id), now: () => now })
   t.after(async () => {
     watch.close()
     community.close()
@@ -56,7 +58,7 @@ async function fixture(t) {
     }
   }
 
-  async function request(actor, method = 'GET', relative = '', body, headers = {}) {
+  async function fixtureCall(handler, actor, method, body, headers) {
     const bytes = body === undefined ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body))
     const fixtureRequest = Readable.from(bytes === null ? [] : [bytes])
     fixtureRequest.method = method
@@ -72,12 +74,23 @@ async function fixture(t) {
       response.headers = responseHeaders
       return response
     }
-    assert.equal(await watch.handle(fixtureRequest, response, new URL(base + relative, 'http://127.0.0.1')), true)
+    await handler(fixtureRequest, response)
     const buffer = Buffer.concat(chunks)
     return {
       status: response.statusCode, headers: response.headers, bytes: buffer,
       ...(response.headers?.['Content-Type']?.startsWith('application/json') && { data: JSON.parse(buffer) }),
     }
+  }
+
+  function request(actor, method = 'GET', relative = '', body, headers = {}) {
+    return fixtureCall(async (request, response) => {
+      assert.equal(await watch.handle(request, response, new URL(base + relative, 'http://127.0.0.1')), true)
+    }, actor, method, body, headers)
+  }
+
+  function guestRequest(scope, party, method, isActive, headers = {}) {
+    return fixtureCall((request, response) => watch.serveGuestMedia(request, response, scope, party, isActive),
+      null, method, undefined, headers)
   }
 
   async function waitForCleanup() {
@@ -88,9 +101,44 @@ async function fixture(t) {
     assert.fail('Watch party files were left behind')
   }
 
-  return { request, session, users, room, channel, homeActivity: watch.homeActivity,
+  return { request, guestRequest, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot, homeActivity: watch.homeActivity,
     waitForCleanup, tick: milliseconds => { now += milliseconds } }
 }
+
+test('guest media is limited to read-only byte ranges for the authorized temporary room and source', async t => {
+  const { request, guestRequest, session, users, room, channel, temporary, guestSnapshot, homeActivity } = await fixture(t)
+  const host = session(users.host)
+  const video = Buffer.alloc(24)
+  video.writeUInt32BE(24)
+  video.write('ftypisom', 4)
+  const scope = { roomId: room, channelId: channel, ownerId: users.host, source: 'local', guestKey: { token: 'verified-test-token' } }
+  const { party: draft } = (await request(host, 'POST', '', { source: 'local', mime: 'video/mp4', size: video.length })).data
+  temporary.add(channel)
+  assert.equal(guestSnapshot(scope).party, null)
+  await assert.rejects(guestRequest(scope, draft.id, 'GET', () => true), { status: 404 })
+  await request(host, 'PUT', `/${draft.id}/upload?offset=0`, video, { 'content-type': 'application/octet-stream' })
+  const { party } = guestSnapshot(scope)
+  assert.equal(party.mediaUrl, `/api/guest/${room}/media/${draft.id}`)
+  assert.equal(Object.hasOwn(party, 'hostId'), false)
+  assert.deepEqual(homeActivity(users.host), [])
+  await assert.rejects(guestRequest(scope, draft.id, 'PATCH', () => true), { status: 405 })
+  for (const invalid of [
+    { ...scope, ownerId: users.viewer }, { ...scope, channelId: randomUUID() }, { ...scope, source: 'youtube' },
+  ]) {
+    assert.equal(guestSnapshot(invalid).party, null)
+    await assert.rejects(guestRequest(invalid, draft.id, 'GET', () => true), { status: 404 })
+  }
+  await assert.rejects(guestRequest(scope, randomUUID(), 'GET', () => true), { status: 404 })
+  await assert.rejects(guestRequest(scope, draft.id, 'GET', () => false), { status: 404 })
+  let checks = 0
+  await assert.rejects(guestRequest(scope, draft.id, 'GET', () => ++checks === 1), { status: 404 })
+  const media = await guestRequest(scope, draft.id, 'GET', () => true, { range: 'bytes=4-9' })
+  assert.equal(media.status, 206)
+  assert.deepEqual(media.bytes, video.subarray(4, 10))
+  temporary.delete(channel)
+  assert.equal(guestSnapshot(scope).party, null)
+  await assert.rejects(guestRequest(scope, draft.id, 'GET', () => true), { status: 404 })
+})
 
 test('Live Now shows visible ready watch parties and the original host can supply YouTube title metadata once', async t => {
   const { request, session, users, room, channel, homeActivity } = await fixture(t)

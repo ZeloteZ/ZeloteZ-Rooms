@@ -52,9 +52,10 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
   };
 }
 
-export function createWatchParty({ signal, user, watchId }, channel, { onSelect, onChange, onUnavailable }) {
+export function createWatchParty({ signal, user, watchId, room }, channel, { onSelect, onChange, onUnavailable, onShareUnavailable }) {
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
+  const sourceLimit = room?.temporary ? room.quickSource : null;
   const share = button(t("Share video", "Video teilen"), chooseSource, { hidden: true });
   const cardName = el("strong");
   const cardSource = el("small", { class: "muted" });
@@ -100,6 +101,7 @@ export function createWatchParty({ signal, user, watchId }, channel, { onSelect,
   let sample;
   let hasSnapshot = false;
   let linkedId = watchId;
+  let requestedSource;
   let selectedId;
   let surface;
   let ready = false;
@@ -229,6 +231,26 @@ export function createWatchParty({ signal, user, watchId }, channel, { onSelect,
     else onUnavailable();
   }
 
+  function prepareSource(source) {
+    requestedSource = source;
+    openRequestedSource();
+  }
+
+  function openRequestedSource() {
+    if (!requestedSource || signal.aborted) return;
+    if (sourceLimit === "screen" || (sourceLimit && sourceLimit !== requestedSource)) {
+      requestedSource = undefined;
+      onShareUnavailable();
+      return;
+    }
+    if (!hasSnapshot) return;
+    const source = requestedSource;
+    requestedSource = undefined;
+    if (!canShare || sample?.party || busy) onShareUnavailable();
+    else if (source === "youtube") youtubeForm();
+    else if (source === "local") localForm();
+  }
+
   function resetPlayer(party) {
     tell(statusNode, t("Loading video…", "Video wird geladen …"));
     const current = () => selectedId === party.id && !signal.aborted;
@@ -296,6 +318,7 @@ export function createWatchParty({ signal, user, watchId }, channel, { onSelect,
     sync();
     render();
     openDestination();
+    openRequestedSource();
   }
 
   function schedule(delay = sample?.party ? 1200 : 4000) {
@@ -392,6 +415,10 @@ export function createWatchParty({ signal, user, watchId }, channel, { onSelect,
 
   function chooseSource() {
     if (!canShare || sample?.party || busy) return;
+    if (sourceLimit) {
+      prepareSource(sourceLimit);
+      return;
+    }
     showDialog(t("Share video", "Video teilen"), el("div", { class: "watch-party-sources" },
       button(t("Share YouTube video", "YouTube-Video teilen"), youtubeForm),
       button(t("Share local video", "Lokales Video teilen"), localForm)));
@@ -484,6 +511,6 @@ export function createWatchParty({ signal, user, watchId }, channel, { onSelect,
     clearTimeout(pollTimer);
     leaveParty();
   }, { once: true });
-  schedule(0);
-  return { share, card, player, active: () => sample?.party.state === "ready", selected: () => Boolean(selectedId), leave: leaveParty, open };
+  if (sourceLimit !== "screen") schedule(0);
+  return { share, card, player, active: () => sample?.party.state === "ready", selected: () => Boolean(selectedId), leave: leaveParty, open, prepareSource };
 }

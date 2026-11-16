@@ -54,6 +54,8 @@ function topicView(row, appearance) {
     visitedAt: row.visited_at ?? null, createdAt: row.created_at,
     canDesign: Boolean(row.joined_at && (row.role === 'owner' || row.design_grant)),
     appearance: appearance.topic(row.id, Boolean(row.joined_at)),
+    ...(row.quick_source && { temporary: true, quickSource: row.quick_source,
+      guestAccess: Boolean(row.quick_guest_access), memberVisibility: row.quick_member_visibility === 1 }),
   }
 }
 
@@ -160,6 +162,15 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       type TEXT NOT NULL CHECK (type IN ('chat', 'live')),
       stream_policy TEXT NOT NULL CHECK (stream_policy IN ('all', 'admins')), UNIQUE(topic_id, title)
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS quick_rooms (
+      topic_id TEXT PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE,
+      channel_id TEXT NOT NULL UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
+      owner_id TEXT NOT NULL UNIQUE REFERENCES users(id), owner_session TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('screen', 'youtube', 'local')),
+      member_visibility INTEGER NOT NULL CHECK (member_visibility IN (0, 1)), guest_hash BLOB,
+      created_at INTEGER NOT NULL, draft_until INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1))
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS messages (
       seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, channel_id TEXT NOT NULL REFERENCES channels(id),
       user_id TEXT NOT NULL REFERENCES users(id), envelope TEXT NOT NULL, created_at TEXT NOT NULL
@@ -206,11 +217,16 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   const direct = createDirect(db, appearance.profile)
 
   const topicSelect = `SELECT t.*, m.role, m.approved, m.joined_at, m.visited_at, m.favorite,
+    q.source AS quick_source, q.guest_hash IS NOT NULL AS quick_guest_access, q.member_visibility AS quick_member_visibility,
     EXISTS (SELECT 1 FROM topic_designers d WHERE d.topic_id = t.id AND d.user_id = m.user_id) AS design_grant
-    FROM topics t LEFT JOIN topic_members m ON m.topic_id = t.id AND m.user_id = ?`
-  const listedTopic = 'NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = t.id)'
+    FROM topics t LEFT JOIN topic_members m ON m.topic_id = t.id AND m.user_id = ?
+    LEFT JOIN quick_rooms q ON q.topic_id = t.id`
+  const regularTopic = 'NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = t.id)'
+  const listedTopic = `${regularTopic} AND NOT EXISTS (SELECT 1 FROM quick_rooms qr WHERE qr.topic_id = t.id)`
   const visibleTopics = `${topicSelect} WHERE ${listedTopic} AND (t.visibility = 'public' OR m.user_id IS NOT NULL)`
-  const topicById = db.prepare(`${visibleTopics} AND t.id = ?`)
+  const topicById = db.prepare(`${topicSelect} WHERE ${regularTopic} AND t.id = ? AND (
+    (q.topic_id IS NULL AND (t.visibility = 'public' OR m.user_id IS NOT NULL)) OR
+    (q.topic_id IS NOT NULL AND t.owner_id = m.user_id))`)
   const listTopics = db.prepare(`${visibleTopics} AND (? IS NULL OR (t.created_at, t.id) < (?, ?))
     ORDER BY t.created_at DESC, t.id DESC LIMIT ?`)
   const favoriteTopics = db.prepare(`${topicSelect} WHERE ${listedTopic} AND m.joined_at IS NOT NULL AND m.favorite = 1 ORDER BY m.visited_at DESC, t.id DESC`)
@@ -218,6 +234,12 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     ORDER BY m.visited_at DESC, t.id DESC LIMIT 8`)
   const countRooms = db.prepare(`SELECT count(*) AS count FROM topics t WHERE ${listedTopic}`)
   const countOwnedRooms = db.prepare(`SELECT count(*) AS count FROM topics t WHERE owner_id = ? AND ${listedTopic}`)
+  const quickDestinations = db.prepare(`SELECT t.id AS topicId, t.title AS topicTitle,
+    c.id AS channelId, c.title AS channelTitle FROM channels c JOIN topics t ON t.id = c.topic_id
+    JOIN topic_members m ON m.topic_id = t.id AND m.user_id = ? AND m.joined_at IS NOT NULL
+    WHERE ${listedTopic} AND c.type = 'live' AND t.stream_policy <> 'disabled' AND
+      (m.role IN ('owner', 'admin') OR (t.stream_policy = 'all' AND c.stream_policy = 'all'))
+    ORDER BY t.title COLLATE NOCASE, c.title COLLATE NOCASE, c.id`)
   const storageFor = db.prepare('SELECT messages, bytes FROM chat_storage WHERE scope = ?')
   const findChannel = db.prepare(`SELECT c.*, CASE WHEN d.id IS NULL THEN m.role ELSE 'member' END AS role,
     (d.id IS NOT NULL) AS is_direct, t.stream_policy AS topic_stream_policy, t.title AS topic_title FROM channels c
@@ -225,6 +247,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL
     LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
     WHERE c.id = ? AND (d.id IS NULL OR (c.id = d.channel_id AND m.user_id IN (d.first_id, d.second_id)))
+    AND (m.user_id = t.owner_id OR NOT EXISTS (SELECT 1 FROM quick_rooms q WHERE q.topic_id = t.id))
     AND NOT EXISTS (SELECT 1 FROM disabled_accounts disabled WHERE disabled.user_id = m.user_id)`)
   const recipientKeys = db.prepare(`SELECT u.id, u.public_key FROM topic_members m JOIN users u ON u.id = m.user_id
     LEFT JOIN direct_conversations d ON d.topic_id = m.topic_id
@@ -762,6 +785,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       else return false
     } else if (resource === 'topics' && id && !file) {
       const topic = getTopic(user.id, id)
+      const temporary = topic.quick_source !== null
+      if (temporary && !(method === 'GET' && (!action || action === 'activity')) && !(method === 'DELETE' && !action)) throw forbidden()
       if (method === 'GET' && !action) json(response, 200, topicDetails(user, topic))
       else if (method === 'GET' && action === 'activity') json(response, 200, { activities: recentActivity(user, topic) })
       else if (method === 'PATCH' && !action) json(response, 200, { topic: changeTopic(user, topic, body) })
@@ -821,6 +846,12 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   }
 
   return { handle, channelAccess, homeActivity, assertChatWritable: direct.assertCanSend,
+    quickDestinations: userId => quickDestinations.all(userId),
+    removeTemporaryTopic: (id, ownerId) => {
+      const topic = getTopic(ownerId, id)
+      if (!topic.quick_source) throw missing()
+      removeTopic({ id: ownerId }, topic)
+    },
     chatKeys: channelId => {
       const channel = channelTopic.get(channelId)
       return channel ? recipientKeys.all(channel.topic_id) : []

@@ -4,6 +4,7 @@ import { applyTopicCover, applyTopicDesign, editTopicDesign } from "./appearance
 import { renderChat } from "./chat.js";
 import { renderHomeActivity } from "./home-activity.js";
 import { renderLive } from "./live.js";
+import { openStreamNow, quickRoomActions } from "./quick-start.js";
 import { api, button, closeDialog, el, field, form, identifier, notify, personRow, sameId, select, showDialog, status, tell, topicHref } from "./ui.js";
 
 const visibilityOptions = [["public", t("Everyone in the group", "Für alle im Freundeskreis")], ["private", t("Private · invite only", "Privat · nur auf Einladung")]];
@@ -40,6 +41,17 @@ function newTopic(context) {
     closeDialog();
     location.hash = topicHref(topic.id);
   }));
+}
+
+function roomActions(context) {
+  const actions = el("div", { class: "inline" }, button(t("Create room", "Raum erstellen"), () => newTopic(context), { class: "primary" }));
+  showDialog(t("Room actions", "Raumaktionen"), actions);
+  void api("quick-rooms", { signal: context.signal }).then(({ room }) => {
+    if (!room || !actions.isConnected || context.signal.aborted) return;
+    actions.append(el("a", {
+      class: "button", href: topicHref(room.topicId, room.channelId),
+    }, t("Return to temporary room", "Zum temporären Raum zurück")));
+  }).catch(() => {});
 }
 
 function favoriteControl(topic, context, card = false) {
@@ -213,7 +225,11 @@ export async function renderTopics(context) {
   const dashboard = el("div", { class: "home-dashboard", "data-pane": "topics" },
     el("header", { class: "home-heading page-heading" },
       el("h1", {}, greeting(context.user.displayName)),
-      button(t("Create room", "Raum erstellen"), () => newTopic(context), { class: "primary" })),
+      el("div", { class: "inline home-room-actions" },
+        button(t("Stream Now", "Jetzt streamen"), () => openStreamNow(context), { class: "primary", "aria-haspopup": "dialog" }),
+        button("⚙", () => roomActions(context), {
+          class: "icon-button", title: t("Room actions", "Raumaktionen"), "aria-label": t("Room actions", "Raumaktionen"), "aria-haspopup": "dialog",
+        }))),
     el("div", { class: "home-tabs", role: "group", "aria-label": t("Room overview", "Raumübersicht") }, tabs),
     el("div", { class: "home-content" },
       el("div", { class: "home-topics" },
@@ -560,10 +576,34 @@ function leaveDialog(context, topic) {
       }, { class: "danger" }))));
 }
 
+function renderQuickTopic(context, topic, channels, selectedId, target) {
+  const channel = channels.find(item => item.type === "live");
+  if (!channel) throw new Error(t("This temporary room has ended.", "Dieser temporäre Raum wurde beendet."));
+  const stopCapture = () => {
+    if (sameId(context.screenShare.active()?.room.id, topic.id)) context.screenShare.stop();
+    if (sameId(context.nativeBroadcast?.active()?.channelId, channel.id)) context.nativeBroadcast.stop().catch(() => {});
+  };
+  const playerMount = el("div", { class: "live-channel-player" });
+  const child = { ...context, room: topic, shareSource: sameId(channel.id, selectedId) ? target?.shareSource : undefined };
+  const live = renderLive(child, channel, null, context.player, null, playerMount);
+  const hero = el("div", { class: "panel room-hero section-heading" },
+    el("div", { class: "room-title" },
+      el("div", { class: "inline" }, el("a", { href: "#/rooms", class: "subtle" }, t("All rooms", "Alle Räume")),
+        el("span", { class: "tag" }, t("Temporary room", "Temporärer Raum"))),
+      el("h1", { title: topic.title }, topic.title)), quickRoomActions(context, topic, stopCapture));
+  const node = el("div", { class: "topic-view", "data-joined": true, "data-temporary": true }, hero, live);
+  context.player.setLocation(topic, channel, playerMount);
+  context.voice.setLocation(null);
+  return { node, select(id, next) {
+    if (sameId(id, channel.id) && next?.shareSource) live.dispatchEvent(new CustomEvent("open-message", { detail: next }));
+  } };
+}
+
 export async function renderTopic(context, topicId, selectedId, target) {
   const { topic, channels: initialChannels = [], members = [] } = await api("topics/" + identifier(topicId), { signal: context.signal });
   context.signal.throwIfAborted();
   if (!topic) throw new Error(t("This room is unavailable.", "Dieser Raum ist nicht verfügbar."));
+  if (topic.temporary) return renderQuickTopic(context, topic, initialChannels, selectedId, target);
   const owner = topic.role === "owner";
   const manager = owner || topic.role === "admin";
   const room = el("div", { class: "topic-view", "data-joined": topic.joined === true });
@@ -675,7 +715,9 @@ export async function renderTopic(context, topicId, selectedId, target) {
     const message = channel && sameId(channel.id, requestedId) ? destination : undefined;
     showActivity(false);
     if (channelView && (selected === channel || sameId(selected?.id, channel?.id))) {
-      if (message?.messageId || message?.streamId || message?.watchId) channelNode?.dispatchEvent(new CustomEvent("open-message", { detail: message }));
+      if (message?.messageId || message?.streamId || message?.watchId || message?.shareSource) {
+        channelNode?.dispatchEvent(new CustomEvent("open-message", { detail: message }));
+      }
       return;
     }
     channelView?.abort();
@@ -695,7 +737,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
       return;
     }
     const childContext = { ...context, room: topic, signal: channelView.signal,
-      messageId: message?.messageId, streamId: message?.streamId, watchId: message?.watchId };
+      messageId: message?.messageId, streamId: message?.streamId, watchId: message?.watchId, shareSource: message?.shareSource };
     const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
     if (channel.type === "live") {
       const voiceMount = el("div", { class: "voice-inline" });

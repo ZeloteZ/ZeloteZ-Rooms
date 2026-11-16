@@ -33,7 +33,7 @@ export function initializeChannelOrder(db) {
   })
 }
 
-export function createChannelManagement(db, { requireSession }) {
+export function createChannelManagement(db, { requireSession, isTemporaryTopic = () => false }) {
   const members = db.prepare(`SELECT m.role FROM topic_members m WHERE m.user_id = ? AND m.topic_id = ? AND m.joined_at IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = m.topic_id)`)
   const getChannel = db.prepare('SELECT topic_id, type FROM channels WHERE id = ?')
@@ -46,7 +46,7 @@ export function createChannelManagement(db, { requireSession }) {
   function requireManager(request, topicId) {
     const actor = requireSession(request)
     const member = members.get(actor.id, topicId)
-    if (!member) throw missing()
+    if (!member || isTemporaryTopic(topicId)) throw missing()
     if (member.role !== 'owner' && member.role !== 'admin') {
       throw new RequestError(403, 'Nur die Themenleitung kann Channels verwalten.')
     }
