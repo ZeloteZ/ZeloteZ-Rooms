@@ -614,9 +614,9 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   if (child.shareSource === "screen") screen?.prepare();
   else if (child.shareSource) setup?.prepareSource(child.shareSource);
   const actions = el("div", { class: "quick-view-actions" }, screen?.actions, setup?.share, quickRoomActions(context, topic, stopCapture));
-  const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true,
+  const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true, videoDock: context.videoDock,
     host: {
-      actions, channelId: channel.id,
+      actions, channelId: channel.id, href: topicHref(topic.id, channel.id),
       createPreview: screenRoom ? signal => renderQuickPreview(context, topic, channel, signal) : undefined,
       onUnavailable() {
         context.quickRoomHeader.ended(topic.id);
@@ -735,6 +735,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
     layout.toggleAttribute("data-activity-view", visible);
     activityToggle.setAttribute("aria-pressed", String(visible));
     if (livePlayerMount) context.player.setLocation(topic, selected, visible ? null : livePlayerMount);
+    context.videoDock?.refreshPlacement();
   }
 
   function markSelected(channel) {
@@ -781,6 +782,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
       context.player.setLocation(topic, channel, livePlayerMount);
       content.replaceChildren(channelNode);
       context.player.refreshPlacement();
+      context.videoDock?.refreshPlacement();
       context.voice.setLocation(channel, topic, voiceMount);
     } else {
       const moveDestinations = manager ? () => channels.filter(candidate =>

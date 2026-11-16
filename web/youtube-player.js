@@ -4,7 +4,7 @@ const connectionInterval = 250;
 const connectionTimeout = 18_000;
 const numeric = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onTitle } = {}) {
+export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onTitle, onVisibility } = {}) {
   if (typeof videoId !== "string" || !videoIdPattern.test(videoId)) throw new Error("Invalid YouTube video ID");
 
   const element = document.createElement("iframe");
@@ -22,7 +22,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   let ready = false;
   let destroyed = false;
   let visible = false;
-  let intersecting = false;
+  let presenting = false;
   let nativeVisible = true;
   let wantsPlayback = false;
   let state = -1;
@@ -68,22 +68,25 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   }
 
   function applyPlayback() {
-    if (!ready || !visible || !nativeVisible || document.hidden || !wantsPlayback) return;
+    if (!presenting || !wantsPlayback) return;
     applySeek();
     const pausing = expectedTransport?.target === 2 && performance.now() <= expectedTransport.expiresAt;
     if (pausing || (state !== 1 && state !== 3)) transport(true);
   }
 
   const observer = new IntersectionObserver(([entry]) => {
-    intersecting = entry.isIntersecting && entry.intersectionRatio > 0;
     visible = entry.intersectionRatio > 0.5 && entry.boundingClientRect.width >= 200 && entry.boundingClientRect.height >= 200;
     updateVisibility();
   }, { threshold: [0, 0.5, 0.51, 1] });
   observer.observe(element);
 
   function updateVisibility() {
-    if (ready && (!intersecting || !nativeVisible || document.hidden) && (state === 1 || state === 3)) transport(false);
-    else applyPlayback();
+    const next = ready && visible && nativeVisible && !document.hidden;
+    if (next === presenting) return;
+    presenting = next;
+    wantsPlayback = false;
+    if (!next && (state === 1 || state === 3)) transport(false);
+    onVisibility?.(presenting);
   }
   document.addEventListener("visibilitychange", updateVisibility);
   const unobserveWindow = window.roomsWindowVisibility?.observe(value => { nativeVisible = value; updateVisibility(); });
@@ -93,6 +96,10 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
     const changed = state !== value;
     state = value;
     if (!ready) return;
+    if (!presenting && (value === 1 || value === 3)) {
+      if (changed) transport(false);
+      return;
+    }
     if (changed && value === 0) onEnded?.();
     if (changed && value === 1) onPlaying?.();
     if (value !== 1 && value !== 2) return;
@@ -103,7 +110,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
     const playing = value === 1;
     // Player state can also change because of buffering, browser policy, or our own commands.
     if (!stateEvent || confirming || now < ignoreSeekUntil || playing === wantsPlayback ||
-        !intersecting || !nativeVisible || document.hidden || !document.hasFocus() ||
+        !presenting || !document.hasFocus() ||
         document.activeElement !== element || navigator.userActivation?.isActive !== true) return;
     wantsPlayback = playing;
     onPlaybackChange?.(playing);
@@ -124,6 +131,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
         for (const event of ["onError", "onStateChange", "onAutoplayBlocked"]) command("addEventListener", event);
         applyVolume();
         applySeek();
+        updateVisibility();
         onReady?.();
         applyPlayback();
         break;
@@ -196,6 +204,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
       document.removeEventListener("visibilitychange", updateVisibility);
       unobserveWindow?.();
       window.removeEventListener("message", receive);
+      if (presenting) onVisibility?.(false);
       element.remove();
     },
   };

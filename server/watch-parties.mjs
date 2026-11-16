@@ -7,7 +7,7 @@ import { json, readBytes, readJson, RequestError } from './http.mjs'
 
 const uuid = '[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}'
 const partyIdPattern = new RegExp(`^${uuid}$`, 'u')
-const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media|metadata))?)?$`, 'u')
+const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media|metadata|viewers))?)?$`, 'u')
 const storedName = new RegExp(`^${uuid}\\.video$`, 'u')
 const youtubeId = /^[\w-]{11}$/u
 const videoTypes = new Map([['video/mp4', 'video.mp4'], ['video/webm', 'video.webm']])
@@ -18,6 +18,9 @@ const maxParties = 8
 const maxUploadRequests = 4
 const maxMediaReads = 128
 const maxMediaReadsPerSession = 8
+const maxViewers = 128
+const maxViewersPerCredential = 4
+const viewerLease = 12_000
 const uploadIdleTime = 3 * 60_000
 const uploadLifetime = 20 * 60_000
 const partyLifetime = 12 * 60 * 60_000
@@ -37,6 +40,13 @@ function playbackCommand({ action, revision, position }) {
     throw invalidControl()
   }
   return { action, revision, position }
+}
+
+function viewerReport({ playerId, revision }) {
+  if (typeof playerId !== 'string' || !partyIdPattern.test(playerId) || !Number.isSafeInteger(revision) || revision < 1) {
+    throw new RequestError(400, 'Die Wiedergabe ist ungültig.')
+  }
+  return { playerId, revision }
 }
 
 function watchTitle(value, source) {
@@ -138,14 +148,51 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     for (const [id, start] of starts) {
       if (start.expires <= time) starts.delete(id)
     }
-    for (const channel of parties.keys()) activeParty(channel, time)
+    for (const channel of parties.keys()) {
+      const party = activeParty(channel, time)
+      if (party) reconcileViewers(party, time)
+    }
     for (const file of retiredFiles) removeFile(file)
     for (const read of reads) {
       if (!read.isActive()) read.abort.abort()
     }
   }
 
-  function playbackState(party) {
+  function reconcileViewers(party, time) {
+    if (!party.viewers) return true
+    let hasViewer = false
+    let lastVisibleUntil
+    for (const [id, viewer] of party.viewers) {
+      if (viewer.expiresAt <= time || !viewer.isActive()) {
+        if (viewer.present) lastVisibleUntil = Math.max(lastVisibleUntil ?? 0, Math.min(time, viewer.expiresAt))
+        party.viewers.delete(id)
+      } else if (viewer.present) hasViewer = true
+    }
+    if (!hasViewer && party.playing) {
+      const until = Math.max(party.updatedAt, lastVisibleUntil ?? time)
+      party.position = positionAt(party, until)
+      party.playing = false
+      party.updatedAt = until
+      party.revision++
+    }
+    return hasViewer
+  }
+
+  function updateViewer(party, credential, report, present, time) {
+    if (!party.viewers || party.state !== 'ready' || !credential.key || !credential.isActive()) throw missing()
+    reconcileViewers(party, time)
+    const id = credential.key + ':' + report.playerId
+    const previous = party.viewers.get(id)
+    if (previous && previous.revision >= report.revision) return
+    if (!previous && (party.viewers.size >= maxViewers ||
+        [...party.viewers.values()].filter(viewer => viewer.key === credential.key).length >= maxViewersPerCredential)) throw tooBusy()
+    // Retain a release until any older in-flight heartbeat has had time to arrive.
+    party.viewers.set(id, { ...credential, present, revision: report.revision, expiresAt: time + viewerLease })
+    if (!present) reconcileViewers(party, time)
+  }
+
+  function playbackState(party, time) {
+    reconcileViewers(party, time)
     return { id: party.id, source: party.source, title: party.title,
       position: party.position, playing: party.playing, updatedAt: party.updatedAt, revision: party.revision }
   }
@@ -154,7 +201,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const canStop = Boolean(party && (party.hostId === actor.id || access.canManage))
     const visible = party && (party.state === 'ready' || canStop)
     return { party: visible ? {
-      ...playbackState(party), hostId: party.hostId, state: party.state,
+      ...playbackState(party, time), hostId: party.hostId, state: party.state,
       ...(party.source === 'youtube' ? { videoId: party.videoId } : { mime: party.mime,
         ...(party.state === 'uploading' ? { offset: party.offset, size: party.size } :
           { mediaUrl: `${watchPath(party.channelId, party.id)}/media` }) }),
@@ -190,7 +237,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const serverTime = now()
     const party = guestParty(scope, serverTime)
     return { serverTime, party: party ? {
-      ...playbackState(party), ...(party.source === 'youtube' ? { videoId: party.videoId } : {
+      ...playbackState(party, serverTime), ...(party.source === 'youtube' ? { videoId: party.videoId } : {
         mime: party.mime, mediaUrl: `/api/guest/${scope.roomId}/media/${party.id}`,
       }),
     } : null }
@@ -243,7 +290,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       title: source === 'local' ? watchTitle(title, source) : '',
       playing: false, position: 0, updatedAt: time, revision: 1,
       commandWindowUntil: time, commandCount: 0,
-      ...(source === 'youtube' ? { videoId, state: 'ready', expiresAt: time + partyLifetime } : {
+      ...(source === 'youtube' ? { videoId, state: 'ready', expiresAt: time + partyLifetime, viewers: new Map() } : {
         mime, size, state: 'uploading', expiresAt: time + uploadLifetime,
         uploadUntil: time + uploadIdleTime, file: join(folder, `${id}.video`), offset: 0,
       }),
@@ -388,7 +435,8 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
   }
 
   function updatePlayback(party, { action, revision, position }, time) {
-    if (party.state !== 'ready' || party.revision !== revision) throw conflict()
+    const hasViewer = reconcileViewers(party, time)
+    if (party.state !== 'ready' || party.revision !== revision || (action === 'play' && !hasViewer)) throw conflict()
     if (party.commandWindowUntil <= time) {
       party.commandWindowUntil = time + 1000
       party.commandCount = 0
@@ -409,6 +457,29 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const party = guestParty(scope, time)
     if (party?.id !== partyId) throw missing()
     updatePlayback(party, playbackCommand(input), time)
+  }
+
+  function reportGuestViewer(scope, input, method, isActive) {
+    if (closing) throw missing()
+    const { partyId } = input
+    if (typeof partyId !== 'string' || !partyIdPattern.test(partyId)) throw invalidControl()
+    const report = viewerReport(input)
+    const time = now()
+    const party = guestParty(scope, time)
+    if (party?.id !== partyId) throw missing()
+    const { session, token } = scope.guestKey
+    const key = session ?? (token && 'guest:' + token)
+    updateViewer(party, { key, isActive }, report, method === 'POST', time)
+  }
+
+  async function reportMemberViewer(request, response, actor, party) {
+    const report = viewerReport(await readJson(request, 512))
+    if (requireSession(request).id !== actor.id) throw missing()
+    const key = sessionKey(request)
+    const isActive = () => isSessionActive(key, actor.id) && channelAccess(actor.id, party.channelId)?.canView
+    const time = now()
+    updateViewer(specificParty(party.channelId, party.id, time), { key, isActive }, report, request.method === 'POST', time)
+    response.writeHead(204).end()
   }
 
   async function control(request, response, actor, party) {
@@ -440,6 +511,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       if (resource === 'media' && (method === 'GET' || method === 'HEAD')) await serveMemberMedia(request, response, actor, party)
       else if (resource === 'upload' && method === 'PUT') await upload(request, response, url, actor, party)
       else if (resource === 'metadata' && method === 'PATCH') await addMetadata(request, response, actor, party)
+      else if (resource === 'viewers' && (method === 'POST' || method === 'DELETE')) await reportMemberViewer(request, response, actor, party)
       else if (!resource && method === 'PATCH') await control(request, response, actor, party)
       else if (!resource && method === 'DELETE') {
         if (party.hostId !== actor.id && !access.canManage) throw missing()
@@ -456,5 +528,5 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     for (const party of parties.values()) retire(party)
   }
 
-  return { handle, homeActivity, hasGuestSource, guestSnapshot, serveGuestMedia, controlGuestPlayback, close }
+  return { handle, homeActivity, hasGuestSource, guestSnapshot, serveGuestMedia, controlGuestPlayback, reportGuestViewer, close }
 }

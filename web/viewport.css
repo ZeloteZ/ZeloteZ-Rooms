@@ -40,7 +40,7 @@ body {
 
 .header-media:not(:has(> :not([hidden]))) { display: none; }
 .header-media:has(> :not([hidden])) + .profile { margin-inline-start: 0; }
-#player-dock, #voice-dock, #broadcast-dock, #native-broadcast-dock { min-inline-size: 0; }
+#player-dock, #video-dock, #voice-dock, #broadcast-dock, #native-broadcast-dock { min-inline-size: 0; }
 
 .stream-dock summary {
   min-block-size: 36px;
@@ -77,6 +77,12 @@ body {
 
 .stream-popover .live-player { max-inline-size: none; }
 .stream-popover .player-heading { gap: 5px; }
+.video-dock-popover { background: var(--panel); border: 1px solid var(--line); }
+.video-dock-actions { justify-content: space-between; gap: 6px; padding: 7px 8px; }
+.video-dock-actions .button { min-block-size: 34px; padding: 5px 8px; font-size: .8rem; }
+.video-dock-stage .panel { border: 0; }
+.video-dock-stage .watch-party-player:not(:fullscreen) { grid-template-rows: auto minmax(204px, 1fr) auto; }
+.video-dock-stage .watch-party-heading .icon-button { display: none; }
 
 .home-dashboard {
   block-size: 100%;

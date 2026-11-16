@@ -1,7 +1,8 @@
 import { t } from "./i18n.js";
-import { api, button, closeDialog, el, field, form, identifier, showDialog, status, tell } from "./ui.js";
+import { api, button, closeDialog, el, field, form, identifier, showDialog, status, tell, topicHref } from "./ui.js";
 import { createYoutubePlayer } from "./youtube-player.js";
 import { createWatchControls } from "./watch-controls.js";
+import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
 
 const chunkSize = 4 * 1024 * 1024;
 const maxFileSize = 64 * chunkSize;
@@ -47,8 +48,23 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
   };
 }
 
-export function createWatchParty({ signal, user, watchId, room, quickRoomHeader }, channel,
-  { onSelect, onChange, onUnavailable, onShareUnavailable, setupOnly = false }) {
+export function createWatchParty(context, channel, options) {
+  const { signal, videoDock, watchId } = context;
+  if (!videoDock || options.setupOnly || !options.mount) {
+    const party = createParty(context, channel, options);
+    options.mount?.append(party.player);
+    return party;
+  }
+  const entry = videoDock.get("watch:" + channel.id, entry =>
+    createParty({ ...context, signal: entry.signal }, channel, {}, entry));
+  entry.instance.connectView(options, watchId);
+  entry.mount(options.mount, signal, () => entry.instance.disconnectView());
+  return entry.instance;
+}
+
+function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, options, dockEntry) {
+  let view = options;
+  const { setupOnly = false } = options;
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
   const sourceLimit = room?.temporary ? room.quickSource : null;
@@ -70,7 +86,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
       if (sample.party.playing) return void change("pause");
       const start = restartPosition();
       if (start === 0) surface.seek(0);
-      surface.play();
+      if (sample.party.source !== "youtube") surface.play();
       void change("play", start);
     },
     onSeek: position => void change("seek", position),
@@ -91,6 +107,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
   let requestedSource;
   let selectedId;
   let surface;
+  let audience;
   let ready = false;
   let appliedRevision;
   let nativeIntent;
@@ -153,7 +170,8 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     stop.hidden = !canStop;
     stop.disabled = busy;
     controls.setTransport({ isPlaying: party?.playing, enabled: !busy && ready });
-    onChange?.();
+    if (selectedId) dockEntry?.activate(title.textContent, topicHref(room.id, channel.id, { watchId: selectedId }));
+    view?.onChange?.();
   }
 
   function leaveParty() {
@@ -165,11 +183,14 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     controls.resetPosition();
     appliedRevision = undefined;
     nativeIntent = undefined;
+    audience?.stop();
+    audience = undefined;
     clearInterval(clockTimer);
     previous?.destroy();
     controls.setFullscreenSurface(null);
     media.replaceChildren();
     player.hidden = true;
+    dockEntry?.deactivate();
     enable.hidden = true;
     tell(statusNode, "");
     if (hadSelection && !signal.aborted) render();
@@ -179,7 +200,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     const party = sample?.party;
     if (setupOnly || party?.state !== "ready" || selectedId === party.id || signal.aborted) return;
     selectedId = party.id;
-    onSelect();
+    view?.onSelect?.();
     player.hidden = false;
     resetPlayer(party);
     render();
@@ -195,7 +216,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     const id = linkedId;
     linkedId = undefined;
     if (sample?.party.id === id && sample.party.state === "ready") join();
-    else onUnavailable();
+    else view?.onUnavailable?.();
   }
 
   function prepareSource(source) {
@@ -207,13 +228,13 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     if (!requestedSource || signal.aborted) return;
     if (sourceLimit === "screen" || (sourceLimit && sourceLimit !== requestedSource)) {
       requestedSource = undefined;
-      onShareUnavailable();
+      view?.onShareUnavailable?.();
       return;
     }
     if (!hasSnapshot) return;
     const source = requestedSource;
     requestedSource = undefined;
-    if (!canShare || sample?.party || busy) onShareUnavailable();
+    if (!canShare || sample?.party || busy) view?.onShareUnavailable?.();
     else if (source === "youtube") youtubeForm();
     else if (source === "local") localForm();
   }
@@ -221,6 +242,10 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
   function resetPlayer(party) {
     tell(statusNode, t("Loading video…", "Video wird geladen …"));
     const current = () => selectedId === party.id && !signal.aborted;
+    if (party.source === "youtube") {
+      const viewers = "/api/" + endpoint + "/" + identifier(party.id) + "/viewers";
+      audience = createWatchViewerLease({ signal, report: options => reportWatchViewer(viewers, options, { accountId: user.id }) });
+    }
     const handlers = {
       onReady() {
         if (!current()) return;
@@ -233,6 +258,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
       onError() {
         if (!current()) return;
         ready = false;
+        audience?.setVisible(false);
         const description = party.source === "youtube"
           ? t("YouTube couldn’t play this embedded video.", "YouTube konnte dieses eingebettete Video nicht abspielen.")
           : t("This device couldn’t play the video format.", "Dieses Gerät konnte das Videoformat nicht abspielen.");
@@ -254,6 +280,13 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
         if (!current() || !ready) return;
         nativeIntent = { id: party.id, playing };
         sendNativeIntent();
+      },
+      onVisibility(visible) {
+        audience?.setVisible(visible);
+        if (visible && current()) {
+          appliedRevision = undefined;
+          schedule(0);
+        }
       },
       onTitle(value) {
         if (!current() || party.hostId !== user?.id || sample?.party.title) return;
@@ -352,6 +385,11 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     const party = sample?.party;
     if (!party || selectedId !== party.id) return;
     return run(async () => {
+      if (action === "play" && audience && !await audience.ensure()) {
+        sync(true);
+        throw new Error(t("Open the video player to start playback.", "Öffne den Videoplayer, um die Wiedergabe zu starten."));
+      }
+      if (signal.aborted || selectedId !== party.id) return;
       const startedAt = performance.now();
       try {
         const result = await api(endpoint + "/" + identifier(party.id), {
@@ -474,5 +512,28 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
   }, { once: true });
   if (sourceLimit !== "screen") schedule(0);
   return { share, card, player, active: () => sample?.party.state === "ready", hasSnapshot: () => hasSnapshot,
-    selected: () => Boolean(selectedId), join, leave: leaveParty, open, prepareSource };
+    selected: () => Boolean(selectedId), join, leave: leaveParty, open, prepareSource,
+    stopPlayback: leaveParty,
+    connectView(options, id) {
+      view = options;
+      linkedId = id;
+      schedule(0);
+    },
+    disconnectView() {
+      view = undefined;
+      linkedId = undefined;
+      requestedSource = undefined;
+    },
+    reconnectAfterMove() {
+      if (!selectedId || !surface) return;
+      if (sample.party.source === "youtube") {
+        ready = false;
+        audience?.stop();
+        audience = undefined;
+        surface.destroy();
+        clearInterval(clockTimer);
+        resetPlayer(sample.party);
+      } else if (sample.party.playing) surface.play();
+    },
+  };
 }

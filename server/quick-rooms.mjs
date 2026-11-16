@@ -7,7 +7,7 @@ import { createQuickChat } from './quick-chat.mjs'
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}'
 const roomIdPattern = new RegExp(`^${uuid}$`, 'u')
 const quickRoute = new RegExp(`^/api/quick-rooms(?:/(${uuid}))?$`, 'u')
-const guestRoute = new RegExp(`^/api/guest/(${uuid})/(session|state|playback|chat(?:/join|/leave)?|media/(${uuid}))$`, 'u')
+const guestRoute = new RegExp(`^/api/guest/(${uuid})/(session|state|playback|viewers|chat(?:/join|/leave)?|media/(${uuid}))$`, 'u')
 const passwordPattern = /^[A-Za-z0-9_-]{43}$/u
 const ticketPattern = /^(\d{10})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/u
 const sources = new Set(['screen', 'youtube', 'local'])
@@ -254,6 +254,13 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
       const isActive = () => isGuestActive(mediaScope.guestKey, id)
       if (action.startsWith('chat')) {
         await chat.handle(request, response, mediaScope, action.split('/')[1] ?? 'chat', new URL(request.url, publicOrigin))
+      } else if (action === 'viewers') {
+        if (!['POST', 'DELETE'].includes(request.method)) throw methodInvalid()
+        if (mediaScope.source !== 'youtube') throw missing()
+        const input = await readJson(request, 512)
+        if (!isActive()) throw unauthorized()
+        watchParties.reportGuestViewer(mediaScope, input, request.method, isActive)
+        response.writeHead(204).end()
       } else if (partyId) {
         if (!['GET', 'HEAD'].includes(request.method)) throw methodInvalid()
         await watchParties.serveGuestMedia(request, response, mediaScope, partyId, isActive)

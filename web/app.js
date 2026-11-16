@@ -9,12 +9,13 @@ import { startHistorySharing } from "./history.js";
 import { mountNotifications } from "./notifications.js";
 import { startPresence } from "./presence.js";
 import { createLivePlayer } from "./live.js";
+import { createVideoDock } from "./video-dock.js";
 import { createScreenShareController } from "./screen-share.js";
 import { createNativeBroadcast } from "./native-broadcast.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
 import { createTutorials } from "./tutorial.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
-import { api, button, closeDialog, el, field, form, notify, paintPersonMark, paintPersonName, requireLoginOnExpiry, select, setExpectedAccount } from "./ui.js";
+import { api, button, closeDialog, el, field, form, notify, paintPersonMark, paintPersonName, requireLoginOnExpiry, select, setExpectedAccount, topicHref } from "./ui.js";
 
 const navigation = document.querySelector("#navigation");
 const profile = document.querySelector("#profile");
@@ -27,6 +28,7 @@ const auth = document.querySelector("#auth");
 const workspace = document.querySelector("#workspace");
 const logout = document.querySelector("#logout");
 const playerDock = document.querySelector("#player-dock");
+const videoDockNode = document.querySelector("#video-dock");
 const voiceDock = document.querySelector("#voice-dock");
 const broadcastDock = document.querySelector("#broadcast-dock");
 const nativeBroadcastDock = document.querySelector("#native-broadcast-dock");
@@ -42,6 +44,7 @@ let view;
 let activeTopic;
 let workspaceSession;
 let player;
+let videoDock;
 let voice;
 let screenShare;
 let nativeBroadcast;
@@ -156,6 +159,8 @@ async function showWorkspace(nextUser) {
   workspaceSession = new AbortController();
   const { signal } = workspaceSession;
   player = createLivePlayer({ signal, user }, playerDock);
+  videoDock = createVideoDock({ signal, onSelect() { if (player.activeId()) player.stop(); } }, videoDockNode);
+  player.whenChanged(() => { if (player.activeId()) videoDock.stop(); }, { signal });
   voice = createVoicePanel({ user, signal }, voiceDock);
   screenShare = createScreenShareController({ signal }, broadcastDock);
   nativeBroadcast = createNativeBroadcast(signal, nativeBroadcastDock);
@@ -184,6 +189,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
   workspaceSession?.abort();
   workspaceSession = null;
   player = null;
+  videoDock = null;
   voice = null;
   screenShare = null;
   nativeBroadcast = null;
@@ -292,15 +298,26 @@ async function render(force = false) {
   const { signal } = view;
   workspace.replaceChildren(el("p", { class: "panel status", role: "status" }, t("Loading …", "Wird geladen …")));
   workspace.scrollTop = 0;
-  const context = { user, signal, player, voice, screenShare, nativeBroadcast, quickRoomHeader, profileUpdates, refresh: () => render(true) };
+  const context = { user, signal, player, videoDock, voice, screenShare, nativeBroadcast, quickRoomHeader, profileUpdates, refresh: () => render(true) };
   try {
+    if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
+      const requestedHash = location.hash;
+      const { room } = await api("quick-rooms", { signal });
+      if (signal.aborted || location.hash !== requestedHash) return;
+      if (room?.publicId === route.topicId && room.topicId === route.topicId && roomIdPattern.test(room.channelId ?? "")) {
+        history.replaceState(history.state, "", topicHref(room.topicId, room.channelId));
+        route.page = "rooms";
+        route.channelId = room.channelId;
+        route.target = undefined;
+      }
+    }
     let page;
     if (route.page === "friends") page = await renderFriends(context);
     else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
     else if (route.page === "invites" && user.admin) page = await renderAdmin(context);
     else if (route.page === "help") page = renderHowItWorks();
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
-      page = renderGuestViewer({ publicId: route.topicId, signal, member: true });
+      page = renderGuestViewer({ publicId: route.topicId, signal, member: true, videoDock });
     }
     else if (route.page === "rooms" && route.topicId) {
       const topic = await renderTopic(context, route.topicId, route.channelId, route.target);
@@ -312,6 +329,7 @@ async function render(force = false) {
     if (!signal.aborted) {
       workspace.replaceChildren(page);
       player.refreshPlacement();
+      videoDock.refreshPlacement();
       showTutorial(route, page);
     }
   } catch (error) {

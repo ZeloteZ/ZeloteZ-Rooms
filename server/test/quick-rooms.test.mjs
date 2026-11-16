@@ -19,6 +19,7 @@ function fixture(t) {
   const community = createCommunity(db, { requireSession: auth.requireSession, appearance })
   db.exec('CREATE TABLE broadcasts(id TEXT, channel_id TEXT, ended_at INTEGER) STRICT')
   const current = new Map()
+  const viewerReports = []
   let time = Date.now()
   const media = { hasGuestSource: id => current.has(id), guestSnapshot: ({ channelId }) => ({
     serverTime: time, party: current.get(channelId),
@@ -27,6 +28,9 @@ function fixture(t) {
     if (party?.id !== partyId) throw new RequestError(404)
     if (party.revision !== revision) throw new RequestError(409)
     current.set(channelId, { ...party, revision: revision + 1, position: position ?? party.position, playing: action === 'play' })
+  }, reportGuestViewer(scope, { partyId, playerId }, method, isActive) {
+    if (current.get(scope.channelId)?.id !== partyId || !isActive()) throw new RequestError(404)
+    viewerReports.push({ roomId: scope.roomId, playerId, method, guest: Boolean(scope.guestKey.token) })
   } }
   const quick = createQuickRooms(db, { publicOrigin: origin, auth, community, streams: media, watchParties: media,
     now: () => time })
@@ -79,7 +83,7 @@ function fixture(t) {
 
   const guestPath = (room, action) => `/api/guest/${room.publicId}/${action}`
   const ownerPath = room => `/api/quick-rooms/${room.publicId}`
-  return { db, user, request, quick, start, guestPath, ownerPath,
+  return { db, user, request, quick, start, guestPath, ownerPath, viewerReports,
     stop: room => current.delete(room.channelId), tick: milliseconds => { time += milliseconds } }
 }
 
@@ -189,6 +193,33 @@ test('temporary playback controls require current guest or opted-in account acce
   assert.equal((await request('GET', guestPath(room, 'state'), { user: member })).body.party.playing, false)
   await request('PATCH', ownerPath(room), { user: host, body: { memberVisibility: false } })
   await assert.rejects(request('PATCH', path, { user: member, body }), { status: 401 })
+})
+
+test('temporary YouTube viewer leases inherit the current access ticket and recheck it after reading the body', async t => {
+  const { user, request, start, guestPath, ownerPath, viewerReports } = fixture(t)
+  const host = user('test-host')
+  const member = user('test-member')
+  const room = (await request('POST', '/api/quick-rooms', { user: host,
+    body: { source: 'youtube', guestAccess: true } })).body
+  start(room, host)
+  const exchange = await request('POST', guestPath(room, 'session'), { body: { password: room.secret } })
+  const cookie = exchange.headers['Set-Cookie'].split(';')[0]
+  const { party } = (await request('GET', guestPath(room, 'state'), { cookie })).body
+  const path = guestPath(room, 'viewers')
+  const body = { partyId: party.id, playerId: randomUUID(), revision: 1 }
+  await assert.rejects(request('POST', path, { body }), { status: 401 })
+  await assert.rejects(request('POST', path, { user: member, body }), { status: 401 })
+  await assert.rejects(request('GET', path, { cookie }), { status: 405 })
+  assert.equal((await request('POST', path, { cookie, body })).status, 204)
+  assert.equal((await request('DELETE', path, { cookie, body: { ...body, revision: 2 } })).status, 204)
+  await assert.rejects(request('POST', path, { cookie, body, beforeBody: () =>
+    request('PATCH', ownerPath(room), { user: host, body: { renewPassword: true, memberVisibility: true } }) }), { status: 401 })
+  assert.equal((await request('POST', path, { user: member, body })).status, 204)
+  assert.deepEqual(viewerReports, [
+    { roomId: room.publicId, playerId: body.playerId, method: 'POST', guest: true },
+    { roomId: room.publicId, playerId: body.playerId, method: 'DELETE', guest: true },
+    { roomId: room.publicId, playerId: body.playerId, method: 'POST', guest: false },
+  ])
 })
 
 test('temporary chat uses the same guest access as playback and identifies signed-in participants', async t => {

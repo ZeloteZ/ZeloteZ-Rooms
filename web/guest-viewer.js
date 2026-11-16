@@ -2,6 +2,7 @@ import { language, t } from "./i18n.js";
 import { guestPassword, guestRoomId, guestSource, openGuestMedia } from "./guest-media.js";
 import { renderQuickChat } from "./quick-chat.js";
 import { createWatchControls } from "./watch-controls.js";
+import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
 
 const messages = {
   opening: ["Opening the live room…", "Live-Raum wird geöffnet …"],
@@ -21,6 +22,7 @@ const messages = {
   conflict: ["Someone else changed playback. The player is catching up.",
     "Jemand hat die Wiedergabe geändert. Der Player gleicht sich ab."],
   commandError: ["The playback change couldn’t be sent. Try again.", "Die Steuerung konnte nicht übertragen werden. Versuche es erneut."],
+  visibleRequired: ["Open the video player to start playback.", "Öffne den Videoplayer, um die Wiedergabe zu starten."],
 };
 
 function copy(key) {
@@ -32,7 +34,16 @@ function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
-export function renderGuestViewer({ publicId, signal, member = false, password, host }) {
+export function renderGuestViewer(options) {
+  const { publicId, videoDock, signal, member, host } = options;
+  if (!member || !videoDock) return createGuestViewer(options).viewer;
+  const entry = videoDock.get("temporary:" + publicId, entry => createGuestViewer({ ...options, signal: entry.signal }, entry));
+  entry.instance.connectView(host);
+  entry.mount(entry.instance.slot, signal, entry.instance.disconnectView);
+  return entry.instance.viewer;
+}
+
+function createGuestViewer({ publicId, signal, member = false, password, host }, dockEntry) {
   const viewer = document.createElement("div");
   viewer.className = "guest-viewer";
   viewer.innerHTML = `
@@ -56,7 +67,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
         <span class="tag live" hidden></span>
       </header>
       <div class="quick-view-layout">
-        <section class="panel guest-player">
+        <div class="guest-player-slot"><section class="panel guest-player">
           <div class="guest-media" data-watch-media>
             <p class="status guest-waiting" role="status"></p>
           </div>
@@ -65,7 +76,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
             <p class="status guest-command-status" role="status" hidden></p>
             <button class="button primary guest-play" type="button" hidden></button>
           </div>
-        </section>
+        </section></div>
       </div>
     </section>`;
   const find = selector => viewer.querySelector(selector);
@@ -81,6 +92,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
   const videoTitle = find(".guest-video-title");
   const live = find(".guest-heading .tag");
   const layout = find(".quick-view-layout");
+  const slot = find(".guest-player-slot");
   const player = find(".guest-player");
   const stage = find(".guest-media");
   const waiting = find(".guest-waiting");
@@ -122,6 +134,8 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
   let writing = false;
   let nativeIntent;
   let generation = 0;
+  let mounted = !dockEntry;
+  let dismissedSource;
   const base = "/api/guest/" + publicId;
 
   function updateLabels() {
@@ -169,6 +183,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
   function discardMedia() {
     const old = playing;
     playing = undefined;
+    old?.audience?.stop();
     old?.surface.destroy();
     controls.setFullscreenSurface(null);
     clearInterval(clock);
@@ -254,6 +269,11 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     if (!watch) return;
     const { source } = watch;
     const current = { id: source.id, kind: source.kind, ready: false, started: false };
+    if (source.kind === "youtube") {
+      current.audience = createWatchViewerLease({ signal,
+        report: options => reportWatchViewer(base + "/viewers", options, { partyId: source.id }),
+      });
+    }
     const active = () => playing === current && !signal.aborted;
     current.surface = openGuestMedia(source, {
       onReady() {
@@ -279,6 +299,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
       onError() {
         if (!active()) return;
         current.ready = false;
+        current.audience?.setVisible(false);
         showPreview();
         setPlayback("playbackError");
         renderTransport();
@@ -287,6 +308,13 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
         if (!active() || !current.ready || source.kind === "screen") return;
         nativeIntent = { id: source.id, playing: resumed };
         sendNativeIntent();
+      },
+      onVisibility(visible) {
+        current.audience?.setVisible(visible);
+        if (visible && active()) {
+          current.revision = undefined;
+          schedule(0);
+        }
       },
       onTitle(value) {
         if (!active() || !host?.channelId || watch?.source.title) return;
@@ -313,10 +341,22 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     nativeIntent = undefined;
     hidePreview();
     discardMedia();
+    closeChat();
+    dockEntry?.deactivate();
+  }
+
+  function closeChat() {
     chatScope?.abort();
     chatScope = undefined;
     chat?.remove();
     chat = undefined;
+  }
+
+  function openChat() {
+    if (chat || !mounted || !authorized) return;
+    chatScope = new AbortController();
+    chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]) });
+    layout.append(chat);
   }
 
   function showRoom(snapshot, sent) {
@@ -326,15 +366,12 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     room.hidden = false;
     gate.hidden = true;
     passwordInput.value = "";
-    if (!chat) {
-      chatScope = new AbortController();
-      chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]) });
-      layout.append(chat);
-    }
+    openChat();
     const source = guestSource(snapshot, base);
     if (!source) {
       watch = undefined;
       if (playing) discardMedia();
+      dockEntry?.deactivate();
       showPreview();
       updateLabels();
       return;
@@ -342,6 +379,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     const received = performance.now();
     watch = { source, serverTime: snapshot.serverTime, received, roundTrip: received - sent };
     updateLabels();
+    if (source.id === dismissedSource) return;
     if (source.id !== playing?.id || source.kind !== playing?.kind) {
       showPreview();
       startPlayback();
@@ -350,6 +388,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     if (playbackState === "reconnecting") setPlayback(undefined);
     renderTransport();
     live.hidden = source.kind !== "screen" && !source.playing;
+    dockEntry?.activate(source.title || roomTitle || title.textContent, host?.href ?? dockEntry.href ?? "#/watch/" + publicId);
   }
 
   function request(path, method = "GET", body, absolute = false) {
@@ -419,6 +458,12 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     const sent = performance.now();
     try {
       const { id, revision } = source;
+      if (action === "play" && playing?.audience && !await playing.audience.ensure()) {
+        setCommand("visibleRequired");
+        applyState(true);
+        return;
+      }
+      if (signal.aborted || watch?.source.id !== id) return;
       const response = await request("/playback", "PATCH", { partyId: id, revision, action, position });
       if (signal.aborted || accessLost(response)) return;
       if (response.status === 409) {
@@ -487,5 +532,32 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
   if (!guestRoomId.test(publicId)) showGate("unavailable");
   else if (!member && typeof password === "string") void unlock(password);
   else void refresh();
-  return viewer;
+  return {
+    viewer, player, slot,
+    connectView(nextHost) {
+      mounted = true;
+      host?.actions?.remove();
+      host = nextHost;
+      if (host?.actions) find(".guest-heading").append(host.actions);
+      dismissedSource = undefined;
+      openChat();
+      schedule(0);
+    },
+    disconnectView() {
+      mounted = false;
+      host?.actions?.remove();
+      host = undefined;
+      hidePreview();
+      closeChat();
+    },
+    stopPlayback() {
+      dismissedSource = watch?.source.id;
+      discardMedia();
+      dockEntry?.deactivate();
+    },
+    reconnectAfterMove() {
+      if (playing?.kind === "youtube") startPlayback();
+      else if (playing?.kind === "screen" || watch?.source.playing) playing?.surface.play();
+    },
+  };
 }

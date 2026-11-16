@@ -102,7 +102,8 @@ async function fixture(t) {
   }
 
   return { request, guestRequest, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot,
-    controlGuestPlayback: watch.controlGuestPlayback, homeActivity: watch.homeActivity,
+    controlGuestPlayback: watch.controlGuestPlayback, reportGuestViewer: watch.reportGuestViewer,
+    homeActivity: watch.homeActivity,
     waitForCleanup, tick: milliseconds => { now += milliseconds } }
 }
 
@@ -142,11 +143,12 @@ test('guest media is limited to read-only byte ranges for the authorized tempora
 })
 
 test('guest and member playback use one canonical revision for the authorized temporary party', async t => {
-  const { request, session, users, room, channel, temporary, guestSnapshot, controlGuestPlayback, tick } = await fixture(t)
+  const { request, session, users, room, channel, temporary, guestSnapshot, controlGuestPlayback, reportGuestViewer, tick } = await fixture(t)
   const host = session(users.host)
   const viewer = session(users.viewer)
   const { party } = (await request(host, 'POST', '', { source: 'youtube', videoId: 'K5ABskPJN1Q' })).data
-  const scope = { roomId: room, channelId: channel, ownerId: users.host, source: 'youtube' }
+  const scope = { roomId: room, channelId: channel, ownerId: users.host, source: 'youtube',
+    guestKey: { token: 'verified-test-token' } }
   const command = { partyId: party.id, action: 'play', revision: party.revision }
   assert.throws(() => controlGuestPlayback(scope, command), { status: 404 })
   temporary.add(channel)
@@ -155,6 +157,12 @@ test('guest and member playback use one canonical revision for the authorized te
   }
   assert.throws(() => controlGuestPlayback(scope, { ...command, partyId: randomUUID() }), { status: 404 })
   assert.throws(() => controlGuestPlayback(scope, { ...command, action: 'seek', position: -1 }), { status: 400 })
+  assert.throws(() => controlGuestPlayback(scope, command), { status: 409 })
+  const report = { partyId: party.id, playerId: randomUUID(), revision: 1 }
+  let active = true
+  assert.throws(() => reportGuestViewer(scope, report, 'POST', () => false), { status: 404 })
+  assert.throws(() => reportGuestViewer(scope, { ...report, partyId: randomUUID() }, 'POST', () => active), { status: 404 })
+  reportGuestViewer(scope, report, 'POST', () => active)
   controlGuestPlayback(scope, { ...command, position: 30 })
   tick(3500)
   await assert.rejects(request(viewer, 'PATCH', `/${party.id}`, { action: 'pause', revision: 1 }), { status: 409 })
@@ -168,6 +176,13 @@ test('guest and member playback use one canonical revision for the authorized te
   assert.equal(guest.revision, 4)
   assert.equal(Object.hasOwn(guest, 'hostId'), false)
   assert.equal((await request(host)).data.party.revision, guest.revision)
+  controlGuestPlayback(scope, { ...command, revision: 4 })
+  tick(1000)
+  active = false
+  const revoked = guestSnapshot(scope).party
+  assert.equal(revoked.playing, false)
+  assert.equal(revoked.revision, 6)
+  assert.equal(revoked.position, 13.5)
 })
 
 test('Live Now shows visible ready watch parties and the original host can supply YouTube title metadata once', async t => {
@@ -223,6 +238,8 @@ test('a watch party follows Live channel permissions and synchronizes play, seek
   await assert.rejects(request(stranger, 'PATCH', path, { action: 'play', revision: 1 }), { status: 404 })
   await assert.rejects(request(viewer, 'DELETE', path), { status: 404 })
 
+  const viewerReport = { playerId: randomUUID(), revision: 1 }
+  assert.equal((await request(viewer, 'POST', path + '/viewers', viewerReport)).status, 204)
   const play = (await request(viewer, 'PATCH', path, { action: 'play', revision: 1 })).data
   assert.equal(play.party.playing, true)
   tick(3000)
@@ -241,6 +258,54 @@ test('a watch party follows Live channel permissions and synchronizes play, seek
   assert.equal(replay.playing, true)
   assert.equal((await request(moderator, 'DELETE', path)).data.party, null)
   assert.equal((await request(viewer)).data.party, null)
+})
+
+test('YouTube pauses at the final viewer release or expiry and waits for a new explicit play', async t => {
+  const { request, session, users, tick } = await fixture(t)
+  const host = session(users.host)
+  const viewer = session(users.viewer)
+  const other = session(users.moderator)
+  const stranger = session(users.stranger)
+  const { party } = (await request(host, 'POST', '', { source: 'youtube', videoId: 'K5ABskPJN1Q' })).data
+  const path = `/${party.id}`
+  const body = { playerId: randomUUID(), revision: 1 }
+  const report = (actor, method = 'POST', revision = 1) => request(actor, method, path + '/viewers', { ...body, revision })
+  const play = revision => request(host, 'PATCH', path, { action: 'play', revision })
+
+  await assert.rejects(report(stranger), { status: 404 })
+  await assert.rejects(request(viewer, 'POST', path + '/viewers', { ...body, revision: 0 }), { status: 400 })
+  await assert.rejects(play(1), { status: 409 })
+  await report(viewer)
+  await report(other)
+  await play(1)
+  tick(2000)
+  await report(viewer, 'DELETE', 2)
+  await report(viewer) // A delayed request from the previous revision cannot reopen the lease.
+  assert.equal((await request(host)).data.party.playing, true)
+  await report(other, 'DELETE', 2)
+  const paused = (await request(host)).data.party
+  assert.equal(paused.playing, false)
+  assert.equal(paused.position, 2)
+  assert.equal(paused.revision, 3)
+  await assert.rejects(play(3), { status: 409 })
+
+  await report(viewer, 'POST', 3)
+  assert.equal((await request(host)).data.party.playing, false)
+  await play(3)
+  tick(14500)
+  await report(viewer, 'POST', 4)
+  const missedHeartbeat = (await request(host)).data.party
+  assert.equal(missedHeartbeat.playing, false)
+  assert.equal(missedHeartbeat.position, 14)
+  assert.equal(missedHeartbeat.revision, 5)
+
+  await play(5)
+  tick(500)
+  viewer.leave()
+  const lostMembership = (await request(host)).data.party
+  assert.equal(lostMembership.playing, false)
+  assert.equal(lostMembership.position, 14.5)
+  assert.equal(lostMembership.revision, 7)
 })
 
 test('the server stores original video chunks and serves authenticated byte ranges until the watch party ends', async t => {
@@ -277,6 +342,8 @@ test('the server stores original video chunks and serves authenticated byte rang
   assert.deepEqual(homeActivity(stranger.userId), [])
   const posted = (await request(viewer)).data.party
   assert.equal(posted.mediaUrl, ready.party.mediaUrl)
+  await assert.rejects(request(viewer, 'POST', path + '/viewers', { playerId: randomUUID(), revision: 1 }), { status: 404 })
+  assert.equal((await request(viewer, 'PATCH', path, { action: 'play', revision: posted.revision })).data.party.playing, true)
   const headers = (await request(viewer, 'HEAD', `${path}/media`)).headers
   assert.equal(headers['Content-Length'], first.length + tail.length)
   assert.equal(headers['Content-Type'], source.mime)

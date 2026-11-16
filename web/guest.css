@@ -70,6 +70,7 @@
   gap: clamp(8px, 1.4vw, 16px);
   min-block-size: 0;
 }
+.guest-player-slot { display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); min-block-size: 0; min-inline-size: 0; }
 .guest-player {
   display: grid;
   grid-template-rows: minmax(204px, 1fr) auto;

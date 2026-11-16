@@ -492,7 +492,9 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const chatButton = button(t("Chat", "Chat"), () => setPanel("chat"), {
     "aria-controls": "live-channel-chat", "aria-pressed": "false",
   });
+  const watchSlot = el("div", { class: "watch-party-slot" });
   const watchParty = createWatchParty(context, channel, {
+    mount: watchSlot,
     onSelect() {
       autoSelectPending = false;
       if (player.activeId()) player.stop();
@@ -797,7 +799,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish, edit), feedback),
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
-      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchParty.player, watchHint),
+      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint),
     el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
     people,
     el("aside", {

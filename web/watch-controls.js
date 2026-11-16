@@ -63,7 +63,11 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
   expand.setAttribute("aria-hidden", "true");
   fullscreen.append(expand);
   const transport = item("div", "watch-party-transport", [toggle, audio, fullscreen]);
-  const element = item("div", "watch-party-controls", [timeline, transport]);
+  const reveal = button("watch-fullscreen-reveal", event => {
+    wake();
+    if (event.detail === 0) (toggle.disabled || toggle.hidden ? fullscreen : toggle).focus({ preventScroll: true });
+  }, signal);
+  const element = item("div", "watch-party-controls", [timeline, transport, reveal]);
 
   function refreshLabels() {
     const action = playing ? t("Pause together", "Gemeinsam pausieren") : t("Play together", "Gemeinsam abspielen");
@@ -75,6 +79,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
     fullscreen.title = inFullscreen ? t("Exit full screen", "Vollbild verlassen") : t("Full screen", "Vollbild");
     fullscreen.setAttribute("aria-label", fullscreen.title);
+    reveal.setAttribute("aria-label", t("Show playback controls", "Wiedergabesteuerung einblenden"));
   }
 
   function clearIdle() {
@@ -86,7 +91,10 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     if (!inFullscreen || !media) return;
     clearIdle();
     idleTimer = setTimeout(() => {
-      if (!dragging.size && !element.querySelector(":focus-visible")) shell.setAttribute("data-watch-idle", "");
+      if (dragging.size || element.querySelector(":focus-visible")) return;
+      const keepFocus = media.localName === "iframe" && element.contains(document.activeElement);
+      shell.setAttribute("data-watch-idle", "");
+      if (keepFocus) reveal.focus({ preventScroll: true });
     }, fullscreenIdleDelay);
   }
 
@@ -116,14 +124,22 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
       shell = fullscreenTarget?.();
       if (shell) {
         const passive = { signal, passive: true };
-        shell.addEventListener("pointermove", wake, passive);
+        shell.addEventListener("pointermove", event => {
+          if (event.target !== reveal || event.pointerType === "mouse") wake();
+        }, passive);
         shell.addEventListener("pointerdown", event => {
+          if (event.target === reveal) return;
           if (inFullscreen && element.contains(event.target)) dragging.add(event.pointerId);
           wake();
         }, passive);
-        shell.addEventListener("keydown", wake, { signal });
-        shell.addEventListener("focusin", wake, { signal });
-        shell.addEventListener("focusout", wake, { signal });
+        const wakeFromControl = event => {
+          if (event.target !== reveal) wake();
+        };
+        shell.addEventListener("keydown", wakeFromControl, { signal });
+        shell.addEventListener("focusin", wakeFromControl, { signal });
+        shell.addEventListener("focusout", () => {
+          if (!shell.hasAttribute("data-watch-idle")) wake();
+        }, { signal });
         const stopDragging = event => {
           if (dragging.delete(event.pointerId)) wake();
         };
