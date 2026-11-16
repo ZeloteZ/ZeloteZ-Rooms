@@ -5,6 +5,7 @@ import { editProfile } from "./appearance.js";
 import { renderHowItWorks } from "./how-it-works.js";
 import { startHistorySharing } from "./history.js";
 import { mountNotifications } from "./notifications.js";
+import { startPresence } from "./presence.js";
 import { createLivePlayer } from "./live.js";
 import { createScreenShareController } from "./screen-share.js";
 import { createNativeBroadcast } from "./native-broadcast.js";
@@ -157,6 +158,7 @@ async function showWorkspace(nextUser) {
   paintOwnProfile();
   workspace.hidden = false;
   await render();
+  if (!signal.aborted) startPresence(nextUser.id, signal);
 }
 
 function showAuth(note = "", preset = "", showInvite = false) {

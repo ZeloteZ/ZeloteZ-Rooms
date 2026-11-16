@@ -10,6 +10,7 @@ import { createHistory } from './history.mjs'
 import { assertOrigin, json, readJson, RequestError } from './http.mjs'
 import { setResponseLocale } from './locale.mjs'
 import { createNotifications } from './notifications.mjs'
+import { createPresence } from './presence.mjs'
 import { createReactions } from './reactions.mjs'
 import { createStreams } from './streams.mjs'
 import { createStreamChat } from './stream-chat.mjs'
@@ -43,6 +44,7 @@ const community = createCommunity(db, { requireSession, appearance, recordMentio
   requeueMovedHistory: input => history.requeueMovedHistory(input),
 })
 const channelManagement = createChannelManagement(db, { requireSession })
+const presence = createPresence(db, auth)
 const history = createHistory(db, { requireSession })
 const streams = createStreams(db, {
   publicOrigin: origin.origin, ingestBase: process.env.STREAM_INGEST_BASE, mediaApiUrl: process.env.MEDIAMTX_API_URL,
@@ -104,6 +106,7 @@ const publicApi = service(async (request, response) => {
     }
     if (await appearance.handle(request, response, path, requireSession)) return
     if (await tutorials.handle(request, response, path)) return
+    if (await presence.handle(request, response, path)) return
     if (await notifications.handle(request, response, url)) return
     if (await reactions.handle(request, response, url)) return
     if (await voice.handle(request, response, path)) return
@@ -135,6 +138,7 @@ function shutdown() {
   stopping = true
   streams.close()
   community.close()
+  presence.close()
   voice.close()
   let servers = 2
   const closed = () => {

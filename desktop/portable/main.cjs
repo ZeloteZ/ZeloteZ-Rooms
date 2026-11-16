@@ -70,7 +70,30 @@ async function loadSettings() {
     }
     desktopSettings.suppressCloseHint = saved?.suppressCloseHint === true;
     desktopSettings.origin = serverOrigin(saved?.origin) ?? "";
-  } catch { /* First launch or unreadable settings. */ }
+  } catch (error) {
+    if (process.platform === "linux" && error.code === "ENOENT") return readLegacyLinuxSettings();
+  }
+  return null;
+}
+
+async function readLegacyLinuxSettings() {
+  const folder = path.join(app.getPath("appData"), "zelotez-rooms");
+  const read = name => readFile(path.join(folder, name), "utf8").then(value => value.trim(), () => "");
+  const [address, language, appearance, notifications, keepRunning, suppressCloseHint] = await Promise.all([
+    read("server"), read("desktop-language"), read("appearance"), read("desktop-notifications"),
+    read("minimize-on-close"), read("skip-minimize-confirmation"),
+  ]);
+  if (preferenceOptions.language.includes(language)) desktopSettings.language = language;
+  if (preferenceOptions.appearance.includes(appearance)) desktopSettings.appearance = appearance;
+  if (notifications === "false") desktopSettings.notifications = false;
+  if (keepRunning === "false") desktopSettings.keepRunning = false;
+  desktopSettings.suppressCloseHint = suppressCloseHint === "true";
+  try {
+    const saved = JSON.parse(address);
+    return saved?.protocol === 1 ? serverOrigin(saved.origin) : null;
+  } catch {
+    return serverOrigin(address);
+  }
 }
 
 function saveSettings(changes) {
@@ -550,7 +573,7 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === "win32") app.setAppUserModelId("de.zelotez.rooms");
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-    await loadSettings();
+    const legacyLinuxAddress = await loadSettings();
     applyPreferences();
     captureProgram = await nativeHelper();
     const supplied = process.env.ZELOTEZ_ROOMS_ORIGIN;
@@ -562,6 +585,6 @@ if (!app.requestSingleInstanceLock()) {
     }
     let legacy;
     try { legacy = serverOrigin(await readFile(path.join(app.getPath("userData"), "server-origin"), "utf8")); } catch { /* First launch. */ }
-    showSettings(supplied === undefined ? false : "invalid", legacy ?? "");
+    showSettings(supplied === undefined ? false : "invalid", legacy ?? legacyLinuxAddress ?? "");
   });
 }

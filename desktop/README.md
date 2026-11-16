@@ -20,6 +20,19 @@ Viewers get direct, low-latency playback when the WebRTC connection is available
 
 Use Alt to show the application menu on Windows or Linux.
 
+## Native screen capture on Linux
+
+The Linux app uses the system ScreenCast portal for native monitor, region, or app window capture. App window capture requires support from the portal. Install these packages on CachyOS or Arch Linux with GNOME to use the native capture helper.
+
+```bash
+sudo pacman -S --needed python-gobject python-cairo gtk4 libadwaita libportal libportal-gtk4 \
+  pipewire gst-plugin-pipewire xdg-desktop-portal xdg-desktop-portal-gnome \
+  gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly \
+  gst-plugin-gtk4 gst-libav glib-networking ca-certificates
+```
+
+On KDE Plasma Wayland, use `xdg-desktop-portal-kde` instead of `xdg-desktop-portal-gnome` in that command. Keep the portal backend that matches your active desktop session.
+
 ## Share your screen
 
 1. Sign in, open a live channel where you can broadcast, and click **Share screen**.

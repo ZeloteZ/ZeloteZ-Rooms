@@ -48,4 +48,4 @@ Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 
 ## Desktop-App
 
-Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer, Linux-AppImage und die native GTK-App.
+Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer und Linux-AppImage.

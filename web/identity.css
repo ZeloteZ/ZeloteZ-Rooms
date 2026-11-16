@@ -9,6 +9,24 @@
   object-fit: cover;
 }
 
+.avatar[data-online] {
+  position: relative;
+}
+
+.avatar[data-online]::after {
+  position: absolute;
+  inset-inline-end: 1px;
+  inset-block-end: 1px;
+  inline-size: clamp(5px, 29%, 9px);
+  block-size: auto;
+  aspect-ratio: 1;
+  border: 1px solid #18372b;
+  border-radius: 50%;
+  background: #65e69a;
+  content: "";
+  pointer-events: none;
+}
+
 .person-name {
   color: var(--profile-name-color, inherit);
 }

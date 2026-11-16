@@ -101,6 +101,7 @@ const catalogs = {
       'Talk-Raum nicht gefunden.': 'Voice chat not found.',
       'Thema oder Channel nicht gefunden.': 'Room or channel not found.',
       'Ungültige Anhänge.': 'Invalid attachments.',
+      'Ungültige Anwesenheitsabfrage.': 'Invalid presence query.',
       'Ungültige Auswahl.': 'Invalid selection.',
       'Ungültige Channel-Reihenfolge.': 'Invalid channel order.',
       'Ungültige Designeinstellung.': 'Invalid design setting.',
