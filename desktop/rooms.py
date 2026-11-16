@@ -17,28 +17,10 @@ except (ImportError, ValueError) as error:
 
 import i18n
 from i18n import t
-from model import parse_destination, validate_key
+from model import STREAM_ID, capture_reservation, reservation_id, server_origin
 
 
 CHANNEL_ID = re.compile(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
-STREAM_ID = re.compile(r"[a-f0-9]{32}")
-
-
-def server_origin(text):
-    value = text.strip().rstrip("/")
-    if any(char.isspace() or char in "\\%" for char in value):
-        raise ValueError
-    url = urlsplit(value)
-    port = url.port
-    if (not url.hostname or port == 0 or url.username is not None or url.path or url.query or url.fragment
-            or (url.scheme != "https" and
-                (url.scheme != "http" or url.hostname not in ("localhost", "127.0.0.1", "::1")))):
-        raise ValueError
-    host = url.hostname.encode("idna").decode("ascii")
-    host = f"[{host}]" if ":" in host else host
-    if port and port != (443 if url.scheme == "https" else 80):
-        host += f":{port}"
-    return f"{url.scheme}://{host}"
 
 
 class CaptureSession:
@@ -63,21 +45,13 @@ class CaptureSession:
             if error or not isinstance(data, dict) or reason:
                 callback(None, error or reason or t("The live channel couldn’t prepare the stream."))
                 return
-            stream = data.get("stream")
-            stream_id = stream.get("id") if isinstance(stream, dict) else None
             try:
-                if not isinstance(stream_id, str) or not STREAM_ID.fullmatch(stream_id):
-                    raise ValueError
-                target = parse_destination(data["address"])
-                validate_key(data["key"])
-                if (target.host != self._origin.hostname or target.stream != stream_id
-                        or (self._origin.scheme == "https" and not target.secure)):
-                    raise ValueError
-            except (AttributeError, KeyError, TypeError, ValueError):
-                self.finish(stream_id)
+                destination = capture_reservation(data, self._origin)
+            except ValueError:
+                self.finish(reservation_id(data))
                 callback(None, t("The live channel returned an invalid stream destination."))
                 return
-            callback({"id": stream_id, "address": data["address"], "key": data["key"]}, None)
+            callback(destination, None)
 
         self._request("/api/channels/" + self._channel + "/streams", "POST", reserved)
 

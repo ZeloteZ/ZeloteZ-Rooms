@@ -4,6 +4,14 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktop", true);
 
+if (process.isMainFrame && process.argv.includes("--rooms-native-capture")) {
+  contextBridge.exposeInMainWorld("roomsNativeCapture", {
+    open: (channel, language) => navigator.userActivation.isActive
+      ? ipcRenderer.invoke("rooms:native-capture-open", channel, language) : Promise.resolve("unavailable"),
+    close: () => ipcRenderer.invoke("rooms:native-capture-close"),
+  });
+}
+
 if (process.isMainFrame && process.platform === "linux") {
   const callbacks = new Map();
   ipcRenderer.on("rooms:audio-data", (_event, id, pcm) => callbacks.get(id)?.data(pcm));

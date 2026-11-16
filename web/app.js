@@ -147,6 +147,7 @@ async function showWorkspace(nextUser) {
 
 function showAuth(note = "", preset = "", showInvite = false) {
   if (user) window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
+  if (user) window.roomsNativeCapture?.close().catch(() => {});
   if (view) view.abort();
   workspaceSession?.abort();
   workspaceSession = null;
@@ -274,6 +275,7 @@ logout.addEventListener("click", async () => {
   try {
     screenShare?.stop();
     window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
+    await window.roomsNativeCapture?.close().catch(() => {});
     await releaseVoiceForLogout();
     await api("auth/logout", { method: "POST", body: {} });
     showAuth();

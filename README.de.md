@@ -26,7 +26,7 @@ Das Passwort entsperrt auch den privaten Schlüssel. Bei einem Passwortverlust g
 
 Für persönliche Erwähnungen erhält der Server die IDs der erwähnten Konten sowie der Nachricht und ihres Chats. Der Nachrichtentext und die darin enthaltenen Links bleiben verschlüsselt.
 
-Sprache und Bildschirmfreigaben aus dem Browser und der plattformübergreifenden Desktop-Version verwenden WebRTC mit Transportverschlüsselung. Die native Linux-Version streamt per RTMPS. Die Wiedergabe erfolgt per HTTPS. MediaMTX verteilt Audio und verarbeitet Video für die HLS-Wiedergabe. Der VPS zeichnet die Live-Übertragungen nicht auf. Die VPS-Uploadrate muss für alle gleichzeitigen Zuschauer und Streams ausreichen.
+Sprache und Bildschirmfreigaben aus dem Browser verwenden WebRTC mit Transportverschlüsselung. Die native Linux-Aufnahme der Desktop-App streamt per RTMPS. Die Wiedergabe erfolgt per HTTPS. MediaMTX verteilt die Streams. FFmpeg wandelt optionalen WebRTC-Streamton für die HLS-Wiedergabe auf Apple-Geräten in AAC um. Der VPS zeichnet die Live-Übertragungen nicht auf. Die VPS-Uploadrate muss für alle gleichzeitigen Zuschauer und Streams ausreichen.
 
 ## Auf dem VPS betreiben
 

@@ -7,7 +7,7 @@ const channelStreamsPath = /^\/api\/channels\/([0-9a-f-]{36})\/streams$/
 const streamPath = /^\/api\/streams\/([0-9a-f]{32})$/
 const streamWhipPath = /^\/api\/streams\/([0-9a-f]{32})\/whip$/
 const streamViewersPath = /^\/api\/streams\/([0-9a-f]{32})\/viewers$/
-const mediaPath = /^live\/([0-9a-f]{32})$/
+const mediaPath = /^(live|browser)\/([0-9a-f]{32})$/
 const connectLifetime = 10 * 60_000
 const publishLifetime = 12 * 60 * 60_000
 const startGrace = 15_000
@@ -159,7 +159,8 @@ export function createStreams(db, config, {
   }
 
   async function fetchOnline() {
-    const live = new Map()
+    const sources = new Set()
+    const playback = new Map()
     for (let page = 0, total = 1; page < total; page++) {
       const response = await control(`/v3/paths/list?page=${page}&itemsPerPage=100`)
       if (!response.ok) {
@@ -169,13 +170,18 @@ export function createStreams(db, config, {
       const result = await response.json()
       total = result.pageCount
       for (const path of result.items) {
-        if ((path.online ?? path.ready) === true && path.name.startsWith('live/')) {
+        const match = mediaPath.exec(path.name)
+        if (!match || (path.online ?? path.ready) !== true) continue
+        const [, kind, id] = match
+        if (kind === 'browser') {
+          sources.add(id)
+        } else {
           const hasAudio = path.tracks2?.some(track => ['MPEG-4 Audio', 'Opus'].includes(track.codec)) ?? false
-          live.set(path.name.slice(5), hasAudio)
+          playback.set(id, hasAudio)
         }
       }
     }
-    return live
+    return { sources, playback }
   }
 
   function onlineStreams() {
@@ -261,10 +267,11 @@ export function createStreams(db, config, {
     return true
   }
 
-  function closeInvalid(rows, now, live) {
+  function closeInvalid(rows, now, online) {
     for (const row of rows) {
       const grace = row.mode === 'browser' ? browserStartGrace : startGrace
-      if (!validBroadcast(row, now) || (row.publisher_id && row.claimed_at + grace <= now && live && !live.has(row.id))) {
+      const input = row.mode === 'browser' ? online?.sources : online?.playback
+      if (!validBroadcast(row, now) || (row.publisher_id && row.claimed_at + grace <= now && input && !input.has(row.id))) {
         browserPublishers.delete(row.id)
         end.run(now, row.id)
       }
@@ -299,11 +306,11 @@ export function createStreams(db, config, {
     sweeping = true
     try {
       const open = getOpen.all()
-      const live = open.some(row => row.publisher_id) ? await onlineStreams().catch(() => undefined) : undefined
+      const online = open.some(row => row.publisher_id) ? await onlineStreams().catch(() => undefined) : undefined
       // Re-read after the control request so an incoming publish can claim a pending broadcast safely.
       const now = Date.now()
       pruneViewerLeases(now)
-      closeInvalid(getOpen.all(), now, live)
+      closeInvalid(getOpen.all(), now, online)
       for (const [id, publisher] of browserPublishers) {
         if (publisher.until <= now || getBroadcast.get(id)?.ended_at !== null) browserPublishers.delete(id)
       }
@@ -344,23 +351,23 @@ export function createStreams(db, config, {
 
   async function homeActivity(userId) {
     if (!getVisible.all(userId, Date.now()).length) return { streams: [], streamsAvailable: true }
-    let live
-    try { live = await onlineStreams() } catch { return { streams: [], streamsAvailable: false } }
+    let playback
+    try { ({ playback } = await onlineStreams()) } catch { return { streams: [], streamsAvailable: false } }
     const now = Date.now()
-    const streams = getVisible.all(userId, now).filter(row => live.has(row.id) && validBroadcast(row, now)).slice(0, 16)
-      .map(row => ({ ...publicStream(row, true, live.get(row.id)), topicId: row.topic_id, topicTitle: row.topic_title,
+    const streams = getVisible.all(userId, now).filter(row => playback.has(row.id) && validBroadcast(row, now)).slice(0, 16)
+      .map(row => ({ ...publicStream(row, true, playback.get(row.id)), topicId: row.topic_id, topicTitle: row.topic_title,
         channelId: row.channel_id, channelTitle: row.channel_title }))
     return { streams, streamsAvailable: true }
   }
 
   async function channelStatus(channelId) {
     let rows = getChannel.all(channelId)
-    const live = rows.some(row => row.publisher_id) ? await onlineStreams().catch(() => {
+    const online = rows.some(row => row.publisher_id) ? await onlineStreams().catch(() => {
       throw new RequestError(503, 'Der Streamingserver ist gerade nicht erreichbar.')
-    }) : new Map()
+    }) : { sources: new Set(), playback: new Map() }
     rows = getChannel.all(channelId)
-    closeInvalid(rows, Date.now(), live)
-    return { rows: getChannel.all(channelId), live }
+    closeInvalid(rows, Date.now(), online)
+    return { rows: getChannel.all(channelId), playback: online.playback }
   }
 
   async function stopBroadcast(row) {
@@ -407,7 +414,7 @@ export function createStreams(db, config, {
       }
       let result
       try {
-        result = await fetch(new URL(`/live/${id}/whip`, mediaWebrtc), {
+        result = await fetch(new URL(`/browser/${id}/whip`, mediaWebrtc), {
           method: 'POST', body: offer, redirect: 'error', signal: AbortSignal.timeout(9000),
           headers: {
             'Content-Type': 'application/sdp',
@@ -453,10 +460,10 @@ export function createStreams(db, config, {
     if (channel && request.method === 'GET') {
       const channelId = channel[1]
       canSee(user, channelId)
-      const { rows, live } = await channelStatus(channelId)
+      const { rows, playback } = await channelStatus(channelId)
       const access = canSee(requireSession(request), channelId)
-      const streams = rows.filter(row => live.has(row.id) || row.user_id === user.id)
-        .map(row => publicStream(row, live.has(row.id), live.get(row.id)))
+      const streams = rows.filter(row => playback.has(row.id) || row.user_id === user.id)
+        .map(row => publicStream(row, playback.has(row.id), playback.get(row.id)))
       json(response, 200, { streams, canStream: Boolean(access.canStream) })
       return true
     }
@@ -511,15 +518,18 @@ export function createStreams(db, config, {
       return true
     }
     const match = typeof auth?.path === 'string' && mediaPath.exec(auth.path)
-    const row = match && getBroadcast.get(match[1])
+    const row = match && getBroadcast.get(match[2])
     const now = Date.now()
     if (validBroadcast(row, now)) {
-      if (auth.action === 'read' && auth.protocol === 'hls' && row.publisher_id) {
+      const isPlayback = match[1] === 'live'
+      const relay = row.mode === 'browser' && row.publisher_id && auth.protocol === 'rtsp' && auth.ip === '127.0.0.1'
+      if ((isPlayback && auth.action === 'read' && auth.protocol === 'hls' && row.publisher_id) ||
+          (relay && auth.action === (isPlayback ? 'publish' : 'read'))) {
         response.writeHead(200).end()
         return true
       }
-      const nativePublisher = row.mode === 'rtmp' && auth.protocol === 'rtmp' && auth.user === 'streamer'
-      const browserPublisher = row.mode === 'browser' && auth.protocol === 'webrtc' && auth.user === 'browser' &&
+      const nativePublisher = isPlayback && row.mode === 'rtmp' && auth.protocol === 'rtmp' && auth.user === 'streamer'
+      const browserPublisher = !isPlayback && row.mode === 'browser' && auth.protocol === 'webrtc' && auth.user === 'browser' &&
         browserPublishers.get(row.id)?.negotiating
       if (auth.action === 'publish' && (nativePublisher || browserPublisher) &&
           typeof auth.id === 'string' && connectionIdPattern.test(auth.id) && matchDigest(auth.password, row.key_hash) &&

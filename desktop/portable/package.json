@@ -1,6 +1,6 @@
 {
   "name": "zelotez-rooms-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ZeloteZ Rooms desktop client",
   "author": "ZeloteZ",
   "desktopName": "de.zelotez.rooms.desktop",
@@ -35,7 +35,12 @@
       "target": "AppImage",
       "icon": "ui/icon.png",
       "syncDesktopName": true,
-      "category": "Network"
+      "category": "Network",
+      "extraResources": [{
+        "from": "..",
+        "to": "native-capture",
+        "filter": ["capture_helper.py", "streamer.py", "media.py", "model.py", "app_audio.py", "i18n.py", "capture.css"]
+      }]
     },
     "electronFuses": {
       "runAsNode": false,

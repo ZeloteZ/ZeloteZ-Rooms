@@ -7,6 +7,26 @@ from urllib.parse import urlsplit
 from i18n import t
 
 
+STREAM_ID = re.compile(r"[a-f0-9]{32}")
+
+
+def server_origin(text):
+    value = text.strip().rstrip("/")
+    if any(char.isspace() or char in "\\%" for char in value):
+        raise ValueError
+    url = urlsplit(value)
+    port = url.port
+    if (not url.hostname or port == 0 or url.username is not None or url.path or url.query or url.fragment
+            or (url.scheme != "https" and
+                (url.scheme != "http" or url.hostname not in ("localhost", "127.0.0.1", "::1")))):
+        raise ValueError
+    host = url.hostname.encode("idna").decode("ascii")
+    host = f"[{host}]" if ":" in host else host
+    if port and port != (443 if url.scheme == "https" else 80):
+        host += f":{port}"
+    return f"{url.scheme}://{host}"
+
+
 @dataclass(frozen=True)
 class Destination:
     host: str
@@ -66,6 +86,23 @@ def validate_key(key):
     if not re.fullmatch(r"[a-fA-F0-9]{64}", key):
         raise ValueError(t("The stream key must contain 64 hexadecimal characters."))
     return key
+
+
+def reservation_id(data):
+    stream = data.get("stream") if isinstance(data, dict) else None
+    stream_id = stream.get("id") if isinstance(stream, dict) else None
+    return stream_id if isinstance(stream_id, str) and STREAM_ID.fullmatch(stream_id) else None
+
+
+def capture_reservation(data, origin):
+    stream_id = reservation_id(data)
+    if stream_id is None or not isinstance(data.get("address"), str) or not isinstance(data.get("key"), str):
+        raise ValueError
+    target = parse_destination(data["address"])
+    key = validate_key(data["key"])
+    if (target.host != origin.hostname or target.stream != stream_id or (origin.scheme == "https" and not target.secure)):
+        raise ValueError
+    return {"id": stream_id, "address": data["address"], "key": key}
 
 
 @dataclass(frozen=True)

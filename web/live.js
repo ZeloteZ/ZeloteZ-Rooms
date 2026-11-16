@@ -415,7 +415,8 @@ export function renderLive(context, channel, edit, player, voiceMount) {
   const reconnectNote = t("Reconnecting the stream list.", "Die Stream-Liste wird neu verbunden.");
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
   const desktop = window.webkit?.messageHandlers?.roomsCapture;
-  const portableShare = window.roomsDesktop === true && !desktop ? desktopShareControls() : null;
+  const nativeCapture = window.roomsNativeCapture;
+  const portableShare = window.roomsDesktop === true && !desktop && !nativeCapture ? desktopShareControls() : null;
   const portableAudio = portableShare && window.roomsDesktopAudio ? select([
     ["none", t("No audio", "Kein Ton")],
     ["application", t("Application audio", "Anwendungston")],
@@ -466,7 +467,7 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     const sharing = screenShare?.active();
     const sharingHere = sharing && sameId(sharing.channel.id, channel.id);
     reserve.hidden = !canStream || Boolean(own || sharing);
-    audioOption.hidden = Boolean(desktop || portableShare) || reserve.hidden;
+    audioOption.hidden = Boolean(desktop || nativeCapture || portableShare) || reserve.hidden;
     if (portableShare) portableShare.element.hidden = reserve.hidden;
     finish.hidden = !own && !sharingHere;
     finish.textContent = sharingHere && sharing.phase !== "live"
@@ -534,6 +535,12 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     try {
       if (desktop) {
         desktop.postMessage({ action: "open", channelId: channel.id, language: language() });
+        return;
+      }
+      if (nativeCapture) {
+        const result = await nativeCapture.open(channel.id, language());
+        if (result === "busy") throw new Error(t("The capture controls are already open.", "Die Aufnahmesteuerung ist bereits geöffnet."));
+        if (result !== "opened") throw new Error(t("The capture window couldn’t open.", "Das Aufnahmefenster konnte nicht geöffnet werden."));
         return;
       }
       const options = portableShare ? { ...portableShare.options(), audio: portableAudio?.value ?? "none" } : null;

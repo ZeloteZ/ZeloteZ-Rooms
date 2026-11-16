@@ -10,7 +10,10 @@ apiAddress: :9997
 metrics: false
 pprof: false
 playback: false
-rtsp: false
+# FFmpeg reads and publishes the browser relay over this container-local listener.
+rtsp: true
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:8554
 webrtc: true
 webrtcAddress: :8889
 webrtcAllowOrigins: []
@@ -38,6 +41,17 @@ hlsSegmentMaxSize: 16M
 hlsAllowOrigins: []
 
 paths:
+  '~^browser/([a-f0-9]{32})$':
+    source: publisher
+    overridePublisher: false
+    record: false
+    # Preserve the H.264 video and convert an optional Opus track for Apple HLS players.
+    runOnOnline: >-
+      ffmpeg -hide_banner -nostdin -loglevel warning
+      -rtsp_transport tcp -timeout 5000000 -i rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+      -map 0:v:0 -map 0:a:0? -c:v copy -c:a aac -profile:a aac_low -ar 48000 -ac 2 -b:a 128k
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/live/$G1
+    runOnOnlineRestart: true
   '~^live/[a-f0-9]{32}$':
     source: publisher
     overridePublisher: false

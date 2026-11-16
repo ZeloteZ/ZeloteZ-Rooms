@@ -25,6 +25,8 @@ Your password unlocks the encrypted account key. The server can see membership, 
 
 For personal mention notifications, the server receives the mentioned account IDs and the message and chat IDs. The chat text and its embedded links stay encrypted.
 
+Voice and browser capture use WebRTC transport encryption. The native Linux capture available in the desktop app uses RTMPS. Stream playback uses HTTPS. MediaMTX relays live media and FFmpeg converts optional WebRTC stream audio to AAC for HLS playback on Apple devices. Server recording is disabled. The list of active viewers is visible to the streamer.
+
 ## Deploy
 
 Copy [`.env.example`](.env.example) to `.env` and configure your server. Set `PUBLIC_ORIGIN` to the external HTTPS website address, and set `STREAM_INGEST_BASE` to the RTMPS address for desktop capture. Set `VOICE_ICE_HOST` to the address clients can reach for WebRTC. Put `fullchain.pem` and `privkey.pem` in `RTMPS_CERT_DIR`. Configure your HTTPS reverse proxy to reach the web port via loopback and to set `X-Real-IP` from the incoming connection. RTMPS uses TCP port 1936 by default. Voice and browser screen sharing use UDP 8189 with TCP on the same port as a fallback.

@@ -5,6 +5,7 @@ const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { installAudio } = require("./audio.cjs");
+const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
 
 const localPage = path.join(__dirname, "ui", "index.html");
 const localUrl = pathToFileURL(localPage).href;
@@ -16,6 +17,7 @@ let connection = 0;
 let currentOrigin = "";
 let rememberedOrigin = "";
 let german = false;
+let captureProgram;
 const text = (en, de) => german ? de : en;
 
 function webUrl(value) {
@@ -218,6 +220,7 @@ function connect(origin) {
     webPreferences: {
       session: media, preload: path.join(__dirname, "rooms-preload.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false,
+      additionalArguments: captureProgram ? ["--rooms-native-capture"] : [],
     },
   });
   roomsWindow = window;
@@ -227,6 +230,7 @@ function connect(origin) {
   installPermissions(window, origin, media);
 
   const contents = window.webContents;
+  installNativeCapture(contents, captureProgram, origin, media, value => isRoomsPage(value, origin));
   contents.on("will-frame-navigate", event => {
     if (!event.isMainFrame || !isRoomsPage(event.url, origin)) event.preventDefault();
   });
@@ -271,6 +275,7 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     german = app.getLocale().toLowerCase().startsWith("de");
     menus();
+    captureProgram = await nativeHelper();
     try { rememberedOrigin = serverOrigin(await readFile(setupPath(), "utf8")) ?? ""; } catch { /* First launch. */ }
     const origin = process.env.ZELOTEZ_ROOMS_ORIGIN ? serverOrigin(process.env.ZELOTEZ_ROOMS_ORIGIN) : rememberedOrigin;
     if (origin) connect(origin);
