@@ -45,12 +45,3 @@
 .quick-option input { flex: none; }
 .quick-option strong { display: block; margin-bottom: 3px; font-size: .88rem; }
 .quick-guest-link { padding: 12px; border: 1px solid var(--line-strong); border-radius: 11px; }
-
-.topic-view[data-temporary] { min-block-size: 0; }
-[data-temporary-live] .live-channel-body {
-  grid-template: "watch" minmax(9rem, 1fr) "support" auto / minmax(0, 1fr);
-}
-[data-temporary-live] .live-channel-body:has(.watch-youtube-frame) { grid-template-rows: minmax(22rem, 1fr) auto; }
-[data-temporary-live] .live-channel-body:not(:has(.live-channel-people:not([hidden]))) { grid-template-rows: minmax(9rem, 1fr) 0; }
-[data-temporary-live] .live-channel-people:not([hidden]) { grid-area: support; grid-template: minmax(0, auto) / minmax(0, 1fr); }
-[data-temporary-live] .live-channel-streams { border: 0; }

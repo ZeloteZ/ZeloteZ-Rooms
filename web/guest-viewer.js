@@ -57,7 +57,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
       </header>
       <div class="quick-view-layout">
         <section class="panel guest-player">
-          <div class="guest-media">
+          <div class="guest-media" data-watch-media>
             <p class="status guest-waiting" role="status"></p>
           </div>
           <div class="watch-party-footer">
@@ -101,18 +101,10 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     },
     onSeek: position => void change("seek", position),
     onVolume: level => playing?.surface.setVolume(level),
-    onFullscreen() {
-      if (document.fullscreenElement) void document.exitFullscreen()?.catch(() => {});
-      else if (document.fullscreenEnabled) void player.requestFullscreen()?.catch(() => {});
-      else playing?.surface.element.webkitEnterFullscreen?.();
-    },
+    fullscreenTarget: () => player,
   });
   find(".watch-party-footer").prepend(controls.element);
   if (host?.actions) find(".guest-heading").append(host.actions);
-  if (host?.localPlayer) {
-    player.classList.add("guest-player-local");
-    player.replaceChildren(host.localPlayer);
-  }
 
   let gateState = "opening";
   let playbackState;
@@ -121,6 +113,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
   let clock;
   let watch;
   let playing;
+  let preview;
   let authorized = false;
   let roomTitle = "";
   let chat;
@@ -177,6 +170,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     const old = playing;
     playing = undefined;
     old?.surface.destroy();
+    controls.setFullscreenSurface(null);
     clearInterval(clock);
     controls.resetPosition();
     controls.element.hidden = true;
@@ -184,6 +178,20 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     live.hidden = true;
     setPlayback(undefined);
     setCommand(undefined);
+  }
+
+  function showPreview() {
+    if (preview || !host?.createPreview) return;
+    const scope = new AbortController();
+    const element = host.createPreview(AbortSignal.any([scope.signal, signal]));
+    preview = { scope, element };
+    stage.append(element);
+  }
+
+  function hidePreview() {
+    preview?.scope.abort();
+    preview?.element.remove();
+    preview = undefined;
   }
 
   function expectedPosition() {
@@ -239,7 +247,6 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
       shared: watch?.source.kind !== "screen",
     });
     controls.audio.hidden = !watch?.source.hasAudio;
-    controls.fullscreen.hidden = !document.fullscreenEnabled && !playing?.surface.element.webkitEnterFullscreen;
   }
 
   function startPlayback() {
@@ -259,6 +266,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
         if (!active()) return;
         const started = current.started;
         current.started = true;
+        hidePreview();
         setPlayback(undefined);
         if (!started && watch?.source.playing && source.kind === "youtube") applyState(true);
       },
@@ -271,6 +279,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
       onError() {
         if (!active()) return;
         current.ready = false;
+        showPreview();
         setPlayback("playbackError");
         renderTransport();
       },
@@ -289,7 +298,8 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     });
     playing = current;
     if (current.surface.element.tagName === "VIDEO") current.surface.element.setAttribute("aria-label", title.textContent);
-    stage.append(current.surface.element);
+    stage.insertBefore(current.surface.element, preview?.element ?? null);
+    controls.setFullscreenSurface(current.surface.element);
     waiting.hidden = true;
     controls.element.hidden = false;
     setPlayback("loading");
@@ -301,6 +311,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     authorized = false;
     watch = undefined;
     nativeIntent = undefined;
+    hidePreview();
     discardMedia();
     chatScope?.abort();
     chatScope = undefined;
@@ -324,18 +335,20 @@ export function renderGuestViewer({ publicId, signal, member = false, password, 
     if (!source) {
       watch = undefined;
       if (playing) discardMedia();
+      showPreview();
       updateLabels();
       return;
     }
     const received = performance.now();
     watch = { source, serverTime: snapshot.serverTime, received, roundTrip: received - sent };
     updateLabels();
-    if (!host?.localPlayer) {
-      if (source.id !== playing?.id || source.kind !== playing?.kind) startPlayback();
-      else applyState();
-      if (playbackState === "reconnecting") setPlayback(undefined);
-      renderTransport();
+    if (source.id !== playing?.id || source.kind !== playing?.kind) {
+      showPreview();
+      startPlayback();
     }
+    else applyState();
+    if (playbackState === "reconnecting") setPlayback(undefined);
+    renderTransport();
     live.hidden = source.kind !== "screen" && !source.playing;
   }
 

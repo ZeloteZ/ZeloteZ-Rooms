@@ -79,8 +79,6 @@
   padding: clamp(6px, 1.2vw, 12px);
   border-radius: 16px;
 }
-.guest-player-local { display: block; padding: 0; border: 0; }
-.guest-player-local > .live-channel { block-size: 100%; }
 .guest-media {
   position: relative;
   display: grid;
@@ -102,14 +100,22 @@
   object-fit: contain;
 }
 .guest-waiting { text-align: center; padding: 20px; }
+.quick-capture-preview:not(:has(> :not([hidden]))) { display: none; }
+.quick-capture-preview {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #08080c;
+}
+.quick-capture-preview .native-broadcast { display: block; }
+.quick-capture-preview .native-broadcast, .quick-capture-preview .native-broadcast-stage { block-size: 100%; }
 .guest-playback-status, .guest-command-status { padding-inline: 3px; }
-.guest-player:fullscreen { padding: 12px; background: #08090d; border-radius: 0; }
 @media (max-width: 760px) {
   .guest-room { grid-template-rows: auto minmax(452px, 1fr); }
   .quick-view-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(204px, 1fr) minmax(240px, .8fr); }
   .guest-room:has(.watch-party-controls:not([hidden])) { grid-template-rows: auto minmax(550px, 1fr); }
   .quick-view-layout:has(.watch-party-controls:not([hidden])) { grid-template-rows: minmax(295px, 1fr) minmax(240px, .8fr); }
-  .guest-player:has(.watch-party-controls:not([hidden])) { grid-template-rows: minmax(204px, 1fr) auto; }
+  .guest-player:not(:fullscreen):has(.watch-party-controls:not([hidden])) { grid-template-rows: minmax(204px, 1fr) auto; }
 }
 @media (max-width: 520px) {
   .guest-page .bar { inline-size: calc(100% - 24px); min-height: 54px; }

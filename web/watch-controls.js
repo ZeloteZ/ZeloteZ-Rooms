@@ -1,5 +1,7 @@
 import { t } from "./i18n.js";
 
+const fullscreenIdleDelay = 3000;
+
 function item(tag, className, children = []) {
   const node = document.createElement(tag);
   node.className = className;
@@ -30,12 +32,17 @@ function timeLabel(seconds) {
   return minutes + ":" + String(whole % 60).padStart(2, "0");
 }
 
-export function createWatchControls({ signal, onToggle, onSeek, onVolume, onFullscreen, muted = false }) {
+export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullscreenTarget, muted = false }) {
   let scrubbing = false;
   let position = 0;
   let duration;
   let playing = false;
   let previousVolume = 100;
+  let shell;
+  let media;
+  let inFullscreen = false;
+  let idleTimer;
+  const dragging = new Set();
   const icon = item("span", "watch-play-icon");
   icon.setAttribute("aria-hidden", "true");
   const toggle = button("watch-play-button", onToggle, signal);
@@ -50,7 +57,8 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onFull
     volumeChanged();
   }, signal);
   const audio = item("div", "watch-audio", [mute, level]);
-  const fullscreen = button("ghost icon-button watch-fullscreen", onFullscreen, signal);
+  const fullscreen = button("ghost icon-button watch-fullscreen", toggleFullscreen, signal);
+  fullscreen.hidden = true;
   const expand = item("span", "watch-fullscreen-icon", ["⛶"]);
   expand.setAttribute("aria-hidden", "true");
   fullscreen.append(expand);
@@ -65,8 +73,74 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onFull
     progress.setAttribute("aria-label", t("Playback position for everyone", "Wiedergabeposition für alle"));
     level.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
     mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
-    fullscreen.title = t("Full screen", "Vollbild");
+    fullscreen.title = inFullscreen ? t("Exit full screen", "Vollbild verlassen") : t("Full screen", "Vollbild");
     fullscreen.setAttribute("aria-label", fullscreen.title);
+  }
+
+  function clearIdle() {
+    clearTimeout(idleTimer);
+    shell?.removeAttribute("data-watch-idle");
+  }
+
+  function wake() {
+    if (!inFullscreen || !media) return;
+    clearIdle();
+    idleTimer = setTimeout(() => {
+      if (!dragging.size && !element.querySelector(":focus-visible")) shell.setAttribute("data-watch-idle", "");
+    }, fullscreenIdleDelay);
+  }
+
+  function fullscreenChanged() {
+    const next = document.fullscreenElement === shell;
+    if (next === inFullscreen) return;
+    inFullscreen = next;
+    dragging.clear();
+    clearIdle();
+    if (!next && document.activeElement === document.body && element.isConnected && !fullscreen.hidden) {
+      fullscreen.focus({ preventScroll: true });
+    }
+    refreshLabels();
+    wake();
+  }
+
+  function toggleFullscreen() {
+    if (!media) return;
+    if (inFullscreen) void document.exitFullscreen().catch(() => {});
+    else if (document.fullscreenEnabled && shell?.requestFullscreen) void shell.requestFullscreen().catch(() => {});
+    else media.webkitEnterFullscreen?.();
+  }
+
+  function setFullscreenSurface(surface) {
+    if (signal.aborted) return;
+    if (!shell) {
+      shell = fullscreenTarget?.();
+      if (shell) {
+        const passive = { signal, passive: true };
+        shell.addEventListener("pointermove", wake, passive);
+        shell.addEventListener("pointerdown", event => {
+          if (inFullscreen && element.contains(event.target)) dragging.add(event.pointerId);
+          wake();
+        }, passive);
+        shell.addEventListener("keydown", wake, { signal });
+        shell.addEventListener("focusin", wake, { signal });
+        shell.addEventListener("focusout", wake, { signal });
+        const stopDragging = event => {
+          if (dragging.delete(event.pointerId)) wake();
+        };
+        document.addEventListener("pointerup", stopDragging, passive);
+        document.addEventListener("pointercancel", stopDragging, passive);
+        document.addEventListener("fullscreenchange", fullscreenChanged, { signal });
+        signal.addEventListener("abort", clearIdle, { once: true });
+      }
+    }
+    media = surface;
+    if (media && shell) shell.dataset.watchFullscreen = media.localName === "iframe" ? "embed" : "overlay";
+    if (!media) {
+      clearIdle();
+      shell?.removeAttribute("data-watch-fullscreen");
+      if (inFullscreen) void document.exitFullscreen().catch(() => {});
+    }
+    fullscreen.hidden = !media || !(document.fullscreenEnabled && shell?.requestFullscreen || media.webkitEnterFullscreen);
   }
 
   function paintTimeline() {
@@ -95,7 +169,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onFull
   refreshLabels();
 
   return {
-    element, audio, fullscreen,
+    element, audio, setFullscreenSurface,
     refreshLabels,
     volume: () => Number(level.value) / 100,
     setTransport({ isPlaying = false, enabled = false, shared = true } = {}) {

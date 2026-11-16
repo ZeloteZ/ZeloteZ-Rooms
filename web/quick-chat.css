@@ -1,6 +1,6 @@
 .quick-chat {
   display: grid;
-  grid-template-rows: auto minmax(124px, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 10px;
   min-inline-size: 0;
   min-block-size: 0;
@@ -8,6 +8,29 @@
   border-radius: 16px;
 }
 .quick-chat h2 { font-size: 1.05rem; }
+.quick-chat-heading { min-inline-size: 0; }
+.quick-chat-roster { margin-block-start: 7px; border-block-end: 1px solid var(--line); padding-block-end: 6px; }
+.quick-chat-roster summary { width: fit-content; color: var(--muted); cursor: pointer; font-size: .78rem; }
+.quick-chat-participants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-block-size: 4.6rem;
+  margin-block: 6px 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  list-style: none;
+}
+.quick-chat-participants li {
+  max-inline-size: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: .78rem;
+  overflow-wrap: anywhere;
+}
 .quick-chat-scroll {
   min-block-size: 0;
   overflow: auto;

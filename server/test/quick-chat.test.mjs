@@ -83,6 +83,29 @@ test('temporary live chat delivers only the authorized device wrap and binds sen
   await assert.rejects(send(guest, encrypted([owner, guest]), messageId), { status: 409 })
 })
 
+test('participant names deduplicate an account or guest ticket while keeping each device for encryption', async t => {
+  const { viewer, join, read, request, send } = fixture(t)
+  const owner = viewer()
+  const sameName = viewer(owner.scope.roomId)
+  const otherSession = viewer(owner.scope.roomId)
+  otherSession.scope.guestKey.userId = owner.scope.guestKey.userId
+  const guest = viewer(owner.scope.roomId, true)
+  const guestTab = { ...guest, id: randomUUID() }
+  for (const peer of [owner, sameName, otherSession, guest]) await join(peer)
+  const { body: { peers, participants } } = await join(guestTab)
+  const [guestName] = participants.filter(person => person.guest).map(person => person.name)
+  assert.match(guestName, /^[0-9A-F]{6}$/u)
+  assert.deepEqual(participants, [{ name: 'Room member', guest: false }, { name: 'Room member', guest: false },
+    { name: guestName, guest: true }])
+  assert.equal(peers.length, 5)
+  assert.equal((await send(guestTab, encrypted(peers))).body.messages[0].name, guestName)
+
+  await request(guestTab, 'POST', 'leave', { deviceId: guestTab.id })
+  assert.equal((await read(owner)).body.participants.length, 3)
+  await request(guest, 'POST', 'leave', { deviceId: guest.id })
+  assert.equal((await read(owner)).body.participants.length, 2)
+})
+
 test('browser chat keys encrypt messages for each current device', async t => {
   const { viewer, join, read, send } = fixture(t)
   const roomId = randomUUID()

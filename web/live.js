@@ -1,8 +1,8 @@
-import { api, button, checkAccountResponse, el, field, identifier, notify, personMark, personName, sameId, select, status, tell, topicHref } from "./ui.js";
-import { language, t } from "./i18n.js";
+import { api, button, checkAccountResponse, el, identifier, notify, personMark, personName, sameId, status, tell, topicHref } from "./ui.js";
+import { t } from "./i18n.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
-import { desktopShareControls } from "./desktop-share.js";
+import { createChannelCapture } from "./channel-capture.js";
 import { createWatchParty } from "./watch-party.js";
 import { canPlayDirectly, startWhep } from "./whep.js";
 
@@ -454,7 +454,6 @@ export function createLivePlayer(context, dock) {
 
 export function renderLive(context, channel, edit, player, voiceMount, playerMount = el("div", { class: "live-channel-player" })) {
   const { signal, user, room, screenShare, nativeBroadcast } = context;
-  const temporary = room.temporary === true;
   const endpoint = streamsPath(channel);
   const cards = el("div", { class: "screen-stream-cards" });
   const living = el("span", { class: "tag live live-channel-count", role: "status", hidden: true });
@@ -475,23 +474,12 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const reconnectNote = t("Reconnecting the stream list.", "Die Stream-Liste wird neu verbunden.");
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
   const unavailableWatch = t("The watch party has ended.", "Die Watchparty ist beendet.");
-  const desktop = window.webkit?.messageHandlers?.roomsCapture;
-  const nativeCapture = window.roomsNativeCapture;
-  const portableShare = window.roomsDesktop === true && !desktop && !nativeCapture ? desktopShareControls() : null;
-  const portableAudio = portableShare && window.roomsDesktopAudio ? select([
-    ["none", t("No audio", "Kein Ton")],
-    ["application", t("Application audio", "Anwendungston")],
-    ["system", t("System audio", "Systemton")],
-  ], "none") : null;
-  if (portableAudio) portableShare.element.append(field(t("Stream audio", "Streamton"), portableAudio));
+  const capture = createChannelCapture(context, channel);
   const reserve = button(t("Share screen", "Bildschirm teilen"), requestStream, { class: "primary", hidden: true, "data-tutorial": "live-share" });
-  const audio = el("input", { type: "checkbox" });
-  const audioOption = el("label", { class: "inline subtle", hidden: true }, audio,
-    t("Include tab or app audio when available", "Tab- oder Anwendungston teilen, wenn verfügbar"));
   const finish = button(t("End my stream", "Meinen Stream beenden"), endStream, { class: "danger", hidden: true });
   const shareSummary = el("summary", { class: "button" }, t("Share options", "Freigabeoptionen"));
   const shareSettings = el("details", { class: "live-channel-share-settings", hidden: true }, shareSummary,
-    el("div", { class: "panel stack live-channel-share-options" }, portableShare?.element, audioOption));
+    el("div", { class: "panel stack live-channel-share-options" }, capture.options));
   shareSettings.addEventListener("keydown", event => {
     if (event.key !== "Escape" || !shareSettings.open) return;
     event.stopPropagation();
@@ -583,7 +571,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     const selectedHere = streams.find(stream => sameId(stream.id, selection));
     const watchingParty = watchParty.selected();
     const previewMedia = sharingHere && sharing.phase === "live" && !selectedHere && !watchingParty ? sharing.media : null;
-    reserve.hidden = !canStream || (temporary && room.quickSource !== "screen") || Boolean(own || sharing || nativeBroadcast?.active());
+    reserve.hidden = !canStream || Boolean(own || sharing || nativeBroadcast?.active());
     if (requestedShare && (requestedShare !== "screen" || streamsReady)) {
       const source = requestedShare;
       requestedShare = null;
@@ -591,9 +579,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       else if (!reserve.hidden) reserve.focus({ preventScroll: true });
       else tell(feedback, t("Screen sharing is unavailable in this channel.", "In diesem Kanal kannst du gerade keinen Bildschirm teilen."));
     }
-    audioOption.hidden = Boolean(desktop || nativeCapture || portableShare) || reserve.hidden;
-    if (portableShare) portableShare.element.hidden = reserve.hidden;
-    shareSettings.hidden = reserve.hidden || (audioOption.hidden && !portableShare);
+    shareSettings.hidden = reserve.hidden || !capture.options;
     if (shareSettings.hidden) shareSettings.open = false;
     finish.hidden = (!own && !sharingHere) || Boolean(nativeHere && !selectedHere);
     finish.textContent = sharingHere && sharing.phase !== "live"
@@ -609,14 +595,13 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
         : t("Nobody is live here right now.", "Hier ist gerade niemand live.");
     if ((streamsReady || watchParty.active()) && empty.textContent !== watchNote) empty.textContent = watchNote;
     streamsSection.hidden = !streams.length && !watchParty.active();
-    if (temporary) people.hidden = streamsSection.hidden;
     preview.hidden = !previewMedia;
     if (previewVideo.srcObject !== previewMedia) {
       previewVideo.srcObject = previewMedia;
       if (previewMedia) previewStage.append(previewVideo);
       else previewVideo.remove();
     }
-    const nextChat = temporary ? null : (selectedHere?.live ? selectedHere : null) ?? (own?.live ? own : null);
+    const nextChat = (selectedHere?.live ? selectedHere : null) ?? (own?.live ? own : null);
     const nextChatId = nextChat?.id;
     const target = nextChatId && sameId(nextChatId, destination?.streamId) ? destination : null;
     if (target) destination = null;
@@ -671,18 +656,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     shareSettings.open = false;
     tell(feedback, "");
     try {
-      if (desktop) {
-        desktop.postMessage({ action: "open", channelId: channel.id, language: language() });
-        return;
-      }
-      if (nativeCapture) {
-        const result = nativeBroadcast ? await nativeBroadcast.open(room, channel, language()) : await nativeCapture.open(channel.id, language());
-        if (result === "busy") throw new Error(t("The capture controls are already open.", "Die Aufnahmesteuerung ist bereits geöffnet."));
-        if (result !== "opened") throw new Error(t("The capture window couldn’t open.", "Das Aufnahmefenster konnte nicht geöffnet werden."));
-        return;
-      }
-      const options = portableShare ? { ...portableShare.options(), audio: portableAudio?.value ?? "none" } : null;
-      await screenShare.start(room, channel, audio.checked, options);
+      await capture.start();
       refreshSoon();
     } catch (error) {
       if (!signal.aborted) {
@@ -771,11 +745,6 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     } catch (error) {
       if (signal.aborted) return;
       if (error.status === 403 || error.status === 404) {
-        if (temporary) {
-          context.quickRoomHeader.ended(room.id);
-          location.hash = "#/rooms";
-          return;
-        }
         context.refresh();
         return;
       }
@@ -787,20 +756,20 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   }
 
   const people = el("section", {
-    class: "panel live-channel-people", id: "live-channel-people", "data-tutorial": "live-people", hidden: temporary,
-    "aria-label": temporary ? t("Streams", "Streams") : t("Voice & streams", "Sprache & Streams"),
+    class: "panel live-channel-people", id: "live-channel-people", "data-tutorial": "live-people",
+    "aria-label": t("Voice & streams", "Sprache & Streams"),
   }, voiceMount, streamsSection);
   const node = el("section", {
-    class: "panel live-channel", "aria-labelledby": "live-channel-heading", "data-panel": "people", "data-temporary-live": temporary,
+    class: "panel live-channel", "aria-labelledby": "live-channel-heading", "data-panel": "people",
   }, el("header", { class: "live-channel-toolbar" },
     el("div", { class: "inline live-channel-title" }, el("h2", { id: "live-channel-heading", title: channel.title }, channel.title), living),
     el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish, edit), feedback),
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchParty.player, watchHint),
-    !temporary && el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
+    el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
     people,
-    !temporary && el("aside", {
+    el("aside", {
       class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat", "aria-label": t("Stream chat", "Streamchat"),
     }, chat, chatEmpty)));
   node.addEventListener("open-message", event => {

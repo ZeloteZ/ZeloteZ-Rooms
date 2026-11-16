@@ -44,9 +44,9 @@ function validWrap(value) {
   return fields(value, ['nonce', 'blob']) && encoded(value.nonce, 12) && encoded(value.blob, 48)
 }
 
-function senderName(scope, id) {
+function senderName(scope) {
   if (scope.guestKey.token) {
-    return createHash('sha256').update(scope.roomId).update(scope.guestKey.token).update(id).digest('hex').slice(0, 6).toUpperCase()
+    return createHash('sha256').update(scope.roomId).update(scope.guestKey.token).digest('hex').slice(0, 6).toUpperCase()
   }
   const name = typeof scope.displayName === 'string' ? scope.displayName.trim() : ''
   return [...name.replace(/[\p{Cc}\p{Cs}\p{Bidi_Control}]/gu, '')].slice(0, 48).join('') || 'Member'
@@ -93,13 +93,20 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
   function ownPeer(room, scope, id, at) {
     const peer = room.peers.get(id)
     if (!peer || !sameCredential(peer.credential, scope.guestKey)) throw conflict()
+    if (!peer.guest) peer.name = senderName(scope)
     peer.expiresAt = at + peerLease
     return peer
   }
 
   function snapshot(room, viewer, after) {
+    const participants = new Map()
+    const peers = [...room.peers.values()].map(({ id, credential, publicKey, name, guest }) => {
+      const identity = guest ? `guest:${credential.token}` : `account:${credential.userId}`
+      participants.set(identity, { name, guest })
+      return { id, publicKey, name, guest }
+    })
     return { deviceId: viewer.id,
-      peers: [...room.peers.values()].map(({ id, publicKey, name, guest }) => ({ id, publicKey, name, guest })),
+      peers, participants: [...participants.values()],
       messages: room.messages.filter(message => message.seq > Math.max(after, viewer.joinedSeq) && message.keys.has(viewer.id))
         .map(({ id, from, name, guest, sentAt, publicKey, nonce, blob, keys }) => ({
           id, from, name, guest, sentAt, publicKey, envelope: { nonce, blob, key: keys.get(viewer.id) },
@@ -122,7 +129,7 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
       return json(response, 200, snapshot(room, peer, peer.joinedSeq))
     }
     if (room.peers.size >= maxPeers || [...room.peers.values()].filter(peer => sameCredential(peer.credential, scope.guestKey)).length >= maxDevicesPerCredential) throw tooBusy()
-    const peer = { id: input.deviceId, publicKey, name: senderName(scope, input.deviceId), guest: Boolean(scope.guestKey.token),
+    const peer = { id: input.deviceId, publicKey, name: senderName(scope), guest: Boolean(scope.guestKey.token),
       credential: scope.guestKey, joinedSeq: room.seq, expiresAt: at + peerLease, burst: { used: 0, resetAt: 0 } }
     room.peers.set(peer.id, peer)
     return json(response, 200, snapshot(room, peer, peer.joinedSeq))

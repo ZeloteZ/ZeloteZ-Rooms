@@ -60,7 +60,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
   { class: "stream-pick watch-party-card", hidden: true, "aria-pressed": "false" });
   const title = el("h3");
   const statusNode = status();
-  const media = el("div", { class: "watch-party-media" });
+  const media = el("div", { class: "watch-party-media", "data-watch-media": true });
   const enable = button(t("Enable playback on this device", "Wiedergabe auf diesem Gerät erlauben"), enablePlayback,
     { hidden: true });
   const controls = createWatchControls({
@@ -75,11 +75,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     },
     onSeek: position => void change("seek", position),
     onVolume: level => surface?.setVolume(level),
-    onFullscreen() {
-      if (document.fullscreenElement) void document.exitFullscreen()?.catch(() => {});
-      else if (document.fullscreenEnabled) void player.requestFullscreen()?.catch(() => {});
-      else surface?.element.webkitEnterFullscreen?.();
-    },
+    fullscreenTarget: () => player,
   });
   const stop = button(t("End watch party", "Watchparty beenden"), stopParty, { class: "danger", hidden: true });
   const leave = button("×", leaveParty, { class: "ghost icon-button", title: t("Close player", "Player schließen"),
@@ -157,7 +153,6 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     stop.hidden = !canStop;
     stop.disabled = busy;
     controls.setTransport({ isPlaying: party?.playing, enabled: !busy && ready });
-    controls.fullscreen.hidden = !document.fullscreenEnabled && !surface?.element.webkitEnterFullscreen;
     onChange?.();
   }
 
@@ -172,6 +167,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     nativeIntent = undefined;
     clearInterval(clockTimer);
     previous?.destroy();
+    controls.setFullscreenSurface(null);
     media.replaceChildren();
     player.hidden = true;
     enable.hidden = true;
@@ -269,6 +265,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     surface = party.source === "youtube" ? createYoutubePlayer(party.videoId, handlers)
       : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers);
     media.replaceChildren(surface.element);
+    controls.setFullscreenSurface(surface.element);
     clockTimer = setInterval(tick, 250);
   }
 

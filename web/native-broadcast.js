@@ -80,7 +80,7 @@ export function createNativeBroadcast(signal, dock) {
     dock.replaceChildren();
   }, { once: true });
 
-  function mount(room, channel, viewSignal) {
+  function mount(room, channel, viewSignal, { previewOnly = false } = {}) {
     const heading = t("Your stream preview", "Deine Stream-Vorschau");
     const canvas = el("canvas", { hidden: true, role: "img", "aria-label": heading });
     const canvasContext = canvas.getContext("2d", { alpha: false });
@@ -89,9 +89,9 @@ export function createNativeBroadcast(signal, dock) {
     stage.append(waiting);
     const stats = el("div", { class: "inline native-broadcast-metrics", hidden: true });
     const node = el("section", { class: "native-broadcast stack", hidden: true, "aria-label": heading },
-      el("header", { class: "section-heading" },
+      !previewOnly && el("header", { class: "section-heading" },
         el("div", { class: "inline" }, el("span", { class: "tag live" }, "Live"), el("h3", {}, heading)), end()),
-      stage, stats);
+      stage, !previewOnly && stats);
     let drawing = false;
     let mountedId;
     let caption;
@@ -113,7 +113,7 @@ export function createNativeBroadcast(signal, dock) {
         location = { roomId: room.id, id: channel.id, title: channel.title };
         placeDock();
       }
-      if (!Number.isFinite(active.elapsed)) return;
+      if (previewOnly || !Number.isFinite(active.elapsed)) return;
       const seconds = Math.floor(active.elapsed);
       const duration = [Math.floor(seconds / 60), seconds % 60].map(value => String(value).padStart(2, "0")).join(":");
       const values = [

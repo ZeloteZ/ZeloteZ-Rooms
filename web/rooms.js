@@ -5,6 +5,7 @@ import { renderChat } from "./chat.js";
 import { renderHomeActivity } from "./home-activity.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 import { renderLive } from "./live.js";
+import { createQuickScreen } from "./quick-screen.js";
 import { openStreamNow, quickRoomActions } from "./quick-start.js";
 import { createWatchParty } from "./watch-party.js";
 import { api, button, closeDialog, el, field, form, identifier, notify, personRow, sameId, select, showDialog, status, tell, topicHref } from "./ui.js";
@@ -578,6 +579,24 @@ function leaveDialog(context, topic) {
       }, { class: "danger" }))));
 }
 
+function renderQuickPreview(context, topic, channel, signal) {
+  const nativePreview = context.nativeBroadcast?.mount(topic, channel, signal, { previewOnly: true });
+  const video = el("video", { autoplay: true, playsinline: true, hidden: true });
+  video.muted = true;
+
+  function update() {
+    const capture = context.screenShare.active();
+    const media = capture?.phase === "live" && sameId(capture.channel.id, channel.id) ? capture.media : null;
+    if (video.srcObject !== media) video.srcObject = media;
+    video.hidden = !media;
+  }
+
+  context.screenShare.whenChanged(update, { signal });
+  signal.addEventListener("abort", () => { video.srcObject = null; }, { once: true });
+  update();
+  return el("div", { class: "quick-capture-preview", "aria-hidden": "true" }, video, nativePreview);
+}
+
 function renderQuickTopic(context, topic, channels, selectedId, target) {
   const channel = channels.find(item => item.type === "live");
   if (!channel) throw new Error(t("This temporary room has ended.", "Dieser temporäre Raum wurde beendet."));
@@ -585,28 +604,33 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
     if (sameId(context.screenShare.active()?.room.id, topic.id)) context.screenShare.stop();
     if (sameId(context.nativeBroadcast?.active()?.channelId, channel.id)) context.nativeBroadcast.stop().catch(() => {});
   };
-  const playerMount = el("div", { class: "live-channel-player" });
   const child = { ...context, room: topic, shareSource: sameId(channel.id, selectedId) ? target?.shareSource : undefined };
   const screenRoom = topic.quickSource === "screen";
-  const localPlayer = screenRoom ? renderLive(child, channel, null, context.player, null, playerMount) : null;
+  const screen = screenRoom ? createQuickScreen(child, channel) : null;
   const setup = screenRoom ? null : createWatchParty(child, channel, {
     setupOnly: true,
     onShareUnavailable: () => notify(t("Video sharing is unavailable in this room.", "Hier kannst du gerade kein Video teilen.")),
   });
-  if (child.shareSource) setup?.prepareSource(child.shareSource);
-  const actions = el("div", { class: "quick-view-actions" }, setup?.share, quickRoomActions(context, topic, stopCapture));
+  if (child.shareSource === "screen") screen?.prepare();
+  else if (child.shareSource) setup?.prepareSource(child.shareSource);
+  const actions = el("div", { class: "quick-view-actions" }, screen?.actions, setup?.share, quickRoomActions(context, topic, stopCapture));
   const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true,
-    host: { actions, channelId: channel.id, localPlayer, onUnavailable() {
-      context.quickRoomHeader.ended(topic.id);
-      location.hash = "#/rooms";
-    } } });
+    host: {
+      actions, channelId: channel.id,
+      createPreview: screenRoom ? signal => renderQuickPreview(context, topic, channel, signal) : undefined,
+      onUnavailable() {
+        context.quickRoomHeader.ended(topic.id);
+        location.hash = "#/rooms";
+      },
+    },
+  });
   node.dataset.temporary = "true";
-  context.player.setLocation(topic, channel, screenRoom ? playerMount : null);
+  context.player.setLocation(topic, channel, null);
   context.voice.setLocation(null);
   return { node, select(id, next) {
     if (!sameId(id, channel.id) || !next?.shareSource) return;
-    if (localPlayer) localPlayer.dispatchEvent(new CustomEvent("open-message", { detail: next }));
-    else setup.prepareSource(next.shareSource);
+    if (next.shareSource === "screen") screen?.prepare();
+    else setup?.prepareSource(next.shareSource);
   } };
 }
 

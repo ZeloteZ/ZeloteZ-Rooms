@@ -14,7 +14,13 @@ export function renderQuickChat({ publicId, signal }) {
   const pane = document.createElement("section");
   pane.className = "panel quick-chat";
   pane.innerHTML = `
-    <h2></h2>
+    <div class="quick-chat-heading">
+      <h2></h2>
+      <details class="quick-chat-roster" open hidden>
+        <summary></summary>
+        <ul class="quick-chat-participants" role="list" tabindex="0"></ul>
+      </details>
+    </div>
     <div class="quick-chat-scroll" tabindex="0">
       <p class="subtle quick-chat-empty" hidden></p>
       <ol class="quick-chat-log" role="log" aria-live="polite"></ol>
@@ -25,6 +31,9 @@ export function renderQuickChat({ publicId, signal }) {
       <button type="submit" class="button primary" disabled></button>
     </form>`;
   const heading = pane.querySelector("h2");
+  const roster = pane.querySelector(".quick-chat-roster");
+  const rosterSummary = roster.querySelector("summary");
+  const rosterList = roster.querySelector("ul");
   const scroll = pane.querySelector(".quick-chat-scroll");
   const empty = pane.querySelector(".quick-chat-empty");
   const log = pane.querySelector("ol");
@@ -38,6 +47,8 @@ export function renderQuickChat({ publicId, signal }) {
   let sendProblem = "";
   let device;
   let peers = [];
+  let participants = [];
+  let rosterSignature;
   let cursor = 0;
   let joined = false;
   let posting = false;
@@ -54,6 +65,23 @@ export function renderQuickChat({ publicId, signal }) {
     const label = message ? t(...message) : "";
     feedback.hidden = !label;
     if (feedback.textContent !== label) feedback.textContent = label;
+    updateRoster();
+  }
+
+  function updateRoster() {
+    const signature = JSON.stringify([language(), participants]);
+    if (signature === rosterSignature) return;
+    rosterSignature = signature;
+    roster.hidden = participants.length === 0;
+    rosterSummary.textContent = t("Participants ({count})", "Teilnehmende ({count})", { count: participants.length });
+    rosterList.setAttribute("aria-label", t("Participants in live chat", "Teilnehmende im Livechat"));
+    const names = participants.map(person => person.guest ? guestName(person.name) : person.name);
+    names.sort(new Intl.Collator(locale()).compare);
+    rosterList.replaceChildren(...names.map(name => {
+      const item = document.createElement("li");
+      item.textContent = name;
+      return item;
+    }));
   }
 
   function timeFormat() {
@@ -86,6 +114,7 @@ export function renderQuickChat({ publicId, signal }) {
     clearTimeout(timer);
     if (device) void request("/leave", { deviceId: device.deviceId }, true).catch(() => {});
     peers = [];
+    participants = [];
     device = undefined;
     pending = undefined;
     input.value = "";
@@ -181,10 +210,12 @@ export function renderQuickChat({ publicId, signal }) {
       if (stopped) return;
       cursor = batch.cursor;
       peers = batch.peers;
+      participants = batch.participants ?? peers.map(({ name, guest }) => ({ name, guest }));
       joined = true;
       connection = "";
     } catch (error) {
       peers = [];
+      participants = [];
       connection = saveStatus(error, "reconnecting") ?? "";
     }
     update();
