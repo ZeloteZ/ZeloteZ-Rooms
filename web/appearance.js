@@ -3,6 +3,7 @@ import { api, button, closeDialog, el, field, form, identifier, notify, paintPer
 
 const imageTypes = ["image/png", "image/jpeg", "image/webp"];
 const fileLimit = 8 * 1024 * 1024;
+const bytesPerMiB = 1024 * 1024;
 const imageSlots = [
   ["cover", "coverUrl", "Cover image", "Titelbild"],
   ["banner", "bannerUrl", "Banner", "Banner"],
@@ -194,19 +195,50 @@ async function loadPreset(path, signal) {
   throw new Error(t("The image preset couldn’t be loaded.", "Die Bildvorlage konnte nicht geladen werden."));
 }
 
+function attachmentPreference(profile) {
+  const maxBytes = profile.autoLoadAttachmentMaxBytes;
+  const initialMode = !profile.autoLoadAttachments ? "manual" : maxBytes === null ? "auto" : "limited";
+  const mode = select([
+    ["manual", t("Load manually", "Manuell laden")],
+    ["auto", t("Load automatically", "Automatisch laden")],
+    ["limited", t("Load automatically up to a size limit", "Automatisch bis zu einer Größenbegrenzung laden")],
+  ], initialMode);
+  const limit = el("input", {
+    type: "number", inputmode: "decimal", min: 1 / bytesPerMiB, step: "any", required: true,
+    value: maxBytes === null ? 1 : maxBytes / bytesPerMiB,
+  });
+  const sizeField = field(t("Size limit per attachment (MiB)", "Maximale Größe pro Anhang (MiB)"), limit);
+  function sync() {
+    sizeField.hidden = limit.disabled = mode.value !== "limited";
+  }
+  mode.addEventListener("change", sync);
+  sync();
+  return {
+    node: el("div", { class: "appearance-attachment-preference field" },
+      field(t("Chat attachments", "Chat-Anhänge"), mode), sizeField),
+    value: () => ({
+      autoLoadAttachments: mode.value !== "manual",
+      autoLoadAttachmentMaxBytes: mode.value === "limited" ? Math.round(limit.valueAsNumber * bytesPerMiB)
+        : mode.value === "manual" ? maxBytes : null,
+    }),
+  };
+}
+
 export function editProfile(user, onChange, languageControl, onResetTutorials) {
   const signal = dialogLifetime();
-  const person = { ...user };
+  const person = { nameColor: null, autoLoadAttachments: true, autoLoadAttachmentMaxBytes: null, ...user };
   const mark = personMark(person);
   const name = personName(person, { class: "appearance-profile-name" });
   const color = optColor(t("Name color", "Namensfarbe"), "#abb8ff", person.nameColor, preview);
   const icon = imageEditor("avatar", t("Profile picture", "Profilbild"), person.avatarUrl, signal, preview);
+  const attachments = attachmentPreference(person);
   function preview() {
     const next = { ...person, id: undefined, nameColor: color.value(), avatarUrl: icon.savedPath() };
     paintPersonMark(mark, next, icon.previewPath());
     paintPersonName(name, next);
   }
-  const fields = el("fieldset", { class: "appearance-fields appearance-profile-fields stack" }, icon.node, color.node, languageControl);
+  const fields = el("fieldset", { class: "appearance-fields appearance-profile-fields stack" },
+    icon.node, color.node, attachments.node, languageControl);
   const tutorialFeedback = status();
   showDialog(t("Your profile", "Dein Profil"), form([
     el("div", { class: "appearance-profile-preview" }, mark,
@@ -217,6 +249,8 @@ export function editProfile(user, onChange, languageControl, onResetTutorials) {
         tell(tutorialFeedback, t("Tutorials will restart when you close your profile.", "Die Rundgänge starten erneut, sobald du dein Profil schließt."));
       }, { class: "ghost", "data-tutorial": "reset" }), tutorialFeedback),
   ], t("Save profile", "Profil speichern"), async () => {
+    const values = { nameColor: color.value(), ...attachments.value() };
+    const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== person[key]));
     fields.disabled = true;
     try {
       const saved = ({ profile }) => {
@@ -225,8 +259,8 @@ export function editProfile(user, onChange, languageControl, onResetTutorials) {
         return profile.avatarUrl;
       };
       await icon.save("profile/avatar", saved);
-      if (color.value() !== (person.nameColor ?? null)) {
-        saved(await api("profile", { method: "PATCH", body: { nameColor: color.value() }, signal }));
+      if (Object.keys(changed).length) {
+        saved(await api("profile", { method: "PATCH", body: changed, signal }));
       }
       if (!signal.aborted) {
         closeDialog();

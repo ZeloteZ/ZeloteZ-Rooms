@@ -27,6 +27,7 @@ const voiceDock = document.querySelector("#voice-dock");
 const broadcastDock = document.querySelector("#broadcast-dock");
 const nativeBroadcastDock = document.querySelector("#native-broadcast-dock");
 const notificationDock = document.querySelector("#notification-dock");
+const profileUpdates = new EventTarget();
 
 let user = null;
 let view;
@@ -125,6 +126,7 @@ profileEditor.addEventListener("click", () => {
     if (user !== account) return;
     Object.assign(user, profile);
     paintOwnProfile();
+    profileUpdates.dispatchEvent(new Event("change"));
   }, languageChooser(), () => tutorials?.reset());
   tutorials?.openProfile(document.querySelector("#dialog-content"));
 });
@@ -250,7 +252,7 @@ async function render(force = false) {
   const { signal } = view;
   workspace.replaceChildren(el("p", { class: "panel status", role: "status" }, t("Loading …", "Wird geladen …")));
   workspace.scrollTop = 0;
-  const context = { user, signal, player, voice, screenShare, nativeBroadcast, refresh: () => render(true) };
+  const context = { user, signal, player, voice, screenShare, nativeBroadcast, profileUpdates, refresh: () => render(true) };
   try {
     let page;
     if (route.page === "friends") page = await renderFriends(context);

@@ -1,9 +1,12 @@
-import { api, button, closeDialog, el, field, form, identifier, localizedTime, personMark, personName, showDialog, status, tell, validHttpLink } from "./ui.js";
+import { api, button, closeDialog, el, field, form, identifier, localizedTime, openChatImage, personMark, personName, showDialog, status, tell, validHttpLink } from "./ui.js";
 import { locale, t } from "./i18n.js";
 import { createMentionDirectory, mentionComposer, renderMentionText } from "./mentions.js";
+import { createReactions } from "./reactions.js";
 
 const maxFiles = 4;
 const maxFileSize = 12 * 1024 * 1024;
+const encryptedFileOverhead = 28; // 12-byte nonce and 16-byte authentication tag.
+const automaticLoadSlots = 2;
 const initialHistoryRows = 80;
 const imageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
 const videoTypes = new Set(["video/mp4", "video/webm", "video/ogg"]);
@@ -58,7 +61,7 @@ function readableFilename(name) {
   return text.slice(0, 160) || t("Attachment", "Anhang");
 }
 
-function renderAttachment(context, file, key, fileEndpoint, urls) {
+function renderAttachment(signal, file, key, fileEndpoint, urls) {
   const name = readableFilename(file.name);
   const isImage = imageTypes.has(file.type);
   const isVideo = videoTypes.has(file.type);
@@ -67,30 +70,55 @@ function renderAttachment(context, file, key, fileEndpoint, urls) {
   const size = sizeLabel(file.size);
   const feedback = status();
   const view = el("div", { class: "attached-file stack" }, feedback);
-  const load = button(isImage || isVideo || isAudio ? t("Show", "Anzeigen") : t("Open", "Öffnen"), async () => {
+  const load = button(isImage || isVideo || isAudio ? t("Show", "Anzeigen") : t("Open", "Öffnen"), () => loadFile(), {
+    "aria-label": t("Open {name}", "{name} öffnen", { name }),
+  });
+  let attemptedLimit;
+  let closePreview;
+
+  async function loadFile(limit = null) {
+    if (load.disabled || signal.aborted) return;
     load.disabled = true;
     tell(feedback, t("Decrypting file…", "Datei wird entschlüsselt …"));
     try {
-      const stored = await api(fileEndpoint + identifier(file.id), { buffer: true, signal: context.signal });
+      const cap = limit === null ? "" : "?maxBytes=" + (Math.min(limit, maxFileSize) + encryptedFileOverhead);
+      const stored = await api(fileEndpoint + identifier(file.id) + cap, { buffer: true, signal });
+      if (signal.aborted) return;
+      if (stored === null) {
+        tell(feedback, "");
+        load.disabled = false;
+        return;
+      }
       const bytes = await ClubCrypto.decryptFile(key, file.id, stored);
-      if (context.signal.aborted) return;
+      if (signal.aborted) return;
       const url = URL.createObjectURL(new Blob([bytes], { type: isImage || isVideo || isAudio ? file.type : "application/octet-stream" }));
       urls.add(url);
-      const media = isImage ? el("img", { class: "attachment-preview", src: url, alt: name, loading: "lazy" })
+      const media = isImage ? button(el("img", { class: "attachment-preview", src: url, alt: "", loading: "lazy" }), event => {
+        closePreview = openChatImage(url, name, event.currentTarget);
+      }, { class: "chat-image-trigger", "aria-haspopup": "dialog", "aria-label": t("Enlarge {name}", "{name} vergrößern", { name }) })
         : isVideo ? el("video", { src: url, class: "attachment-preview", controls: true, playsinline: true, preload: "metadata", "aria-label": name })
         : isAudio ? el("audio", { src: url, controls: true, preload: "metadata", "aria-label": name }) : null;
       view.replaceChildren(media ?? el("p", { class: "subtle" }, t("File decrypted", "Datei entschlüsselt")),
         el("a", { class: "attachment", href: url, download: name }, t("Download file · {name}", "Datei herunterladen · {name}", { name })));
     } catch (error) {
-      if (!context.signal.aborted) tell(feedback, error.message || t("The file could not be decrypted.", "Die Datei konnte nicht entschlüsselt werden."), "error");
+      if (!signal.aborted) tell(feedback, error.message || t("The file could not be decrypted.", "Die Datei konnte nicht entschlüsselt werden."), "error");
       load.disabled = false;
     }
-  }, { "aria-label": t("Open {name}", "{name} öffnen", { name }) });
+  }
   view.prepend(el("div", { class: "inline attached-file-row" },
     el("div", { class: "attachment-details" }, el("strong", {}, name),
       el("p", { class: "subtle" }, size ? format + " · " + size : format)),
     load));
-  return view;
+  return {
+    node: view,
+    canAutoLoad: limit => !load.disabled && !signal.aborted && limit !== attemptedLimit &&
+      (limit === null || (Number.isSafeInteger(file.size) && file.size >= 0 && file.size <= limit)),
+    autoLoad(limit) {
+      attemptedLimit = limit;
+      return loadFile(limit);
+    },
+    closePreview: () => closePreview?.(),
+  };
 }
 
 export function renderChat(context, channel, edit) {
@@ -102,6 +130,20 @@ export function renderChat(context, channel, edit) {
   const tombstones = new Set();
   const fileViews = new Map();
   const list = el("ol", { class: "message-list", role: "log", tabindex: "0", "aria-label": t("Messages", "Nachrichten"), "aria-live": "off" });
+  const reactions = createReactions({ endpoint: messageEndpoint, scope: channel.id, user: context.user, signal, scroll: list });
+  const attachmentJobs = new WeakMap();
+  const visibleAttachments = new Set();
+  let activeLoads = 0;
+  const fileObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const attachment = attachmentJobs.get(entry.target);
+      if (!attachment) continue;
+      if (entry.isIntersecting) visibleAttachments.add(attachment);
+      else visibleAttachments.delete(attachment);
+    }
+    loadVisibleAttachments();
+  }, { root: list });
+  context.profileUpdates?.addEventListener("change", loadVisibleAttachments, { signal });
   const mentionDirectory = createMentionDirectory({ signal, channelId: channel.id, scope: list });
   const older = button(t("Load older messages", "Ältere Nachrichten laden"), loadOlder, { hidden: true });
   const empty = el("li", { class: "muted" }, t("Loading messages…", "Nachrichten werden geladen …"));
@@ -136,6 +178,20 @@ export function renderChat(context, channel, edit) {
   let locating = false;
   let highlighted;
   let highlightTimer;
+
+  function loadVisibleAttachments() {
+    if (signal.aborted || context.user?.autoLoadAttachments === false) return;
+    const limit = context.user?.autoLoadAttachmentMaxBytes ?? null;
+    for (const attachment of visibleAttachments) {
+      if (activeLoads >= automaticLoadSlots) break;
+      if (!attachment.canAutoLoad(limit)) continue;
+      activeLoads++;
+      void attachment.autoLoad(limit).finally(() => {
+        activeLoads--;
+        loadVisibleAttachments();
+      });
+    }
+  }
 
   function updateSend() {
     const busy = !initialized || sending || input.disabled;
@@ -301,6 +357,12 @@ export function renderChat(context, channel, edit) {
     const files = fileViews.get(id);
     if (!files) return;
     files.controller.abort();
+    for (const attachment of files.attachments) {
+      fileObserver.unobserve(attachment.node);
+      attachmentJobs.delete(attachment.node);
+      visibleAttachments.delete(attachment);
+      attachment.closePreview();
+    }
     for (const node of rows.get(id)?.querySelectorAll("video, audio") ?? []) {
       node.pause();
       node.removeAttribute("src");
@@ -318,6 +380,7 @@ export function renderChat(context, channel, edit) {
       el("div", { class: "message-meta" }, !message.deleted && personName(author),
         el("time", { datetime: time ? date.toISOString() : undefined, title: localizedTime(message.at) }, time)));
     let fileView;
+    let reactionKey;
     let remove;
     if (message.deleted) {
       body.append(await deletionNote(message, author));
@@ -333,14 +396,16 @@ export function renderChat(context, channel, edit) {
         if (!result) {
           body.append(el("p", { class: "subtle" }, t("Your account does not have a key for this message.", "Für diese Nachricht ist auf deinem Konto kein Schlüssel verfügbar.")));
         } else {
+          reactionKey = result.key;
           const text = result.content?.text;
           if (typeof text === "string" && text) body.append(...messageText(result.content, mentionDirectory).filter(Boolean));
           const attachments = Array.isArray(result.content?.attachments)
             ? result.content.attachments.filter(attachment => typeof attachment?.id === "string") : [];
           if (attachments.length) {
             fileView = { controller: new AbortController(), urls: new Set() };
-            const fileContext = { ...context, signal: AbortSignal.any([signal, fileView.controller.signal]) };
-            body.append(...attachments.map(attachment => renderAttachment(fileContext, attachment, result.key, fileEndpoint, fileView.urls)));
+            const fileSignal = AbortSignal.any([signal, fileView.controller.signal]);
+            fileView.attachments = attachments.map(attachment => renderAttachment(fileSignal, attachment, result.key, fileEndpoint, fileView.urls));
+            body.append(...fileView.attachments.map(attachment => attachment.node));
           }
         }
       } catch {
@@ -351,7 +416,7 @@ export function renderChat(context, channel, edit) {
       "data-author-id": !message.deleted && message.author?.id, "data-deleted": Boolean(message.deleted),
       "data-reason-granted": Boolean(message.deleted?.reason?.historyGrant),
       tabindex: "-1", "data-sent-at": date.getTime() }, personMark(author), body, remove);
-    return { row, fileView };
+    return { row, fileView, reactionKey, reactionMount: body };
   }
 
   async function addMessages(messages, { olderBatch = false, keepPosition = false } = {}) {
@@ -376,13 +441,14 @@ export function renderChat(context, channel, edit) {
       row !== empty && row.getBoundingClientRect().bottom > viewTop);
     const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
     empty.remove();
-    for (const [msg, { row, fileView }] of elements) {
+    for (const [msg, { row, fileView, reactionKey, reactionMount }] of elements) {
       if (!canRender(msg)) continue;
       const previous = rows.get(msg.id);
       const sequence = Number(msg.seq);
       const next = previous ? previous.nextElementSibling : Array.from(list.children).find(child => Number(child.dataset.sequence) > sequence);
       if (previous) {
         releaseFiles(msg.id);
+        reactions.remove(msg.id);
         const hadFocus = previous.contains(document.activeElement);
         list.insertBefore(row, previous);
         previous.remove();
@@ -394,7 +460,14 @@ export function renderChat(context, channel, edit) {
       updateMessageGroup(row);
       updateMessageGroup(next);
       rows.set(msg.id, row);
-      if (fileView) fileViews.set(msg.id, fileView);
+      if (reactionKey) reactions.track(msg.id, reactionKey, row, reactionMount);
+      if (fileView) {
+        fileViews.set(msg.id, fileView);
+        for (const attachment of fileView.attachments) {
+          attachmentJobs.set(attachment.node, attachment);
+          fileObserver.observe(attachment.node);
+        }
+      }
     }
     if (anchor) list.scrollTop += (rows.get(anchor.dataset.messageId) ?? anchor).getBoundingClientRect().top - anchorTop;
     else if (olderBatch) list.scrollTop = preservedScroll + list.scrollHeight - preservedHeight;
@@ -535,6 +608,7 @@ export function renderChat(context, channel, edit) {
   signal.addEventListener("abort", () => {
     clearTimeout(timer);
     clearTimeout(highlightTimer);
+    fileObserver.disconnect();
     for (const id of fileViews.keys()) releaseFiles(id);
   }, { once: true });
 

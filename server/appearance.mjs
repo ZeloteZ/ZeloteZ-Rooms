@@ -18,6 +18,7 @@ const imageSizes = {
 const defaults = {
   accentColor: null, surfaceColor: null, chatBackgroundMode: 'cover', chatBackgroundOpacity: 28,
 }
+const profileFields = ['nameColor', 'autoLoadAttachments', 'autoLoadAttachmentMaxBytes']
 const missing = () => new RequestError(404, 'Dieses Bild oder Thema ist nicht verfügbar.')
 const forbidden = () => new RequestError(403, 'Du darfst dieses Design nicht ändern.')
 
@@ -66,6 +67,11 @@ export function createAppearance(db) {
     CREATE TABLE IF NOT EXISTS profile_appearance (
       user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, name_color TEXT
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS profile_chat_preferences (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      auto_load INTEGER NOT NULL CHECK (auto_load IN (0, 1)),
+      max_bytes INTEGER CHECK (max_bytes > 0)
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS topic_appearance (
       topic_id TEXT PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE, accent_color TEXT, surface_color TEXT,
       background_mode TEXT NOT NULL CHECK (background_mode IN ('cover', 'tile')),
@@ -85,6 +91,7 @@ export function createAppearance(db) {
   `)
 
   const lookUpProfile = db.prepare('SELECT name_color FROM profile_appearance WHERE user_id = ?')
+  const lookUpChatPreferences = db.prepare('SELECT auto_load, max_bytes FROM profile_chat_preferences WHERE user_id = ?')
   const avatarFor = db.prepare("SELECT id FROM appearance_images WHERE user_id = ? AND slot = 'avatar'")
   const themeFor = db.prepare('SELECT * FROM topic_appearance WHERE topic_id = ?')
   const imagesFor = db.prepare('SELECT id, slot FROM appearance_images WHERE topic_id = ?')
@@ -95,6 +102,15 @@ export function createAppearance(db) {
 
   function profile(userId) {
     return { avatarUrl: urlFor(avatarFor.get(userId)?.id), nameColor: lookUpProfile.get(userId)?.name_color ?? null }
+  }
+
+  function chatPreferences(userId) {
+    const row = lookUpChatPreferences.get(userId)
+    return { autoLoadAttachments: row?.auto_load !== 0, autoLoadAttachmentMaxBytes: row?.max_bytes ?? null }
+  }
+
+  function selfProfile(userId) {
+    return { ...profile(userId), ...chatPreferences(userId) }
   }
 
   function topic(topicId, joined) {
@@ -120,9 +136,25 @@ export function createAppearance(db) {
   }
 
   function updateProfile(userId, input) {
-    if (Object.keys(input).length !== 1 || !Object.hasOwn(input, 'nameColor')) throw new RequestError(400, 'Ungültige Profileinstellung.')
-    db.prepare(`INSERT INTO profile_appearance(user_id, name_color) VALUES (?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET name_color = excluded.name_color`).run(userId, hexColor(input.nameColor))
+    const keys = Object.keys(input)
+    const invalid = () => new RequestError(400, 'Ungültige Profileinstellung.')
+    if (!keys.length || keys.some(key => !profileFields.includes(key))) throw invalid()
+    const hasColor = Object.hasOwn(input, 'nameColor')
+    transaction(db, () => {
+      if (hasColor) {
+        db.prepare(`INSERT INTO profile_appearance(user_id, name_color) VALUES (?, ?)
+          ON CONFLICT(user_id) DO UPDATE SET name_color = excluded.name_color`).run(userId, hexColor(input.nameColor))
+      }
+      if (keys.some(key => key !== 'nameColor')) {
+        const { autoLoadAttachments, autoLoadAttachmentMaxBytes: max } = { ...chatPreferences(userId), ...input }
+        if (typeof autoLoadAttachments !== 'boolean' || (max !== null && (!Number.isSafeInteger(max) || max < 1))) {
+          throw invalid()
+        }
+        db.prepare(`INSERT INTO profile_chat_preferences(user_id, auto_load, max_bytes) VALUES (?, ?, ?)
+          ON CONFLICT(user_id) DO UPDATE SET auto_load = excluded.auto_load, max_bytes = excluded.max_bytes`)
+          .run(userId, Number(autoLoadAttachments), max)
+      }
+    })
   }
 
   function updateTopic(topicId, input) {
@@ -222,9 +254,9 @@ export function createAppearance(db) {
     } else if (request.method !== 'GET' || topicId || slot) {
       throw new RequestError(405, 'Diese Anfrage wird hier nicht unterstützt.')
     }
-    json(response, 200, topicId ? { appearance: topic(topicId, true) } : { profile: profile(user.id) })
+    json(response, 200, topicId ? { appearance: topic(topicId, true) } : { profile: selfProfile(user.id) })
     return true
   }
 
-  return { handle, profile, topic, designPermission }
+  return { handle, profile, selfProfile, topic, designPermission }
 }

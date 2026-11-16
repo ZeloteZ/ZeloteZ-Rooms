@@ -20,6 +20,7 @@
 
 .room-actions { gap: 6px; }
 .room-action-icon { display: none; }
+.room-settings-delete { padding-block-start: 15px; border-block-start: 1px solid var(--line); }
 .topic-view:not([data-joined]) > .room-hero { margin-bottom: 12px; }
 
 .topic-view[data-joined] {

@@ -107,7 +107,12 @@
 .appearance-preset-grid[data-slot="banner"] img { aspect-ratio: 5 / 2; }
 .appearance-preset[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--raised)); }
 .appearance-profile-fields .appearance-image-preview { display: none; }
-.appearance-color-field { padding: 8px 10px; background: #13141b; border: 1px solid var(--line); border-radius: 11px; }
+.appearance-color-field, .appearance-attachment-preference {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #13141b;
+}
 .appearance-color-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; }
 .appearance-color-row input[type="color"] { width: 46px; min-height: 34px; padding: 3px; cursor: pointer; }
 .appearance-color-code { color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; }

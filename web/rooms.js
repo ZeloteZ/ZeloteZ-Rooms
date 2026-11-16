@@ -108,6 +108,14 @@ function collection(title, topics, empty, context) {
     el("div", { class: "shelf-heading" }, heading, controls), grid);
 }
 
+function greeting(name) {
+  const hour = new Date().getHours();
+  if (hour < 5) return t("Hello, {name}", "Hallo, {name}", { name });
+  if (hour < 12) return t("Good morning, {name}", "Guten Morgen, {name}", { name });
+  if (hour < 18) return t("Good afternoon, {name}", "Guten Tag, {name}", { name });
+  return t("Good evening, {name}", "Guten Abend, {name}", { name });
+}
+
 export async function renderTopics(context) {
   const { topics } = await api("topics", { signal: context.signal });
   const recent = topics.filter(topic => topic.joined && topic.visitedAt).sort(timeOrder("visitedAt")).slice(0, 8);
@@ -119,7 +127,7 @@ export async function renderTopics(context) {
   ];
   const dashboard = el("div", { class: "home-dashboard", "data-pane": "topics" },
     el("header", { class: "home-heading page-heading" },
-      el("h1", {}, t("Your rooms", "Deine Räume")),
+      el("h1", {}, greeting(context.user.displayName)),
       button(t("Create room", "Raum erstellen"), () => newTopic(context), { class: "primary" })),
     el("div", { class: "home-tabs", role: "group", "aria-label": t("Room overview", "Raumübersicht") }, tabs),
     el("div", { class: "home-content" },
@@ -136,17 +144,64 @@ export async function renderTopics(context) {
   return dashboard;
 }
 
-function topicSettings(context, topic) {
+function topicSettings(context, topic, onDelete) {
+  const endpoint = "topics/" + identifier(topic.id);
   const title = el("input", { required: true, value: topic.title, name: "title", maxlength: "72", autocomplete: "off" });
   const visibility = select(visibilityOptions, topic.visibility);
   const streamPolicy = select(topicPolicies, topic.streamPolicy ?? "all");
-  showDialog(t("Edit room", "Raum bearbeiten"), form([field(t("Room name", "Name des Raums"), title), field(t("Who can join?", "Wer kann beitreten?"), visibility), field(t("Who can stream in this room?", "Wer darf in diesem Raum streamen?"), streamPolicy)],
-    t("Save", "Speichern"), async () => {
-      await api("topics/" + identifier(topic.id), {
-        method: "PATCH", body: { title: title.value.trim(), visibility: visibility.value, streamPolicy: streamPolicy.value }, signal: context.signal,
-      });
-      refreshAfter(context, t("Room saved.", "Raum gespeichert."));
-    }));
+  const settings = form([
+    field(t("Room name", "Name des Raums"), title),
+    field(t("Who can join?", "Wer kann beitreten?"), visibility),
+    field(t("Who can stream in this room?", "Wer darf in diesem Raum streamen?"), streamPolicy),
+  ], t("Save", "Speichern"), async () => {
+    await api(endpoint, {
+      method: "PATCH", body: { title: title.value.trim(), visibility: visibility.value, streamPolicy: streamPolicy.value }, signal: context.signal,
+    });
+    refreshAfter(context, t("Room saved.", "Raum gespeichert."));
+  });
+  const removeRoom = button(t("Delete room", "Raum löschen"), confirmDelete, { class: "danger" });
+  const panel = el("div", { class: "stack" }, settings, el("div", { class: "inline room-settings-delete" }, removeRoom));
+
+  function open() {
+    showDialog(t("Edit room", "Raum bearbeiten"), panel);
+  }
+
+  function confirmDelete() {
+    if (settings.getAttribute("aria-busy") === "true") return;
+    const feedback = status();
+    const cancel = button(t("Cancel", "Abbrechen"), () => {
+      open();
+      removeRoom.focus();
+    });
+    const remove = button(t("Permanently delete room", "Raum endgültig löschen"), async () => {
+      cancel.disabled = true;
+      remove.disabled = true;
+      tell(feedback, "");
+      try {
+        await api(endpoint, { method: "DELETE", signal: context.signal });
+        if (context.signal.aborted) return;
+        onDelete();
+        closeDialog();
+        notify(t("Room deleted.", "Raum gelöscht."));
+        location.replace("#/rooms");
+      } catch (error) {
+        if (!context.signal.aborted) tell(feedback, error.message, "error");
+      } finally {
+        cancel.disabled = false;
+        remove.disabled = false;
+      }
+    }, { class: "danger" });
+    showDialog(t("Delete room", "Raum löschen"), el("div", { class: "stack" },
+      el("p", {}, t("Permanently delete “{name}”?", "Möchtest du „{name}“ dauerhaft löschen?", { name: topic.title })),
+      el("p", { class: "muted" }, t(
+        "This deletes the room and all its channels, messages and attachments for everyone. Active voice chats and streams will end.",
+        "Der Raum und alle seine Channels, Nachrichten und Anhänge werden für alle gelöscht. Laufende Sprachchats und Streams werden beendet.")),
+      feedback,
+      el("div", { class: "inline" }, cancel, remove)));
+    cancel.focus();
+  }
+
+  open();
 }
 
 async function membersDialog(context, topic, members) {
@@ -441,7 +496,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
       owner ? button([
         el("span", { class: "room-action-label" }, t("Settings", "Einstellungen")),
         el("span", { class: "room-action-icon", "aria-hidden": "true" }, "⚙"),
-      ], () => topicSettings(context, topic), { "aria-label": t("Settings", "Einstellungen"), title: t("Settings", "Einstellungen") })
+      ], () => topicSettings(context, topic, stopRoomCapture), { "aria-label": t("Settings", "Einstellungen"), title: t("Settings", "Einstellungen") })
         : button(t("Leave", "Verlassen"), () => leaveDialog(context, topic))));
   room.append(hero);
   if (!topic.joined) {
@@ -452,6 +507,13 @@ export async function renderTopic(context, topicId, selectedId, target) {
   }
 
   let channels = initialChannels;
+
+  function stopRoomCapture() {
+    if (sameId(context.screenShare.active()?.room.id, topic.id)) context.screenShare.stop();
+    const nativeChannel = context.nativeBroadcast?.active()?.channelId;
+    if (channels.some(channel => sameId(channel.id, nativeChannel))) context.nativeBroadcast.stop().catch(() => {});
+  }
+
   const channelList = el("nav", { "aria-label": "Channels", class: "channel-list" });
   const picker = el("select", { class: "room-channel-picker", "aria-label": t("Switch channel", "Channel wechseln") });
   let links;

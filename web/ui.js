@@ -90,7 +90,8 @@ export function form(items, submitLabel, submit) {
 const dialog = document.querySelector("#dialog");
 const dialogHeading = document.querySelector("#dialog-heading");
 const dialogContent = document.querySelector("#dialog-content");
-document.querySelector("#dialog-close").addEventListener("click", () => dialog.close());
+const dialogClose = document.querySelector("#dialog-close");
+dialogClose.addEventListener("click", () => dialog.close());
 dialog.addEventListener("close", () => {
   if (!dialog.open) dialogContent.replaceChildren();
 });
@@ -104,6 +105,23 @@ export function showDialog(title, content) {
 export function closeDialog() {
   if (dialog.open) dialog.close();
   dialogContent.replaceChildren();
+}
+
+export function openChatImage(url, name, trigger) {
+  const image = element("img", { alt: name });
+  const failure = status();
+  const viewer = element("div", { class: "chat-image-viewer" }, image, failure);
+  image.addEventListener("error", () => {
+    image.hidden = true;
+    tell(failure, t("The image could not be displayed.", "Das Bild konnte nicht angezeigt werden."), "error");
+  }, { once: true });
+  image.src = url;
+  trigger?.focus({ preventScroll: true });
+  showDialog(name, viewer);
+  dialogClose.focus({ preventScroll: true });
+  return () => {
+    if (dialog.open && viewer.parentNode === dialogContent) closeDialog();
+  };
 }
 
 let toastTimer;

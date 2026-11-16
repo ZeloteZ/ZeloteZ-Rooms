@@ -272,6 +272,21 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     return showTopic(getTopic(user.id, topic.id))
   }
 
+  function removeTopic(user, topic) {
+    if (topic.owner_id !== user.id) throw forbidden()
+    transaction(db, () => {
+      const topicChannels = 'SELECT id FROM channels WHERE topic_id = ?'
+      // Ending a broadcast prunes its chat and preserves the publisher ID for disconnection by the sweeper.
+      db.prepare(`UPDATE broadcasts SET ended_at = ? WHERE ended_at IS NULL AND channel_id IN (${topicChannels})`)
+        .run(Date.now(), topic.id)
+      db.prepare(`DELETE FROM attachments WHERE channel_id IN (${topicChannels})`).run(topic.id)
+      db.prepare(`DELETE FROM messages WHERE channel_id IN (${topicChannels})`).run(topic.id)
+      db.prepare('DELETE FROM channels WHERE topic_id = ?').run(topic.id)
+      db.prepare('DELETE FROM topic_members WHERE topic_id = ?').run(topic.id)
+      db.prepare('DELETE FROM topics WHERE id = ?').run(topic.id)
+    })
+  }
+
   function join(user, topic) {
     if (topic.joined_at) return showTopic(topic)
     const now = new Date().toISOString()
@@ -507,12 +522,17 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     }
   }
 
-  function getFile(response, user, channel, fileId) {
+  function getFile(response, user, channel, fileId, limit) {
     assertId(fileId)
-    const file = db.prepare(`SELECT a.bytes, a.size FROM attachments a JOIN messages m ON m.id = a.message_id
+    if (limit !== null && (!/^[1-9]\d{0,7}$/u.test(limit) || Number(limit) > fileLimit)) {
+      throw new RequestError(400, 'Ungültige Auswahl.')
+    }
+    const file = db.prepare(`SELECT CASE WHEN a.size <= ? THEN a.bytes END AS bytes, a.size
+      FROM attachments a JOIN messages m ON m.id = a.message_id
       ${joinHistory} WHERE a.id = ? AND a.channel_id = ? AND ${undeleted} AND (g.revision IS NOT NULL OR ${originalAccess})`)
-      .get(user.id, fileId, channel.id, user.id)
+      .get(limit === null ? fileLimit : Number(limit), user.id, fileId, channel.id, user.id)
     if (!file) throw missing()
+    if (file.bytes === null) return response.writeHead(204).end()
     response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': file.size,
       'Content-Disposition': 'attachment', 'Content-Security-Policy': "default-src 'none'; sandbox" })
     response.end(file.bytes)
@@ -540,6 +560,10 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       if (method === 'GET' && !action) json(response, 200, topicDetails(user, topic))
       else if (method === 'GET' && action === 'activity') json(response, 200, { activities: recentActivity(user, topic) })
       else if (method === 'PATCH' && !action) json(response, 200, { topic: changeTopic(user, topic, body) })
+      else if (method === 'DELETE' && !action) {
+        removeTopic(user, topic)
+        response.writeHead(204).end()
+      }
       else if (method === 'POST' && action === 'join') json(response, 200, { topic: join(user, topic) })
       else if (method === 'DELETE' && action === 'join') {
         if (topic.role === 'owner') throw forbidden()
@@ -582,7 +606,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
         if (method === 'PUT') {
           await putFile(request, user, channel, file)
           json(response, 201, { id: file })
-        } else if (method === 'GET') getFile(response, user, channel, file)
+        } else if (method === 'GET') getFile(response, user, channel, file, searchParams.get('maxBytes'))
         else return false
       } else return false
     } else return false

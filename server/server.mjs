@@ -10,6 +10,7 @@ import { createHistory } from './history.mjs'
 import { assertOrigin, json, readJson, RequestError } from './http.mjs'
 import { setResponseLocale } from './locale.mjs'
 import { createNotifications } from './notifications.mjs'
+import { createReactions } from './reactions.mjs'
 import { createStreams } from './streams.mjs'
 import { createStreamChat } from './stream-chat.mjs'
 import { createVoice } from './voice.mjs'
@@ -28,7 +29,7 @@ const db = new DatabaseSync(join(dataDir, 'community.sqlite'), { timeout: 5000 }
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 67108864')
 const appearance = createAppearance(db)
 const profileFor = appearance.profile
-const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor })
+const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile })
 const { requireSession } = auth
 const recordMentions = input => notifications.recordMentions(input)
 const community = createCommunity(db, { requireSession, appearance, recordMentions })
@@ -41,6 +42,7 @@ const streams = createStreams(db, {
   channelAccess: community.channelAccess, profileFor, readJson, json, RequestError })
 const streamChat = createStreamChat(db, { requireSession, community, streams, profileFor, recordMentions })
 const notifications = createNotifications(db, { requireSession, streams, profileFor })
+const reactions = createReactions(db, { requireSession, streams })
 const voice = createVoice(db, { mediaUrl: process.env.MEDIAMTX_WEBRTC_URL }, {
   requireSession, sessionKey: auth.sessionKey, isSessionActive: auth.isSessionActive,
   channelAccess: community.channelAccess, profileFor, readJson, json, RequestError,
@@ -87,6 +89,7 @@ const publicApi = service(async (request, response) => {
     }
     if (await appearance.handle(request, response, path, requireSession)) return
     if (await notifications.handle(request, response, url)) return
+    if (await reactions.handle(request, response, url)) return
     if (await voice.handle(request, response, path)) return
     if (await streamChat.handle(request, response, url)) return
     if (await streams.handle(request, response, path)) return

@@ -1,8 +1,9 @@
 import { api, button, closeDialog, el, field, form, localizedTime, personName, showDialog, status, tell } from "./ui.js";
 import { t } from "./i18n.js";
 import { createMentionDirectory, mentionComposer, renderMentionText } from "./mentions.js";
+import { createReactions } from "./reactions.js";
 
-export function renderStreamChat({ signal, messageId }, streamId) {
+export function renderStreamChat({ signal, messageId, user }, streamId) {
   const endpoint = "streams/" + streamId + "/chat";
   const log = el("ol", { class: "stream-chat-log", "aria-label": t("Messages in stream chat", "Nachrichten im Streamchat"), "aria-live": "polite" });
   const empty = el("p", { class: "subtle stream-chat-empty" }, t("No messages yet.", "Noch keine Nachrichten."));
@@ -16,6 +17,7 @@ export function renderStreamChat({ signal, messageId }, streamId) {
   const pane = el("section", { class: "panel stream-chat", "aria-label": t("Stream chat", "Streamchat") },
     el("h2", {}, t("Stream chat", "Streamchat")), el("div", { class: "stream-chat-scroll" }, empty, log), feedback, composer);
   const scroll = log.parentElement;
+  const reactions = createReactions({ endpoint, scope: streamId, user, signal, scroll });
   let recipients = [];
   let latest = messageId ? 0 : null;
   let target = messageId;
@@ -35,7 +37,7 @@ export function renderStreamChat({ signal, messageId }, streamId) {
     if (!envelope) return null;
     try {
       const opened = await ClubCrypto.openMessage(contextId, id, envelope);
-      return typeof opened?.content?.text === "string" ? opened.content : null;
+      return typeof opened?.content?.text === "string" ? opened : null;
     } catch {
       return null;
     }
@@ -43,21 +45,23 @@ export function renderStreamChat({ signal, messageId }, streamId) {
 
   async function renderMessage(message) {
     if (message.deletion) {
-      const reason = (await openContent("deletion:" + streamId, message.id, message.deletion.reason))?.text;
-      return el("li", { class: "stream-chat-tombstone" },
+      const reason = (await openContent("deletion:" + streamId, message.id, message.deletion.reason))?.content.text;
+      return { row: el("li", { class: "stream-chat-tombstone" },
         el("p", {}, t("Message from {author} was deleted by {moderator}.", "Nachricht von {author} wurde von {moderator} gelöscht.",
           { author: message.author.displayName, moderator: message.deletion.by.displayName })),
-        reason && el("p", {}, t("Reason: {reason}", "Grund: {reason}", { reason })));
+        reason && el("p", {}, t("Reason: {reason}", "Grund: {reason}", { reason }))) };
     }
-    const content = await openContent(streamId, message.id, message.envelope);
-    if (!content?.text.trim()) return null;
+    const opened = await openContent(streamId, message.id, message.envelope);
+    if (!opened?.content.text.trim()) return null;
+    const { content, key } = opened;
     const remove = message.canDelete && button(t("Delete", "Löschen"), () => confirmRemoval(message), {
       class: "stream-chat-delete ghost", "aria-label": t("Delete message from {name}", "Nachricht von {name} löschen", { name: message.author.displayName }),
     });
-    return el("li", {},
+    const row = el("li", {},
       el("div", { class: "stream-chat-byline" }, personName(message.author),
         el("time", { datetime: message.at }, localizedTime(message.at)), remove),
       el("p", {}, renderMentionText(content, directory)));
+    return { row, key };
   }
 
   function focusTarget() {
@@ -76,11 +80,14 @@ export function renderStreamChat({ signal, messageId }, streamId) {
     if (signal.aborted) return;
     const nearEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
     messages.forEach((message, index) => {
-      const row = rendered[index];
-      if (!row) return;
+      const nextMessage = rendered[index];
+      if (!nextMessage) return;
+      const { key, row } = nextMessage;
       const existing = rowsById.get(message.id);
-      if (existing && message.deletion) existing.replaceWith(row);
-      else if (!existing && !existingOnly) {
+      if (existing && message.deletion) {
+        reactions.remove(message.id);
+        existing.replaceWith(row);
+      } else if (!existing && !existingOnly) {
         const next = Array.from(log.children).find(entry => Number(entry.dataset.sequence) > message.seq);
         log.insertBefore(row, next ?? null);
       }
@@ -88,10 +95,12 @@ export function renderStreamChat({ signal, messageId }, streamId) {
       row.dataset.messageId = message.id;
       row.dataset.sequence = message.seq;
       rowsById.set(message.id, row);
+      if (key) reactions.track(message.id, key, row);
     });
     empty.hidden = rowsById.size > 0;
     while (log.childElementCount > 250) {
       const oldest = log.firstElementChild;
+      reactions.remove(oldest.dataset.messageId);
       rowsById.delete(oldest.dataset.messageId);
       oldest.remove();
     }

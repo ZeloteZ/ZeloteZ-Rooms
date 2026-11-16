@@ -9,6 +9,7 @@ window.ClubCrypto = (() => {
   const curve = { name: "ECDH", namedCurve: "P-256" };
   const cacheName = `${suite}/vault`;
   const pinnedKeys = new Map();
+  const reactionKeys = new WeakMap();
   let active = null;
 
   function base64(bytes) {
@@ -182,9 +183,12 @@ window.ClubCrypto = (() => {
       : aad("history recipient", channelId, messageId, identity.id, grant.grantorId);
     const rawKey = await unwrapMessageKey(identity.key, original ? envelope.ephemeral : grant.ephemeral, link, original ?? grant);
     try {
-      const key = await aesKey(rawKey);
+      const [key, reactionKey] = await Promise.all([
+        aesKey(rawKey), subtle.importKey("raw", rawKey, "HKDF", false, ["deriveKey"]),
+      ]);
       const content = await subtle.decrypt(aead(binary(envelope.nonce), aad("message", channelId, messageId)), key, binary(envelope.body));
       if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+      reactionKeys.set(key, reactionKey);
       return { content: JSON.parse(decoder.decode(content)), key };
     } finally {
       rawKey.fill(0);
@@ -205,9 +209,31 @@ window.ClubCrypto = (() => {
     return subtle.decrypt(aead(bytes.subarray(0, 12), aad("attachment", attachmentId)), key, bytes.subarray(12));
   }
 
+  async function sealReaction(key, scope, messageId, userId, emoji) {
+    const text = encoder.encode(emoji);
+    const padded = new Uint8Array(32);
+    if (!text.length || text.length > padded.length) throw new Error(errorText("Invalid reaction.", "Ungültige Reaktion."));
+    padded.set(text);
+    const signer = await subtle.deriveKey({
+      name: "HKDF", hash: "SHA-256", salt: aad("reaction ids", scope, messageId), info: aad("reaction id"),
+    }, reactionKeys.get(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const id = base64(await subtle.sign("HMAC", signer, aad(userId, emoji)));
+    const iv = nonce();
+    const ciphertext = await subtle.encrypt(aead(iv, aad("reaction", scope, messageId, userId, id)), key, padded);
+    return { id, nonce: base64(iv), body: base64(ciphertext) };
+  }
+
+  async function openReaction(key, scope, messageId, { id, userId, nonce, body }) {
+    const plaintext = await subtle.decrypt(aead(binary(nonce), aad("reaction", scope, messageId, userId, id)), key, binary(body));
+    const bytes = new Uint8Array(plaintext);
+    const end = bytes.indexOf(0);
+    return decoder.decode(end === -1 ? bytes : bytes.subarray(0, end));
+  }
+
   function deletionScope(id) {
     return id + "/deletion";
   }
 
-  return { prepareRegistration, credential, unlock, lock, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile, deletionScope };
+  return { prepareRegistration, credential, unlock, lock, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
+    sealReaction, openReaction, deletionScope };
 })();
