@@ -4,6 +4,7 @@ const { app, BrowserWindow, Menu, desktopCapturer, dialog, ipcMain, nativeTheme,
 const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { installAudio } = require("./audio.cjs");
 
 const localPage = path.join(__dirname, "ui", "index.html");
 const localUrl = pathToFileURL(localPage).href;
@@ -54,9 +55,10 @@ async function saveServer(origin) {
 
 function localWindow(mode, state, parent) {
   const settings = mode === "settings";
+  const title = mode === "audio" ? text("Choose audio", "Tonquelle auswählen") : text("Share your screen", "Bildschirm teilen");
   const window = new BrowserWindow({
     parent, modal: Boolean(parent), show: false, icon: appIcon, autoHideMenuBar: true, backgroundColor: "#15151b",
-    title: settings ? "ZeloteZ Rooms" : text("Share your screen", "Bildschirm teilen"),
+    title: settings ? "ZeloteZ Rooms" : title,
     width: settings ? 510 : 745, height: settings ? 370 : 590, minWidth: 340, minHeight: 310,
     webPreferences: {
       preload: path.join(__dirname, "local-preload.cjs"), sandbox: true, contextIsolation: true,
@@ -89,7 +91,7 @@ ipcMain.handle("rooms:local-cancel", event => localSender(event)?.window.close()
 ipcMain.handle("rooms:local-submit", async (event, input) => {
   const local = localSender(event);
   if (!local) return false;
-  if (local.state.mode === "picker") {
+  if (local.state.mode !== "settings") {
     if (!Number.isInteger(input) || input < 0 || input >= local.state.sources.length) return false;
     local.selection = input;
     local.window.close();
@@ -121,16 +123,19 @@ function showSettings(error = false) {
 
 function chooseSource(parent, sources) {
   if (!sources.length || parent.isDestroyed()) return Promise.resolve(null);
-  const local = localWindow("picker", {
-    sources: sources.map(source => ({
-      name: source.name,
-      kind: source.id.startsWith("screen:") ? "screen" : "window",
-      thumbnail: source.thumbnail.isEmpty() ? null : source.thumbnail.toDataURL(),
-    })),
-  }, parent);
-  return new Promise(resolve => {
-    local.window.once("closed", () => resolve(sources[local.selection] ?? null));
+  return choose(parent, "picker", sources, { sources: sources.map(source => ({
+    name: source.name,
+    kind: source.id.startsWith("screen:") ? "screen" : "window",
+    thumbnail: source.thumbnail.isEmpty() ? null : source.thumbnail.toDataURL(),
+  })) }).result;
+}
+
+function choose(parent, mode, entries, state) {
+  const local = localWindow(mode, state, parent);
+  const result = new Promise(resolve => {
+    local.window.once("closed", () => resolve(entries[local.selection] ?? null));
   });
+  return { window: local.window, result };
 }
 
 function installPermissions(window, origin, media) {
@@ -138,6 +143,8 @@ function installPermissions(window, origin, media) {
   let microphone = false;
   let microphonePrompt;
   let picking = false;
+  const approveAudio = installAudio(web, value => !window.isDestroyed() && isRoomsPage(value, origin),
+    (mode, sources) => choose(window, "audio", sources, { audioMode: mode, sources: sources.map(source => ({ name: source.title })) }));
   const allowed = (contents, target, main) => !window.isDestroyed() && !web.isDestroyed()
     && contents === web && main === true && isRoomsPage(web.getURL(), origin) && webUrl(target)?.origin === origin;
 
@@ -191,7 +198,11 @@ function installPermissions(window, origin, media) {
       picking = false;
     }
     try {
-      callback(capture && valid() ? { video: capture } : null);
+      if (!capture || !valid()) callback(null);
+      else {
+        approveAudio();
+        callback({ video: capture });
+      }
     } catch {
       // Chromium discards the pending request when its frame closes.
     }

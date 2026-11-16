@@ -148,9 +148,15 @@
   max-block-size: none;
 }
 
-.room-layout .room-live-content { gap: 9px; }
-.room-layout .room-live-content > .panel { padding: 12px; }
-.room-layout .room-live-content .voice-roster { max-block-size: min(9rem, 18dvh); }
+.live-channel { container: live-channel / inline-size; gap: 12px; padding: clamp(10px, 1.5vi, 18px); }
+.live-channel-overview { display: grid; align-items: start; gap: 12px; }
+.live-channel-streams { display: grid; gap: 7px; min-inline-size: 0; padding: 2px; }
+.live-channel-streams > .inline:not(:has(> :not([hidden]))), .live-channel-streams .stream-list:empty { display: none; }
+.voice-inline { min-inline-size: 0; }
+.live-channel .voice-roster { max-block-size: min(7rem, 18dvh); }
+@container live-channel (min-width: 32rem) {
+  .live-channel-overview { grid-template-columns: minmax(13rem, 4fr) minmax(0, 6fr); }
+}
 .screen-preview .stage { max-block-size: clamp(8rem, 32dvh, 18rem); }
 
 .desktop-share-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }

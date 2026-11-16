@@ -6,6 +6,7 @@
   background: linear-gradient(132deg, color-mix(in srgb, var(--accent) 8%, var(--panel)), var(--panel) 58%);
 }
 .voice-panel[data-mode="compact"] { --voice-padding: 8px; border-radius: 12px; gap: 8px; }
+.voice-panel[data-mode="inline"] { --voice-padding: 10px; border-radius: 12px; gap: 7px; }
 .voice-heading { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 5px; }
 .voice-heading h2 { font-size: 1.08rem; }
 .voice-panel[data-mode="compact"] h2 { font-size: .94rem; }
@@ -13,6 +14,7 @@
 a.voice-place { display: inline-block; text-decoration: underline; text-underline-offset: 2px; }
 .voice-presence.voice-speaking { color: var(--good); border-color: #416c63; background: #203630; }
 .voice-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.voice-panel[data-mode="inline"] .voice-actions .button { min-height: 35px; padding-inline: 9px; }
 .voice-panel[data-mode="compact"] .voice-actions .button { min-height: 31px; padding-inline: 6px; font-size: .73rem; text-align: left; }
 .voice-roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 145px), 1fr)); gap: 6px; max-height: 180px; overflow: auto; list-style: none; padding: 0; }
 .voice-panel[data-mode="compact"] .voice-roster { grid-template-columns: 1fr; max-height: 115px; }

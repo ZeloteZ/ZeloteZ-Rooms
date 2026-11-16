@@ -13,7 +13,7 @@ async function setup() {
     control(id).addEventListener("click", () => bridge.cancel());
   }
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && (state.mode === "picker" || state.canCancel)) bridge.cancel();
+    if (event.key === "Escape" && (state.mode !== "settings" || state.canCancel)) bridge.cancel();
   });
 
   if (state.mode === "settings") {
@@ -49,31 +49,43 @@ async function setup() {
     return;
   }
 
-  control("heading").textContent = t("What do you want to share?", "Was möchtest du teilen?");
-  control("description").textContent = t("Select a screen or a window.", "Wähle einen Bildschirm oder ein Fenster.");
+  const audio = state.mode === "audio";
+  const system = state.audioMode === "system";
+  control("heading").textContent = audio
+    ? system ? t("Choose a playback device", "Wiedergabegerät auswählen") : t("Choose application audio", "Anwendungston auswählen")
+    : t("What do you want to share?", "Was möchtest du teilen?");
+  control("description").textContent = audio
+    ? system ? t("The stream will include everything you hear on this device.",
+      "Der Stream enthält alles, was du über dieses Gerät hörst.") : t("The stream will include audio from the selected output.",
+      "Der Stream enthält den Ton der ausgewählten Anwendungsausgabe.")
+    : t("Select a screen or a window.", "Wähle einen Bildschirm oder ein Fenster.");
   const share = control("share");
   share.textContent = t("Share", "Teilen");
   const sources = control("sources");
-  sources.setAttribute("aria-label", t("Capture sources", "Aufnahmequellen"));
+  sources.setAttribute("aria-label", audio ? t("Audio sources", "Tonquellen") : t("Capture sources", "Aufnahmequellen"));
+  sources.classList.toggle("audio-sources", audio);
   let selected = null;
   for (const [index, source] of state.sources.entries()) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "source";
     button.setAttribute("aria-pressed", "false");
-    const preview = document.createElement("div");
-    preview.className = "preview";
-    if (source.thumbnail) {
-      const image = new Image();
-      image.src = source.thumbnail;
-      image.alt = "";
-      preview.append(image);
-    }
     const label = document.createElement("strong");
     label.textContent = source.name;
-    const kind = document.createElement("span");
-    kind.textContent = source.kind === "screen" ? t("Screen", "Bildschirm") : t("Window", "Fenster");
-    button.append(preview, label, kind);
+    if (audio) button.append(label);
+    else {
+      const preview = document.createElement("div");
+      preview.className = "preview";
+      if (source.thumbnail) {
+        const image = new Image();
+        image.src = source.thumbnail;
+        image.alt = "";
+        preview.append(image);
+      }
+      const kind = document.createElement("span");
+      kind.textContent = source.kind === "screen" ? t("Screen", "Bildschirm") : t("Window", "Fenster");
+      button.append(preview, label, kind);
+    }
     button.addEventListener("click", () => {
       selected?.button.setAttribute("aria-pressed", "false");
       selected = { index, button };

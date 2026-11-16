@@ -545,9 +545,8 @@ export async function renderTopic(context, topicId, selectedId, target) {
     const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
     if (channel.type === "live") {
       const voiceMount = el("div", { class: "voice-inline" });
-      channelNode = renderLive(childContext, channel, edit, context.player);
-      content.replaceChildren(el("div", { class: "stack room-live-content" },
-        voiceMount, channelNode));
+      channelNode = renderLive(childContext, channel, edit, context.player, voiceMount);
+      content.replaceChildren(channelNode);
       context.voice.setLocation(channel, topic, voiceMount);
     } else {
       channelNode = renderChat(childContext, channel, edit);

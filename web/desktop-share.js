@@ -53,6 +53,7 @@ function chooseRegion(video, track, signal) {
       }
       signal.removeEventListener("abort", abort);
       video.removeEventListener("error", abort);
+      video.removeEventListener("loadeddata", paint);
       video.removeEventListener("resize", reset);
       observer.disconnect();
       dialog.close();
@@ -62,7 +63,7 @@ function chooseRegion(video, track, signal) {
 
     function paint() {
       selection.hidden = !region;
-      start.disabled = !region || Boolean(drag);
+      start.disabled = !region || Boolean(drag) || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA;
       if (!region) return;
       const { x, y, scale } = pictureBounds(video);
       selection.style.left = `${x + region.x * scale}px`;
@@ -140,6 +141,7 @@ function chooseRegion(video, track, signal) {
     });
     dialog.addEventListener("cancel", event => { event.preventDefault(); finish(null); });
     video.addEventListener("error", abort, { once: true });
+    video.addEventListener("loadeddata", paint);
     video.addEventListener("resize", reset);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) {
@@ -154,7 +156,7 @@ function chooseRegion(video, track, signal) {
   });
 }
 
-export async function cropDesktopShare(source, { height, fps }, signal, onEnded) {
+export async function cropDesktopShare(source, { height: maxHeight, fps }, signal, onEnded) {
   const input = source.getVideoTracks()[0];
   const video = el("video", { muted: true, playsinline: true });
   video.muted = true;
@@ -163,19 +165,38 @@ export async function cropDesktopShare(source, { height, fps }, signal, onEnded)
   if (!selection) return null;
   signal.throwIfAborted();
 
-  const width = Math.round(height * 16 / 9);
+  const { region, sourceWidth, sourceHeight } = selection;
+  if (video.videoWidth !== sourceWidth || video.videoHeight !== sourceHeight) {
+    video.srcObject = null;
+    onEnded(true);
+    return null;
+  }
+  const maxWidth = Math.round(maxHeight * 16 / 9);
+  const scale = Math.min(maxWidth / region.width, maxHeight / region.height);
+  // Match the selected shape within the quality preset, aligned for H.264.
+  const width = Math.max(2, Math.round(region.width * scale / 2) * 2);
+  const height = Math.max(2, Math.round(region.height * scale / 2) * 2);
   const canvas = el("canvas", { width, height });
   const context = canvas.getContext("2d", { alpha: false });
-  video.srcObject = null;
   if (!context || !canvas.captureStream || typeof MediaStreamTrackProcessor !== "function") {
+    video.srcObject = null;
     throw new Error(t("This desktop app couldn’t prepare the region stream.", "Die Desktop-App konnte den Ausschnitt-Stream nicht vorbereiten."));
   }
-  const output = canvas.captureStream(fps);
-  const reader = new MediaStreamTrackProcessor({ track: input, maxBufferSize: 1 }).readable.getReader();
-  const { region, sourceWidth, sourceHeight } = selection;
-  const scale = Math.min(width / region.width, height / region.height);
-  const fittedWidth = Math.round(region.width * scale);
-  const fittedHeight = Math.round(region.height * scale);
+  const draw = frame => context.drawImage(frame, region.x, region.y, region.width, region.height, 0, 0, width, height);
+  let output;
+  let reader;
+  try {
+    reader = new MediaStreamTrackProcessor({ track: input, maxBufferSize: 1 }).readable.getReader();
+    output = canvas.captureStream(fps);
+    // Use the visible preview immediately, even if the shared window is still.
+    draw(video);
+  } catch (error) {
+    reader?.releaseLock();
+    for (const track of output?.getTracks() ?? []) track.stop();
+    throw error;
+  } finally {
+    video.srcObject = null;
+  }
 
   async function drawFrames() {
     try {
@@ -188,8 +209,7 @@ export async function cropDesktopShare(source, { height, fps }, signal, onEnded)
             onEnded(true);
             return;
           }
-          context.drawImage(frame, region.x, region.y, region.width, region.height,
-            Math.floor((width - fittedWidth) / 2), Math.floor((height - fittedHeight) / 2), fittedWidth, fittedHeight);
+          draw(frame);
         } finally {
           frame.close();
         }

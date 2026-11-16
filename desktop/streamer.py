@@ -11,10 +11,13 @@ for namespace, version in (("Gtk", "4.0"), ("Adw", "1"), ("Graphene", "1.0"),
     gi.require_version(namespace, version)
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Xdp, XdpGtk4
 
-from app_audio import list_app_audio, validate_app_audio
+from app_audio import list_audio_outputs, validate_audio_output
 from i18n import decimal, t
 from media import CapturePipeline, CaptureWorker, Gst
 from model import QUALITY_PRESETS, Quality, parse_destination, picture_bounds, region_from_drag, validate_key
+
+
+AUDIO_MODES = ("off", "application", "system")
 
 
 def initialize_media():
@@ -115,7 +118,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.capture_type = None
         self.audio_sources = ()
         self.audio_scan = None
-        self.audio_serial = None
+        self.audio_output = None
         self.output_quality = None
         self.metric_sample = None
         self.room_session = room_session
@@ -255,15 +258,15 @@ class CaptureWindow(Adw.ApplicationWindow):
     def build_audio_controls(self):
         self.audio_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.audio_panel.add_css_class("audio-panel")
-        self.include_audio = Gtk.CheckButton(label=t("Include this app’s audio"))
-        self.include_audio.connect("toggled", self.audio_toggled)
-        self.audio_panel.append(self.include_audio)
+        self.audio_mode = Gtk.DropDown.new_from_strings([t("No audio"), t("Application audio"), t("System audio")])
+        self.audio_mode.set_selected(0)
+        field(self.audio_panel, t("_Audio to share"), self.audio_mode)
         self.audio_details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7, visible=False)
         self.audio_panel.append(self.audio_details)
         row = Gtk.Box(spacing=8)
-        self.audio_picker = Gtk.DropDown.new_from_strings([t("Choose an audio source")])
+        self.audio_picker = Gtk.DropDown.new_from_strings([t("Choose an audio output")])
         self.audio_picker.set_hexpand(True)
-        self.audio_picker.update_property([Gtk.AccessibleProperty.LABEL], [t("Audio source for the window you’re sharing")])
+        self.audio_picker.update_property([Gtk.AccessibleProperty.LABEL], [t("Audio output to share")])
         self.audio_picker.connect("notify::selected", self.update_start)
         row.append(self.audio_picker)
         self.audio_refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=t("Refresh audio sources"))
@@ -274,10 +277,15 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.audio_hint = label("", "muted")
         self.audio_hint.add_css_class("field-caption")
         self.audio_details.append(self.audio_hint)
+        self.audio_mode.connect("notify::selected", self.audio_mode_changed)
         return self.audio_panel
 
+    def selected_audio_mode(self):
+        index = self.audio_mode.get_selected()
+        return AUDIO_MODES[index] if index < len(AUDIO_MODES) else "off"
+
     def has_audio_request(self):
-        return self.app_source.get_active() and self.include_audio.get_active()
+        return self.selected_audio_mode() != "off"
 
     def selected_audio(self):
         index = self.audio_picker.get_selected()
@@ -294,24 +302,26 @@ class CaptureWindow(Adw.ApplicationWindow):
                 GLib.idle_add(callback, result, None)
         Thread(target=run, daemon=True).start()
 
-    def audio_toggled(self, _button):
+    def audio_mode_changed(self, *_args):
+        self.audio_scan = None
+        self.audio_sources = ()
+        self.audio_picker.set_model(Gtk.StringList.new([t("Choose an audio output")]))
         requested = self.has_audio_request()
         self.audio_details.set_visible(requested)
         if requested:
             self.refresh_audio()
-        else:
-            self.audio_scan = None
             self.update_start()
 
     def refresh_audio(self, _button=None):
         if not self.has_audio_request() or self.audio_scan is not None:
             return
+        mode = self.selected_audio_mode()
         previous = self.selected_audio()
         token = object()
         self.audio_scan = token
         self.audio_picker.set_sensitive(False)
         self.audio_refresh.set_sensitive(False)
-        self.audio_hint.set_label(t("Looking for active audio sources …"))
+        self.audio_hint.set_label(t("Looking for audio outputs …"))
         self.update_start()
 
         def scanned(sources, error):
@@ -319,18 +329,23 @@ class CaptureWindow(Adw.ApplicationWindow):
                 return
             self.audio_scan = None
             self.audio_sources = sources or ()
-            labels = [t("Choose an audio source"), *(source.title for source in self.audio_sources)]
+            labels = [t("Choose an audio output"), *(source.title for source in self.audio_sources)]
             self.audio_picker.set_model(Gtk.StringList.new(labels))
             selection = next((index for index, source in enumerate(self.audio_sources, 1)
                               if previous and source.serial == previous.serial), 0)
             self.audio_picker.set_selected(selection)
             self.audio_picker.set_sensitive(bool(self.audio_sources))
             self.audio_refresh.set_sensitive(True)
-            self.audio_hint.set_label(error or (t("Select the audio output of the app whose window you’re sharing.")
-                if self.audio_sources else t("Play some audio in the app and refresh the list.")))
+            if mode == "system":
+                hint = (t("All sound playing through this output will be shared.") if self.audio_sources
+                        else t("No PipeWire playback output is available."))
+            else:
+                hint = (t("Choose the application audio you want to share.") if self.audio_sources
+                        else t("Play some audio in the app and refresh the list."))
+            self.audio_hint.set_label(error or hint)
             self.update_start()
 
-        self.sound_task(list_app_audio, scanned)
+        self.sound_task(lambda: list_audio_outputs(mode), scanned)
 
     def build_live_controls(self):
         controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -413,7 +428,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.app_source.set_sensitive(can_pick)
         for widget in (self.resolution, self.rate):
             widget.set_sensitive(not busy)
-        self.audio_panel.set_visible(window_source and state in ("ready", "connecting"))
+        self.audio_panel.set_visible(state in ("ready", "connecting"))
         self.audio_panel.set_sensitive(not busy)
         self.controls.set_visible_child_name("live" if state == "live" else "setup")
         self.preview_heading.set_label(t("Live preview") if state == "live" else t("Capture preview"))
@@ -609,7 +624,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         width, height, at_30, at_60 = QUALITY_PRESETS[self.resolution.get_selected()]
         fps = 60 if self.rate.get_selected() == 1 else 30
         self.output_quality = Quality(width, height, fps, at_60 if fps == 60 else at_30)
-        self.audio_serial = None
+        self.audio_output = None
         if self.has_audio_request():
             source = self.selected_audio()
             if source is None or self.audio_scan is not None:
@@ -619,19 +634,19 @@ class CaptureWindow(Adw.ApplicationWindow):
             self.set_state("connecting")
             self.notice(t("Checking the selected audio source."))
 
-            def verified(serial, error):
+            def verified(output, error):
                 if self.closing or self.reservation is not token:
                     return
                 self.reservation = None
-                if error or not serial:
+                if error or not output:
                     self.set_state("ready")
-                    self.notice(error or t("The selected app isn’t playing audio right now."), error=True)
+                    self.notice(error or t("The selected audio output is unavailable. Choose it again."), error=True)
                     self.refresh_audio()
                     return
-                self.audio_serial = serial
+                self.audio_output = output
                 self.start_output()
 
-            self.sound_task(lambda: validate_app_audio(source), verified)
+            self.sound_task(lambda: validate_audio_output(source), verified)
         else:
             self.start_output()
 
@@ -674,13 +689,13 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.notice(t("Connecting to the streaming server."))
         capture, worker = self.capture, self.capture_worker
         dimensions = self.source_dimensions
-        quality, region, audio_serial = self.output_quality, self.region, self.audio_serial
+        quality, region, audio = self.output_quality, self.region, self.audio_output
 
         def publish():
             if capture.source_size() != dimensions:
                 return False
-            capture.publish(destination, key, quality, region, audio_serial=audio_serial,
-                            cancelled=worker.closed.is_set)
+            capture.publish(destination, key, quality, region, audio_serial=audio.serial if audio else None,
+                            cancelled=worker.closed.is_set, audio_monitor=audio is not None and audio.mode == "system")
             return True
 
         def published(result, error):
@@ -815,11 +830,8 @@ class CaptureWindow(Adw.ApplicationWindow):
     def cleanup(self):
         self.finish_room_stream()
         self.cropped_preview.set_frame()
-        self.audio_scan = None
-        self.include_audio.set_active(False)
-        self.audio_sources = ()
-        self.audio_serial = None
-        self.audio_picker.set_model(Gtk.StringList.new([t("Choose an audio source")]))
+        self.audio_mode.set_selected(0)
+        self.audio_output = None
         if self.request is not None:
             request, self.request = self.request, None
             request.cancel()

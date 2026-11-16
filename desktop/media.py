@@ -124,7 +124,7 @@ class CapturePipeline:
             return width, height
         return None
 
-    def publish(self, destination, key, quality, region=None, audio_serial=None, cancelled=None):
+    def publish(self, destination, key, quality, region=None, audio_serial=None, cancelled=None, *, audio_monitor=False):
         if self.publish_branch is not None:
             raise RuntimeError(t("A stream is already active."))
         size = self.source_size()
@@ -160,15 +160,17 @@ class CapturePipeline:
         if audio_serial is not None:
             description = f"{video} ! stream_mux.video {output} {self._audio_output(audio_serial)}"
         branch = Gst.parse_bin_from_description(description, True)
-        audio_source = branch.get_by_name("application_audio")
+        audio_source = branch.get_by_name("capture_audio")
         if audio_source is not None:
             if not audio_source.find_property("target-object"):
-                raise RuntimeError(t("This PipeWire version can’t isolate audio from an app."))
+                raise RuntimeError(t("This PipeWire version can’t target the selected audio output."))
             audio_source.set_property("target-object", str(int(audio_serial)))
             properties = Gst.Structure.new_empty("properties")
             for name in ("node.dont-fallback", "node.dont-reconnect", "node.dont-move"):
                 properties.set_value(name, True)
             properties.set_value("stream.restore-target", False)
+            if audio_monitor:
+                properties.set_value("stream.capture.sink", True)
             audio_source.set_property("stream-properties", properties)
         sender = branch.get_by_name("publisher")
         sender.set_property("scheme", 1 if destination.secure else 0)
@@ -199,6 +201,7 @@ class CapturePipeline:
         # Publishing converts the existing preview format itself. Renegotiating
         # upstream would disconnect PipeWire from the active portal source.
         pad.add_probe(Gst.PadProbeType.EVENT_UPSTREAM, keep_capture_format)
+        self.audio_source = audio_source
         try:
             if not branch.sync_state_with_parent():
                 raise RuntimeError(t("Video output couldn’t be connected."))
@@ -214,7 +217,6 @@ class CapturePipeline:
             self.publish_pad = pad
             self.sender = sender
             self.frame_counter = branch.get_by_name("encoded_frames")
-            self.audio_source = audio_source
         finally:
             if self.publish_branch is None:
                 self._remove_publish_branch(branch, pad)
@@ -224,14 +226,14 @@ class CapturePipeline:
     def _audio_output(audio_serial):
         identifier = str(audio_serial)
         if not identifier.isascii() or not identifier.isdecimal() or len(identifier) > 20:
-            raise RuntimeError(t("Choose an app that is playing audio."))
+            raise RuntimeError(t("Choose an audio output."))
         if not 0 < int(identifier) < 2**64 - 1:
-            raise RuntimeError(t("Choose an app that is playing audio."))
+            raise RuntimeError(t("Choose an audio output."))
         encoder = next((item for item in AAC_ENCODERS if Gst.ElementFactory.find(item)), None)
         if encoder is None:
-            raise RuntimeError(t("App audio needs a GStreamer AAC encoder."))
+            raise RuntimeError(t("Screen share audio needs a GStreamer AAC encoder."))
         return (
-            "pipewiresrc name=application_audio client-name=ZeloteZ-Audio on-disconnect=error provide-clock=false ! "
+            "pipewiresrc name=capture_audio client-name=ZeloteZ-Audio on-disconnect=error provide-clock=false ! "
             "queue leaky=downstream max-size-buffers=0 max-size-bytes=0 max-size-time=300000000 ! "
             "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! "
             f"{encoder} bitrate=128000 ! aacparse ! audio/mpeg,mpegversion=4,stream-format=raw ! stream_mux.audio"

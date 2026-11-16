@@ -1,6 +1,7 @@
 import { api, button, el, identifier, notify, topicHref } from "./ui.js";
 import { language, t } from "./i18n.js";
 import { cropDesktopShare } from "./desktop-share.js";
+import { prepareDesktopAudio } from "./desktop-audio.js";
 
 const streamId = /^[a-f0-9]{32}$/u;
 
@@ -56,12 +57,8 @@ async function captureDisplay(withAudio, desktopOptions) {
     throw new Error(t("Screen sharing is unavailable in this browser.", "Die Bildschirmfreigabe ist in diesem Browser nicht verfügbar."));
   }
   const fps = desktopOptions?.fps ?? 30;
-  const height = desktopOptions?.height ?? 1080;
-  const width = Math.round(height * 16 / 9);
-  const size = desktopOptions?.region ? {} : {
-    width: { ideal: width, ...(desktopOptions && { max: width }) },
-    height: { ideal: height, ...(desktopOptions && { max: height }) },
-  };
+  const size = desktopOptions ? { resizeMode: { ideal: "none" } }
+    : { width: { ideal: 1920 }, height: { ideal: 1080 } };
   try {
     return await devices.getDisplayMedia({
       video: { ...size, frameRate: { ideal: fps, max: fps } },
@@ -172,6 +169,8 @@ export function createScreenShareController({ signal }, dock) {
     update();
     try {
       const useAudio = withAudio && !desktopOptions;
+      const audioMode = desktopOptions?.audio;
+      const desktopAudio = audioMode && audioMode !== "none" ? prepareDesktopAudio(controller.signal) : null;
       const source = await captureDisplay(useAudio, desktopOptions);
       if (controller.signal.aborted) {
         for (const track of source.getTracks()) track.stop();
@@ -201,7 +200,17 @@ export function createScreenShareController({ signal }, dock) {
       const video = media.getVideoTracks()[0];
       video.contentHint = "detail";
       const displaySurface = input.getSettings().displaySurface;
-      const audio = useAudio && ["browser", "window"].includes(displaySurface) ? media.getAudioTracks()[0] : null;
+      let audio = useAudio && ["browser", "window"].includes(displaySurface) ? media.getAudioTracks()[0] : null;
+      if (desktopAudio) {
+        audio = await desktopAudio(audioMode, note => {
+          if (sharing === entry) stop(note);
+        });
+        if (!audio) {
+          stop();
+          return;
+        }
+        media.addTrack(audio);
+      }
       const capabilities = new Map();
       for (const track of [video, audio].filter(Boolean)) {
         const codecs = globalThis.RTCRtpSender?.getCapabilities?.(track.kind)?.codecs;
@@ -209,6 +218,9 @@ export function createScreenShareController({ signal }, dock) {
       }
       if (capabilities.get("video")?.length === 0) {
         throw new Error(t("This browser can’t encode H.264 for live video.", "Dieser Browser kann Live-Video nicht als H.264 übertragen."));
+      }
+      if (desktopAudio && capabilities.get("audio")?.length === 0) {
+        throw new Error(t("This desktop app can’t encode stream audio.", "Diese Desktop-App kann den Streamton nicht kodieren."));
       }
       const audioTrack = capabilities.get("audio")?.length === 0 ? null : audio;
       for (const track of media.getTracks()) {
@@ -237,7 +249,15 @@ export function createScreenShareController({ signal }, dock) {
       const peer = new RTCPeerConnection({ iceServers: reservation.iceServers ?? [], bundlePolicy: "max-bundle" });
       entry.peer = peer;
       for (const track of media.getTracks()) {
-        const transceiver = peer.addTransceiver(track, { direction: "sendonly", streams: [media] });
+        const init = { direction: "sendonly", streams: [media] };
+        if (desktopOptions && track === video) {
+          // Preserve the native preview and apply the orientation-independent cap in the encoder.
+          init.sendEncodings = [{
+            maxFramerate: desktopOptions.fps,
+            scaleResolutionDownTo: { maxWidth: Math.round(desktopOptions.height * 16 / 9), maxHeight: desktopOptions.height },
+          }];
+        }
+        const transceiver = peer.addTransceiver(track, init);
         const codecs = capabilities.get(track.kind);
         if (codecs?.length && transceiver.setCodecPreferences) transceiver.setCodecPreferences(codecs);
       }

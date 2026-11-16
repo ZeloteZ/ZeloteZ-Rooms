@@ -122,6 +122,7 @@ export function createVoicePanel(context, dock) {
   const dockSummary = el("summary", { class: "voice-dock-summary" }, dockIcon, dockLabel, dockState);
   const returnLink = el("a", { class: "voice-place" });
   const inline = createControls();
+  inline.node.dataset.mode = "inline";
   const compact = createControls(returnLink);
   compact.node.dataset.mode = "compact";
   const details = el("details", { class: "voice-dock-details", name: "header-media" }, dockSummary,
@@ -144,69 +145,78 @@ export function createVoicePanel(context, dock) {
     const micOff = button(t("Turn off microphone", "Mikrofon aus"), () => stopMicrophone(active));
     const audioOn = button(t("Enable audio playback", "Ton abspielen"), activateAudio, { class: "primary", hidden: true });
     const node = el("section", { class: "panel voice-panel", "aria-label": t("Voice chat", "Sprachchat") },
-      el("div", { class: "voice-heading" }, el("div", {}, el("h2", {}, t("Voice chat", "Sprachchat")), place), presence),
-      roster, note, el("div", { class: "voice-actions" }, join, mic, micOff, audioOn, leave));
+      el("div", { class: "voice-heading" }, el("div", {}, el(place ? "h2" : "h3", {}, t("Voice chat", "Sprachchat")), place), presence),
+      el("div", { class: "voice-actions" }, join, mic, micOff, audioOn, leave), note, roster);
     return { node, presence, roster, note, join, leave, mic, micOff, audioOn };
   }
 
   function render() {
-    const listening = Boolean(active?.confirmed);
-    const sender = active?.sender;
-    const speaking = Boolean(sender?.connected && sender.track.enabled);
-    const presenceText = speaking ? t("Microphone on", "Mikrofon an") : sender?.connected ? t("Muted", "Stumm") : sender ? t("Connecting", "Verbinden") : t("Listening", "Zuhören");
     dock.hidden = !active || Boolean(active.joinError && !active.self);
     if (active) {
       const place = active.topic.title + " · " + active.channel.title;
-      const voiceStatus = listening ? presenceText : active.joinError ? t("Connection failed", "Verbindung fehlgeschlagen") : t("Connecting", "Verbinden");
+      const voiceStatus = active.confirmed ? microphoneStatus(active.sender) : active.joinError
+        ? t("Connection failed", "Verbindung fehlgeschlagen") : t("Connecting", "Verbinden");
       dockLabel.textContent = active.channel.title;
       dockState.textContent = voiceStatus;
       dockSummary.setAttribute("aria-label", t("Voice chat · {place} · {status}", "Sprachchat · {place} · {status}",
         { place, status: voiceStatus }));
       dockSummary.title = place + " · " + voiceStatus;
-      dockIcon.dataset.state = speaking ? "speaking" : listening ? "listening" : "connecting";
+      dockIcon.dataset.state = active.sender?.connected && active.sender.track.enabled ? "speaking" : active.confirmed ? "listening" : "connecting";
       returnLink.href = topicHref(active.topic.id, active.channel.id);
       returnLink.textContent = place;
     }
     if (dock.hidden) details.open = false;
-    const switchRoom = Boolean(current && active && !sameId(current.channel.id, active.channel.id));
-    renderControls(inline, listening, sender, speaking, presenceText, switchRoom);
-    renderControls(compact, listening, sender, speaking, presenceText);
+    const elsewhere = current && active && !sameId(current.channel.id, active.channel.id);
+    renderControls(inline, elsewhere ? null : active, elsewhere && !active.joinError ? active : null);
+    renderControls(compact, active);
   }
 
-  function renderControls({ join, leave, mic, micOff, audioOn, presence, roster, note }, listening, sender, speaking, presenceText, switchRoom = false) {
-    join.hidden = Boolean(active) && !active.joinError && !switchRoom;
-    join.disabled = !supported();
-    join.textContent = switchRoom ? t("Switch voice chat", "Sprachchat wechseln") : active?.conflictingPeerId ? t("Move voice chat here", "Sprachchat hier übernehmen") : t("Join voice chat", "Sprachchat betreten");
-    leave.hidden = !active || switchRoom || Boolean(active.joinError && !active.self);
-    mic.hidden = !listening || switchRoom;
-    mic.disabled = Boolean(active?.requestingMic);
-    mic.textContent = sender ? sender.track.enabled ? t("Mute", "Stummschalten") : t("Unmute", "Stummschaltung aufheben") : t("Turn on microphone", "Mikrofon einschalten");
-    micOff.hidden = !sender || switchRoom;
-    audioOn.hidden = !active?.audioBlocked || switchRoom;
-    presence.hidden = !listening || switchRoom;
-    presence.textContent = presenceText;
-    presence.classList.toggle("voice-speaking", speaking);
+  function microphoneStatus(sender) {
+    if (!sender) return t("Listening", "Zuhören");
+    if (!sender.connected) return t("Connecting", "Verbinden");
+    return sender.track.enabled ? t("Microphone on", "Mikrofon an") : t("Muted", "Stumm");
+  }
 
-    const members = active?.members ?? [];
-    const signature = JSON.stringify([active?.self?.id, members]);
+  function renderControls({ join, leave, mic, micOff, audioOn, presence, roster, note }, room, elsewhere) {
+    const sender = room?.sender;
+    const connecting = room && !room.confirmed && !room.joinError;
+    join.hidden = Boolean(room?.confirmed);
+    join.disabled = !supported() || Boolean(connecting);
+    join.textContent = connecting ? t("Joining…", "Beitreten …") : elsewhere ? t("Switch voice chat", "Sprachchat wechseln")
+      : room?.conflictingPeerId ? t("Move voice chat here", "Sprachchat hier übernehmen") : t("Join voice chat", "Sprachchat betreten");
+    leave.hidden = !room || Boolean(room.joinError && !room.self);
+    leave.textContent = connecting ? t("Cancel", "Abbrechen") : t("Leave", "Verlassen");
+    leave.setAttribute("aria-label", connecting ? t("Cancel joining voice chat", "Beitritt zum Sprachchat abbrechen") : t("Leave voice chat", "Sprachchat verlassen"));
+    mic.hidden = !room?.confirmed;
+    mic.disabled = Boolean(room?.requestingMic);
+    mic.textContent = sender ? sender.track.enabled ? t("Mute", "Stummschalten") : t("Unmute", "Stummschaltung aufheben") : t("Turn on microphone", "Mikrofon einschalten");
+    micOff.hidden = !sender;
+    audioOn.hidden = !room?.audioBlocked;
+    presence.hidden = !room?.confirmed;
+    presence.textContent = room?.confirmed ? microphoneStatus(sender) : "";
+    presence.classList.toggle("voice-speaking", Boolean(sender?.connected && sender.track.enabled));
+
+    const members = room?.members ?? [];
+    const signature = JSON.stringify([room?.self?.id, members]);
     if (signature !== roster.dataset.signature) {
       roster.dataset.signature = signature;
       roster.replaceChildren(...members.map(member => {
         const person = { ...member, id: member.userId };
-        const own = sameId(member.id, active?.self?.id);
+        const own = sameId(member.id, room?.self?.id);
         return el("li", { class: "voice-person" }, personMark(person),
           el("span", { class: "voice-name" }, personName(person), own ? t(" (you)", " (du)") : ""),
           member.publishing && el("span", { class: "voice-mic-mark", "aria-label": t("Publishing audio", "Sendet Audio"), title: t("Publishing audio", "Sendet Audio") }, "◉"));
       }));
     }
-    roster.hidden = !members.length || switchRoom;
+    roster.hidden = !members.length;
 
-    const message = switchRoom ? t("You are still in the voice chat in “{channel}”.", "Dein Talk in „{channel}“ läuft weiter.",
-      { channel: active.channel.title }) : active?.feedback ||
-      (active?.receiverFailures?.size ? t("Reconnecting an audio track…", "Eine Tonspur wird neu verbunden …") :
-      active && !listening ? t("Connecting to voice chat…", "Sprachchat wird verbunden …") :
-      !active && !supported() ? t("Voice chat is not available in this browser.", "Sprachchat ist in diesem Browser nicht verfügbar.") : "");
-    const kind = !switchRoom && active?.feedbackError ? "error" : "";
+    const message = elsewhere ? (elsewhere.confirmed
+      ? t("You’re in the voice chat in “{channel}”.", "Du bist im Sprachchat in „{channel}“.", { channel: elsewhere.channel.title })
+      : t("Connecting to voice chat in “{channel}”…", "Sprachchat in „{channel}“ wird verbunden …", { channel: elsewhere.channel.title }))
+      : room?.feedback || (room?.receiverFailures?.size ? t("Reconnecting an audio track…", "Eine Tonspur wird neu verbunden …")
+        : !supported() ? t("Voice chat is not available in this browser.", "Sprachchat ist in diesem Browser nicht verfügbar.")
+        : !room ? t("Your microphone starts off.", "Dein Mikrofon bleibt beim Beitritt aus.") : "");
+    const kind = room?.feedbackError ? "error" : "";
     if (message !== note.textContent || note.className !== "status " + kind) tell(note, message, kind);
   }
 
@@ -484,11 +494,7 @@ export function createVoicePanel(context, dock) {
     details.open = false;
     if (current) {
       mount.replaceChildren(inline.node);
-      if (!active || (active.joinError && !sameId(active.channel.id, channel.id))) {
-        connect(current);
-        return;
-      }
-      if (sameId(active.channel.id, channel.id)) {
+      if (sameId(active?.channel.id, channel.id)) {
         active.channel = channel;
         active.topic = topic;
       }

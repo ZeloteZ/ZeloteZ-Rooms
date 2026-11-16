@@ -1,4 +1,4 @@
-import { api, button, el, identifier, notify, personMark, personName, sameId, status, tell, topicHref } from "./ui.js";
+import { api, button, el, field, identifier, notify, personMark, personName, sameId, select, status, tell, topicHref } from "./ui.js";
 import { language, t } from "./i18n.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
@@ -399,7 +399,7 @@ export function createLivePlayer(context, dock) {
   };
 }
 
-export function renderLive(context, channel, edit, player) {
+export function renderLive(context, channel, edit, player, voiceMount) {
   const { signal, user, room, screenShare } = context;
   const endpoint = streamsPath(channel);
   const cards = el("div", { class: "stream-list" });
@@ -416,6 +416,12 @@ export function renderLive(context, channel, edit, player) {
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
   const desktop = window.webkit?.messageHandlers?.roomsCapture;
   const portableShare = window.roomsDesktop === true && !desktop ? desktopShareControls() : null;
+  const portableAudio = portableShare && window.roomsDesktopAudio ? select([
+    ["none", t("No audio", "Kein Ton")],
+    ["application", t("Application audio", "Anwendungston")],
+    ["system", t("System audio", "Systemton")],
+  ], "none") : null;
+  if (portableAudio) portableShare.element.append(field(t("Stream audio", "Streamton"), portableAudio));
   const reserve = button(t("Share screen", "Bildschirm teilen"), requestStream, { class: "primary", hidden: true });
   const audio = el("input", { type: "checkbox" });
   const audioOption = el("label", { class: "inline subtle", hidden: true }, audio,
@@ -530,7 +536,8 @@ export function renderLive(context, channel, edit, player) {
         desktop.postMessage({ action: "open", channelId: channel.id, language: language() });
         return;
       }
-      await screenShare.start(room, channel, audio.checked, portableShare?.options());
+      const options = portableShare ? { ...portableShare.options(), audio: portableAudio?.value ?? "none" } : null;
+      await screenShare.start(room, channel, audio.checked, options);
       refreshSoon();
     } catch (error) {
       if (!signal.aborted) {
@@ -602,11 +609,15 @@ export function renderLive(context, channel, edit, player) {
     if (!signal.aborted) timer = setTimeout(refresh, 4000);
   }
 
-  const node = el("section", { class: "panel stack" },
-    el("div", { class: "section-heading" }, el("h2", {}, channel.title), edit),
-    portableShare?.element,
-    el("div", { class: "inline" }, reserve, audioOption, finish),
-    cards, empty, feedback, preview, chat);
+  const node = el("section", { class: "panel stack live-channel", "aria-labelledby": "live-channel-heading" },
+    el("header", { class: "section-heading" }, el("h2", { id: "live-channel-heading" }, channel.title), edit),
+    el("div", { class: "live-channel-overview" },
+      voiceMount,
+      el("section", { class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading" },
+        el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
+        portableShare?.element, el("div", { class: "inline" }, reserve, audioOption, finish),
+        cards, empty, feedback)),
+    preview, chat);
   node.addEventListener("open-message", event => {
     destination = event.detail?.streamId ? event.detail : null;
     selectDestination();

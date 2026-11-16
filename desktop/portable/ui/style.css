@@ -35,6 +35,7 @@ button:disabled { opacity: .55; cursor: default; }
   gap: 9px;
   padding: 3px;
 }
+.audio-sources { grid-template-columns: minmax(0, 1fr); }
 .source { display: grid; text-align: left; min-width: 0; padding: 8px; gap: 4px; }
 .source[aria-pressed="true"] { border-color: #b1a0ff; background: #322953; }
 .source span { color: #bfbbce; font-size: .83rem; }
