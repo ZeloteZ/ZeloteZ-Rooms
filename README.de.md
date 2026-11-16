@@ -1,37 +1,50 @@
+<img src="desktop/portable/ui/icon.png" alt="ZeloteZ Rooms Logo" width="88" align="right">
+
 # ZeloteZ Rooms
 
-Privater Treffpunkt für deinen Freundeskreis. Räume bündeln Chat- und Live-Kanäle. Zur Registrierung braucht jede Person einen Einladungslink vom Betreiberkonto.
+ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In euren Räumen könnt ihr schreiben, miteinander sprechen und euren Bildschirm teilen. Ihr nutzt Rooms im Browser oder in der Desktop-App für Windows und Linux. Neue Konten entstehen über Einladungslinks des Betreibers.
 
-[English](README.md)
+[English](README.md) · [Selbst hosten](#selbst-hosten) · [Desktop-App](desktop/README.md)
 
-Englisch ist die Standardsprache. Deutsch lässt sich beim Anmelden oder im Profil auswählen. Chinesisch ist für eine spätere Übersetzung vorbereitet.
+## Auf einen Blick
 
-## Im Freundeskreis
+- **Räume für eure Themen.** Räume sind für alle Konten der Instanz sichtbar oder auf ausgewählte Freunde beschränkt. Ersteller und Raum-Admins verwalten Text- und Live-Kanäle. Der Ersteller kann den ganzen Raum löschen. Auf der Startseite findest du Favoriten, zuletzt besuchte Räume und aktuelle Aktivitäten.
+- **Chats mit Verlauf.** Teile Links und bis zu vier Anhänge pro Nachricht mit jeweils bis zu 12 MiB. Ein Klick vergrößert ein Bild. Anhänge laden standardmäßig, sobald du sie im Chat erreichst. Im Profil kannst du das abschalten oder eine Größengrenze setzen. In Text- und Streamchats kannst du mit Emojis reagieren. Mit `@` erwähnst du Personen oder verlinkst Räume und Kanäle, auf die du Zugriff hast. Persönliche Erwähnungen erscheinen in der Benachrichtigungsglocke.
+- **Moderation und Konten.** Du kannst eigene Nachrichten löschen. Raumersteller und Raum-Admins geben beim Löschen fremder Nachrichten eine Begründung an. Der Betreiber kann unter **Einladungen → Konten** Konten sperren und ihre Sitzungen samt Streams beenden.
+- **Sprache und Streams.** Über **Sprachchat betreten** hörst du zunächst zu. Zum Sprechen schaltest du das Mikrofon ein und erlaubst den Zugriff. Bildschirmfreigabe und Zuschauen funktionieren unabhängig vom Sprachchat. Beim Wechsel zwischen Seiten bleiben die Bedienelemente neben deinem Profil erreichbar. Der Player bietet direkte Wiedergabe per WebRTC und gepufferte Wiedergabe per HLS.
+- **Ein eigener Look.** Lege Profilbild und Namensfarbe fest. Berechtigte Mitglieder können Räume mit Titelbild, Banner, Chat-Hintergrund und eigenen Farben gestalten. Für Bilder stehen Vorlagen und eigene JPEG-, PNG- und WebP-Dateien bis 8 MiB zur Auswahl.
+- **Orientierung beim ersten Besuch.** Die Rundgänge erklären die wichtigsten Bedienelemente. Du kannst sie im Profil zurücksetzen. Rooms startet auf Englisch. Beim Anmelden und im Profil kannst du **Deutsch** wählen.
 
-- Alle Konten können **Räume** anlegen. Öffentliche Räume sind innerhalb des Freundeskreises sichtbar und können direkt betreten werden. Private Räume sind für den Ersteller und die von ihm freigegebenen Freunde sichtbar. Freundschaften erfordern eine Bestätigung.
-- **Kanäle** können der Raumersteller und Raum-Admins anlegen, umsortieren und löschen. In der Raumansicht kannst du zwischen Textchats und Live-Kanälen wechseln und die letzte Aktivität sehen.
-- **Aktivität** zeigt auf der Startseite Nachrichten und laufende Streams aus deinen Räumen, soweit du sie sehen darfst.
-- **Chats** behalten ihren Verlauf. Du kannst Links und bis zu vier Dateien pro Nachricht teilen. Ein Anhang darf bis zu 12 MiB groß sein. Der Browser erstellt Linkkarten aus der URL lokal. Mit Enter sendest du und mit Umschalt + Enter schreibst du eine neue Zeile. Eigene Nachrichten kannst du löschen. Der Raumersteller und Raum-Admins können fremde Nachrichten mit einer Begründung löschen. Im Chat steht danach, wer die Nachricht gelöscht hat und welchen Grund diese Person angegeben hat.
-- Bei **Erwähnungen** schlägt dir der Chat Personen, Räume und Channels vor, sobald du `@` tippst. Du kannst zugängliche Räume oder Channels verlinken. Persönliche Erwähnungen erscheinen in der Benachrichtigungsglocke der erwähnten Person.
-- **Aussehen** umfasst Profilbild und Namensfarbe sowie Cover, Banner, Akzentfarbe, Flächenfarbe und Chat-Hintergrund eines Raums. Der Ersteller kann das Designrecht an einzelne beigetretene Mitglieder vergeben und wieder entziehen. Bilder in diesen Einstellungen sind JPEG, PNG oder WebP bis 8 MiB und werden auf dem VPS aufbereitet.
-- **Live-Kanäle** zeigen den ausgewählten Stream, die Liste der laufenden Streams und den Streamchat zusammen. Mit **Sprachchat beitreten** hörst du zu. Dein Mikrofon kannst du einschalten, wenn du sprechen willst. Dein Konto kann immer nur an einem Talk teilnehmen. Für einen anderen Talk öffnest du dessen Live-Kanal und wählst **Sprachchat wechseln**.
-- **Bildschirmfreigabe** startest du über **Bildschirm teilen** im Live-Kanal. Im Browser wählst du einen Bildschirm, ein Fenster oder einen Tab. Ob Ton für einen Tab oder ein Fenster verfügbar ist, hängt vom Browser ab. [ZeloteZ Rooms Desktop](desktop/README.md) bietet Bildschirm-, Fenster- und Ausschnittfreigabe auf Windows und Linux. Beide Linux-Versionen können den Ton einer Anwendung oder den gesamten Ton eines Wiedergabegeräts übertragen. Die Zuschauerliste und den Streamchat findest du im Live-Kanal.
-- **Talk und Wiedergabe** laufen beim Wechsel zwischen Seiten weiter. Neben deinem Profil findest du die Bedienelemente zum Verlassen des Talks, zum Beenden der Wiedergabe und den Link zurück zum jeweiligen Live-Kanal. Beim Abmelden oder Schließen des Tabs enden beide.
+## So funktioniert die Verschlüsselung
 
-## Was verschlüsselt ist
+**Chattexte, Links, Dateinamen, Anhänge, Reaktions-Emojis und Moderationsgründe** werden im Browser Ende-zu-Ende verschlüsselt. Jedes berechtigte Mitglied erhält eine verschlüsselte Kopie des Nachrichtenschlüssels. Wenn du einem Raum beitrittst, kann dein Browser den älteren Verlauf lesen, sobald ein angemeldeter und entsperrter Browser eines berechtigten Mitglieds die benötigten Schlüssel für dich freigibt. Der Server speichert jede Nachricht und jeden Anhang einmal. Streamchats werden am Ende der Übertragung gelöscht.
 
-Der Browser verschlüsselt Nachrichten, geteilte URLs, Dateinamen und Anhänge vor dem Upload. Eine Nachricht enthält für jedes zum Sendezeitpunkt beigetretene Mitglied einen separat verschlüsselten Nachrichtenschlüssel. Nach dem Beitritt erhält ein neues Mitglied den älteren Verlauf automatisch, sobald Browser älterer Mitglieder mit den benötigten Schlüsseln angemeldet und entsperrt sind. Diese Browser verschlüsseln zusätzliche Schlüsselkopien für das neue Konto. Verschlüsselte Nachrichten und Anhänge bleiben jeweils einmal gespeichert. Ein ausgeschiedenes Mitglied verliert den Serverzugriff. Bereits gespeicherte Kopien können bestehen bleiben.
+Der Betrieb des Dienstes erfordert lesbare Angaben wie Raum- und Kanalnamen, Mitgliedschaften, Absender, Zeitpunkte und Dateigrößen. Für Benachrichtigungen kennt der Server die Zuordnung persönlicher Erwähnungen. Er weiß, wer auf welche Nachricht reagiert hat. Profil- und Raumbilder werden auf dem Server verarbeitet.
 
-Das Passwort entsperrt auch den privaten Schlüssel. Bei einem Passwortverlust geht der Zugriff auf verschlüsselte Nachrichten verloren. Der VPS speichert Raum- und Kanalnamen, Mitgliedschaften, Absender, Zeitpunkte und Dateigrößen als Betriebsdaten. Profil- und Designbilder sind auf dem VPS lesbar. Der Browser bezieht den Anwendungscode und öffentliche Schlüssel vom VPS. Die Verschlüsselung schützt daher gespeicherte Chatinhalte vor dem Lesen aus der Datenbank. Sie setzt einen vertrauenswürdigen Betrieb der ausgelieferten Website voraus. In der App erklärt **So funktioniert’s** den Unterschied in Alltagssprache.
+Dein Passwort entsperrt deinen privaten Kontoschlüssel. Sobald der Schlüssel gesperrt ist, brauchst du das Passwort, um deine verschlüsselten Nachrichten wieder zu öffnen. Du vertraust dem Server dabei, dass er den richtigen App-Code, die Raummitgliedschaften und beim ersten Kontakt die öffentlichen Schlüssel liefert. Eine aktiv manipulierte Instanz könnte falsche Empfänger für die Verlaufsfreigabe melden. In der App erklärt **So funktioniert’s** diese Grenzen näher.
 
-Für persönliche Erwähnungen erhält der Server die IDs der erwähnten Konten sowie der Nachricht und ihres Chats. Der Nachrichtentext und die darin enthaltenen Links bleiben verschlüsselt.
+**Sprache und Live-Video** sind auf dem Transportweg verschlüsselt. MediaMTX empfängt und verteilt die Übertragungen. Bei Bedarf wandelt FFmpeg das Audioformat für die Wiedergabe um. Die mitgelieferte Konfiguration deaktiviert Aufzeichnungen.
 
-Sprachchat, Browserfreigaben und direkte Wiedergabe verwenden WebRTC mit Transportverschlüsselung. Die native Linux-Aufnahme der Desktop-App streamt per RTMPS. Die gepufferte HLS-Wiedergabe nutzt HTTPS. Der Player kann zwischen direkter und gepufferter Wiedergabe wechseln. MediaMTX verteilt die Streams. FFmpeg passt das Audioformat an die jeweilige Wiedergabe an. Der VPS zeichnet die Live-Übertragungen nicht auf. Die VPS-Uploadrate muss für alle gleichzeitigen Zuschauer und Streams ausreichen.
+## Selbst hosten
 
-## Auf dem VPS betreiben
+Kopiere für die Erstinstallation [`.env.example`](.env.example) nach `.env` und passe die Werte an deine Umgebung an.
 
-Kopiere [`.env.example`](.env.example) nach `.env` und trage die HTTPS-Adresse deiner Website als `PUBLIC_ORIGIN` sowie die RTMPS-Adresse für die Desktop-App als `STREAM_INGEST_BASE` ein. `VOICE_ICE_HOST` enthält die öffentlich erreichbare Adresse für WebRTC. Lege `fullchain.pem` und `privkey.pem` in `RTMPS_CERT_DIR` ab. Der HTTPS-Reverse-Proxy erreicht den Web-Port über Loopback und setzt `X-Real-IP` aus der eingehenden Verbindung. RTMPS nutzt standardmäßig TCP-Port 1936. Sprachchat und Bildschirmfreigaben im Browser verwenden UDP-Port 8189 und bei Bedarf TCP auf demselben Port.
+| Einstellung | Wofür sie gebraucht wird |
+| --- | --- |
+| `PUBLIC_ORIGIN` | Öffentliche HTTPS-Adresse der Website ohne Pfad |
+| `STREAM_INGEST_BASE` | RTMPS-Adresse für native Desktop-Übertragungen ohne Pfad |
+| `VOICE_ICE_HOST` | Hostname oder IP-Adresse, über die Clients den WebRTC-Dienst erreichen |
+| `RTMPS_CERT_DIR` | Verzeichnis mit dem RTMPS-Zertifikat `fullchain.pem` und seinem Schlüssel `privkey.pem` |
 
-Erzeuge den einmaligen Link für das Betreiberkonto.
+Der Web-Port ist an Loopback gebunden. Setze davor einen HTTPS-Reverse-Proxy, der `X-Real-IP` mit der vertrauenswürdigen Client-IP überschreibt. Verwende für den RTMPS-Eingang einen eigenen TLS-Schlüssel. Gib für RTMPS standardmäßig TCP 1936 frei. WebRTC nutzt standardmäßig UDP 8189 und TCP 8189 als Ausweichweg. Die Compose-Konfiguration enthält Ressourcenlimits und Logrotation.
 
-Konten, Mitgliedschaften und verschlüsselte Inhalte liegen im Docker-Volume `community`. Beim Stoppen mit `docker compose down` bleibt dieses Volume erhalten.
+Starte die Dienste und erstelle den Einmal-Link für das Betreiberkonto.
+
+Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
+
+> [!IMPORTANT]
+> Halte ein separates, wiederherstellbares Backup des Docker-Volumes `community` und deiner Instanz-Konfiguration vor. Das Volume enthält Konten, Mitgliedschaften und verschlüsselte Inhalte. Ein normales `docker compose down` erhält es.
+
+## Desktop-App
+
+Die [Desktop-Anleitung](desktop/README.md) enthält die Schritte für Windows-Installer, Linux-AppImage und die native GTK-App. Beim ersten Start gibst du die HTTPS-Adresse deiner eigenen Instanz ein. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab.

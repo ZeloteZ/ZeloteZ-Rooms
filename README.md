@@ -1,35 +1,41 @@
+<img src="desktop/portable/ui/icon.png" alt="ZeloteZ Rooms logo" width="88" align="right">
+
 # ZeloteZ Rooms
 
-[Deutsch](README.de.md)
+A private place for friends to chat, talk, and share their screens. Host an invite-only instance, set up rooms around whatever brings your group together, and join from a browser or the desktop app.
 
-ZeloteZ Rooms is a private place for friends. Rooms bring together encrypted chats, voice channels, and live streams. New accounts require an invitation from the site owner.
+[Deutsch](README.de.md) · [Self-hosting](#self-hosting) · [Desktop app](desktop/README.md)
 
-## Use Rooms
+## What you can do
 
-- **Rooms** can be public within the group or invite only. Room owners and admins can create, reorder, and delete channels. Members can mark rooms as favorites and see recent activity on the home screen.
-- **Chat** supports links and up to four attachments per message, with a limit of 12 MiB per file. Anyone can delete their own messages. Room owners and admins can delete other messages with a reason. The chat then shows who deleted the message and their reason.
-- **Mentions** suggest people, rooms, and channels when you type `@`. Room and channel mentions link to destinations you can access. Personal mentions appear in the recipient’s notification bell.
-- **Live channels** keep the active stream, the live roster, and stream chat together. Click **Join voice chat** to listen. Enable your microphone when you want to speak. Voice and stream playback continue as you browse. Their controls sit beside your profile. To switch voice rooms, open the other live channel and select **Switch voice chat**.
-- **Screen sharing** starts with **Share screen** in a live channel. The browser asks you to choose a screen, window, or tab. Tab and window audio depend on browser support. [ZeloteZ Rooms Desktop](desktop/README.md) supports screen, window, and region capture on Windows and Linux. Both Linux builds can include a selected application’s audio or all audio from one playback device. The live channel shows viewers and stream chat.
-- **Appearance** includes profile pictures and name colors, plus room covers, banners, accents, surfaces, and chat backgrounds. Room owners can grant design access to members. Images may be JPEG, PNG, or WebP up to 8 MiB and are processed on the server.
+- **Make a room your own.** Join rooms open to your group or create private rooms for approved friends. Owners and room admins manage text and live channels. Owners can delete the room or grant design access. The home page keeps favorites, recent rooms, and live activity close at hand.
+- **Keep the conversation going.** Text chats keep their history. Share links and up to four files per message, with a limit of 12 MiB per file. Click an image to enlarge it. Attachments load as you reach them by default. You can turn this off or set a size limit in your profile.
+- **React, mention, and moderate.** Add emoji reactions in text and stream chats. Type `@` to mention a person or link a room or channel. Personal mentions appear in the notification bell. Anyone can delete their own messages. Room owners and admins can remove other messages with a reason.
+- **Talk and watch together.** A live channel brings voice, streams, and stream chat into one view. Choose **Join voice chat** to listen, then enable your microphone when you want to speak. Voice and playback controls stay in the header as you browse. Viewers can choose direct WebRTC playback or buffered HLS.
+- **Share a screen.** Choose **Share screen** in a live channel. Supported browsers can share a screen, window, or tab. The desktop app also supports region capture. On Linux you can share audio from one application or a whole playback device using PipeWire.
+- **Change the look.** Choose a profile picture and name color. Give a room its own cover, banner, colors, and chat background. Built-in image presets are available for profile pictures and room images. You can also upload JPEG, PNG, or WebP images up to 8 MiB.
+- **Find your way around.** First-visit guides introduce the main views and can be reset in your profile. The interface is available in English and German.
 
-## Languages
+## Self-hosting
 
-English is the default. Choose **Deutsch** at sign-in or in your profile. The interface supports adding a Chinese catalog when the translation is ready.
+1. **Configure the instance.** Copy [`.env.example`](.env.example) to `.env`. Set `PUBLIC_ORIGIN` to your HTTPS origin and `STREAM_INGEST_BASE` to your RTMPS endpoint. Use addresses without paths. Set `VOICE_ICE_HOST` to a hostname or IP address your clients can reach.
+2. **Set up HTTPS and RTMPS.** Point your HTTPS reverse proxy at the loopback port configured by `WEB_PORT`. Have the proxy overwrite `X-Real-IP` with the trusted client address. Put `fullchain.pem` and `privkey.pem` in `RTMPS_CERT_DIR`, using a separate TLS key for the ingest endpoint.
+3. **Open the ports your group needs.** HTTPS terminates at your reverse proxy. The media defaults are TCP 1936 for native RTMPS ingest and UDP 8189 with a TCP fallback on the same port for WebRTC.
+4. **Start the instance and create the owner account.** Run these commands from the repository root, then open the bootstrap link.
 
-## Encryption and storage
+The site owner manages invitations and can suspend accounts or end their sessions under **Invites → Accounts**. Each account can broadcast one stream at a time, with up to eight simultaneous broadcasts per instance.
 
-Browsers encrypt chat text, links, attachment names and files before upload. Each joined member receives an encrypted copy of the message key. Members with access automatically re-encrypt older keys for new members while their browser is signed in and unlocked. The encrypted content stays in one copy. Moderation reasons use the same protections. Stream chat belongs to the active broadcast and is removed when it ends.
+The default stack sets resource limits and rotates container logs. See the [Compose file](compose.yaml) for the values.
 
-Your password unlocks the encrypted account key. The server can see membership, roles, channel names, accounts, timestamps, file sizes, and connection data. It also serves the app code and public keys, so chat privacy assumes the delivered app is trustworthy. **How it works** explains these limits.
+> [!IMPORTANT]
+> Keep a separate, restorable backup of the `community` Docker volume and your instance configuration. The volume holds accounts, memberships, and encrypted data. An ordinary `docker compose down` preserves it.
 
-For personal mention notifications, the server receives the mentioned account IDs and the message and chat IDs. The chat text and its embedded links stay encrypted.
+## Desktop app
 
-Voice, browser capture, and direct playback use WebRTC transport encryption. The native Linux capture available in the desktop app uses RTMPS. Buffered HLS playback uses HTTPS. MediaMTX relays live media and FFmpeg converts audio when WebRTC and HLS need different codecs. The player can switch between direct and buffered playback. Server recording is disabled. The list of active viewers is visible to the streamer.
+## What stays private
 
-## Deploy
+Chat messages, shared links, attachment names and files, reaction emojis, and moderation reasons are end-to-end encrypted in the browser. Your password unlocks the private key used to read your chats. When someone joins a room, an unlocked browser with access automatically shares encrypted copies of the older message keys. The server stores each message and attachment once. Stream chat is tied to the broadcast and is cleared when it ends.
 
-Copy [`.env.example`](.env.example) to `.env` and configure your server. Set `PUBLIC_ORIGIN` to the external HTTPS website address, and set `STREAM_INGEST_BASE` to the RTMPS address for desktop capture. Set `VOICE_ICE_HOST` to the address clients can reach for WebRTC. Put `fullchain.pem` and `privkey.pem` in `RTMPS_CERT_DIR`. Configure your HTTPS reverse proxy to reach the web port via loopback and to set `X-Real-IP` from the incoming connection. RTMPS uses TCP port 1936 by default. Voice and browser screen sharing use UDP 8189 with TCP on the same port as a fallback.
+The server handles room and channel names, membership, senders, timestamps, file sizes, profile and room images, and the account references needed for mentions and reactions. It also supplies the app code, membership lists, and first-seen public keys. A compromised server can change the app or misrepresent membership, so chat privacy depends on a trusted instance. **How it works** in the app explains these boundaries in plain language.
 
-
-The `community` Docker volume holds accounts, memberships, and encrypted data. `docker compose down` preserves this volume.
+Voice and live video are encrypted in transit. MediaMTX relays live media and FFmpeg adapts audio for playback where needed. Server-side recording is disabled.
