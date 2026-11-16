@@ -9,6 +9,7 @@ export function createNativeBroadcast(signal, dock) {
   const events = new EventTarget();
   let active = null;
   let location;
+  let temporaryLocation;
   let revision = 0;
   let opening = false;
   const link = el("a", { class: "button", hidden: true }, t("Go to live channel", "Zum Live-Kanal"));
@@ -43,7 +44,8 @@ export function createNativeBroadcast(signal, dock) {
       details.open = false;
       return;
     }
-    const channel = location?.id === active.channelId ? location : null;
+    const channel = temporaryLocation?.id === active.channelId ? temporaryLocation
+      : location?.id === active.channelId ? location : null;
     title.textContent = channel
       ? t("You’re live in {channel}.", "Du streamst in {channel}.", { channel: channel.title })
       : t("Your screen is live.", "Dein Bildschirm ist live.");
@@ -152,6 +154,10 @@ export function createNativeBroadcast(signal, dock) {
   }
 
   return {
+    setTemporaryLocation(room) {
+      temporaryLocation = room ? { roomId: room.topicId, id: room.channelId, title: room.title } : null;
+      placeDock();
+    },
     open: async (room, channel, lang) => {
       if (opening) return "busy";
       opening = true;

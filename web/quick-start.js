@@ -17,6 +17,85 @@ export function clearQuickLinks() {
   passwords.clear();
 }
 
+export function mountQuickRoomDock(dock, { signal, screenShare, nativeBroadcast }) {
+  const name = el("span", { class: "quick-room-link-name" });
+  const link = el("a", { class: "button quick-room-link" }, el("span", { "aria-hidden": "true" }, "▶"), name);
+  dock.replaceChildren(link);
+  let room;
+  let revision = 0;
+  let pending = false;
+  let timer;
+
+  function paint() {
+    const channelId = room?.channelId;
+    const hasCaptureLink = channelId && (screenShare.active()?.channel.id === channelId || nativeBroadcast?.active()?.channelId === channelId);
+    dock.hidden = !room || Boolean(hasCaptureLink);
+    if (!room) {
+      link.removeAttribute("href");
+      return;
+    }
+    link.href = topicHref(room.topicId, channelId);
+    name.textContent = room.title;
+    const label = t("Return to “{title}”", "Zurück zu „{title}“", { title: room.title });
+    link.setAttribute("aria-label", label);
+    link.title = label;
+  }
+
+  function setRoom(value) {
+    room = value && uuid.test(value.topicId) && uuid.test(value.channelId) && quickSource(value.source) ? {
+      topicId: value.topicId, channelId: value.channelId,
+      title: value.title || t("Temporary room", "Temporärer Raum"),
+    } : null;
+    nativeBroadcast?.setTemporaryLocation(room);
+    paint();
+  }
+
+  async function refresh() {
+    if (pending || signal.aborted) return;
+    clearTimeout(timer);
+    pending = true;
+    const requested = revision;
+    try {
+      const result = await api("quick-rooms", { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) });
+      if (!signal.aborted && requested === revision) setRoom(result.room);
+    } catch {
+      // Keep the last known room during a brief connection interruption.
+    } finally {
+      pending = false;
+      if (!signal.aborted) timer = setTimeout(refresh, room ? 6000 : 20000);
+    }
+  }
+
+  function captureChanged() {
+    paint();
+    if (room && dock.hidden === false) void refresh();
+  }
+
+  screenShare.whenChanged(captureChanged, { signal });
+  nativeBroadcast?.whenChanged(captureChanged, { signal });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); }, { signal });
+  signal.addEventListener("abort", () => {
+    clearTimeout(timer);
+    dock.hidden = true;
+    dock.replaceChildren();
+  }, { once: true });
+  void refresh();
+
+  return {
+    created(value) {
+      if (signal.aborted) return;
+      revision++;
+      setRoom(value);
+      void refresh();
+    },
+    ended(topicId) {
+      if (signal.aborted || room?.topicId !== topicId) return;
+      revision++;
+      setRoom(null);
+    },
+  };
+}
+
 function rememberLink(user, room) {
   if (!uuid.test(room.publicId)) return;
   const key = user.id + ":" + room.publicId;
@@ -93,6 +172,7 @@ export function openStreamNow(context) {
           return;
         }
         rememberLink(context.user, room);
+        context.quickRoomHeader.created(room);
         go(room.topicId, room.channelId, source);
       }));
     }
@@ -179,6 +259,7 @@ export function quickRoomActions(context, room, stopCapture) {
       await api(endpoint, { method: "DELETE", signal: context.signal });
       if (context.signal.aborted) return;
       passwords.delete(context.user.id + ":" + room.id);
+      context.quickRoomHeader.ended(room.id);
       stopCapture();
       closeDialog();
       location.hash = "#/rooms";

@@ -52,7 +52,7 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
   };
 }
 
-export function createWatchParty({ signal, user, watchId, room }, channel, { onSelect, onChange, onUnavailable, onShareUnavailable }) {
+export function createWatchParty({ signal, user, watchId, room, quickRoomHeader }, channel, { onSelect, onChange, onUnavailable, onShareUnavailable }) {
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
   const sourceLimit = room?.temporary ? room.quickSource : null;
@@ -409,6 +409,7 @@ export function createWatchParty({ signal, user, watchId, room }, channel, { onS
     if (!canStop || !party) return;
     void run(async () => {
       await api(endpoint + "/" + identifier(party.id), { method: "DELETE", signal });
+      if (room?.temporary) quickRoomHeader.ended(room.id);
       if (!signal.aborted) apply({ party: null, canStop: false, canShare });
     });
   }

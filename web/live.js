@@ -772,6 +772,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       if (signal.aborted) return;
       if (error.status === 403 || error.status === 404) {
         if (temporary) {
+          context.quickRoomHeader.ended(room.id);
           location.hash = "#/rooms";
           return;
         }
