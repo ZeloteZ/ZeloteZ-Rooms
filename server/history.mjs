@@ -69,8 +69,9 @@ export function createHistory(db, { requireSession }) {
     (topic_id, channel_id, recipient_id, admitted_at, latest_sequence)
     SELECT member.topic_id, c.id, member.user_id, member.joined_at,
       (SELECT max(seq) FROM messages WHERE channel_id = c.id)
-    FROM topic_members member JOIN channels c ON c.topic_id = member.topic_id AND c.type = 'chat'
+    FROM topic_members member JOIN channels c ON c.topic_id = member.topic_id
     WHERE member.joined_at IS NOT NULL ${targetFilter}
+    AND NOT EXISTS (SELECT 1 FROM quick_rooms q WHERE q.topic_id = c.topic_id)
     AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = member.topic_id) AND EXISTS (
       SELECT 1 FROM messages m WHERE m.channel_id = c.id AND m.created_at <= member.joined_at
         ${messageFilter} AND ${needsKey('member.user_id')})
@@ -161,7 +162,7 @@ export function createHistory(db, { requireSession }) {
 
   const chatFor = db.prepare(`SELECT c.topic_id FROM channels c JOIN topic_members tm
     ON tm.topic_id = c.topic_id AND tm.user_id = ? AND tm.joined_at IS NOT NULL
-    WHERE c.id = ? AND c.type = 'chat'
+    WHERE c.id = ? AND NOT EXISTS (SELECT 1 FROM quick_rooms q WHERE q.topic_id = c.topic_id)
     AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = c.topic_id)`)
   const receiver = db.prepare(`SELECT user_id AS id, joined_at FROM topic_members
     WHERE topic_id = ? AND user_id = ? AND joined_at IS NOT NULL

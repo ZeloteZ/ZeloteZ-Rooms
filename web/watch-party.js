@@ -473,5 +473,6 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     leaveParty();
   }, { once: true });
   if (sourceLimit !== "screen") schedule(0);
-  return { share, card, player, active: () => sample?.party.state === "ready", selected: () => Boolean(selectedId), leave: leaveParty, open, prepareSource };
+  return { share, card, player, active: () => sample?.party.state === "ready", hasSnapshot: () => hasSnapshot,
+    selected: () => Boolean(selectedId), join, leave: leaveParty, open, prepareSource };
 }

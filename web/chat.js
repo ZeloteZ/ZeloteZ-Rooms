@@ -827,9 +827,10 @@ export function renderChat(context, channel, edit) {
     for (const id of fileViews.keys()) releaseFiles(id);
   }, { once: true });
 
-  const pane = el("section", { class: "panel conversation" },
+  const liveLabel = context.liveChat ? t("Live chat", "Livechat") : undefined;
+  const pane = el("section", { class: "panel conversation" + (context.liveChat ? " live-channel-conversation" : ""), "aria-label": liveLabel },
     el("div", { class: "conversation-heading section-heading" },
-      el("div", { class: "stack chat-title" }, el("h2", {}, context.direct ? context.direct.name : "# " + channel.title),
+      el("div", { class: "stack chat-title" }, el("h2", {}, context.direct?.name ?? liveLabel ?? "# " + channel.title),
         el("span", { class: "tag" }, t("End-to-end encrypted", "Ende-zu-Ende-verschlüsselt"))),
       edit),
     el("div", { class: "chat-controls stack" }, older, connection),

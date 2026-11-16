@@ -11,6 +11,7 @@
   min-inline-size: 0;
   min-block-size: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 9px;
   border-radius: 13px;
@@ -20,14 +21,32 @@
 .watch-party-heading { gap: 6px; }
 .watch-party-heading h3 { flex: 1 1 11ch; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .watch-party-heading .button, .watch-party-controls .button { min-block-size: 34px; padding: 5px 8px; }
-.watch-party-media { display: grid; min-inline-size: 0; min-block-size: 0; border-radius: 9px; background: #08090d; overflow: hidden; }
-.watch-party-media video, .watch-youtube-frame { display: block; inline-size: 100%; block-size: 100%; border: 0; }
+.watch-party-media {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  min-inline-size: 0;
+  min-block-size: 0;
+  border-radius: 9px;
+  background: #08090d;
+  overflow: hidden;
+}
+.watch-party-media video, .watch-youtube-frame {
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+}
 .watch-party-media video { object-fit: contain; }
 .watch-youtube-frame { min-block-size: 200px; }
+.watch-party-player:has(.watch-youtube-frame) { grid-template-rows: auto minmax(200px, 1fr) auto; }
 .watch-party-player:has(.watch-youtube-frame) .watch-party-media { min-block-size: 200px; border-radius: 0; }
 
-.live-channel-body:has(.watch-party-player:not([hidden])) { grid-template-rows: minmax(17rem, 1fr) auto minmax(6rem, 1fr); }
-.live-channel-body:has(.watch-youtube-frame) { grid-template-rows: minmax(22rem, 1fr) auto minmax(6rem, 1fr); }
+.live-channel-body:has(.watch-youtube-frame) { --watch-party-min-height: 22rem; }
+.live-channel-body:has(.watch-party-player:not([hidden])) {
+  grid-template-rows: minmax(var(--watch-party-min-height, 17rem), 1fr) auto minmax(var(--live-support-min, 6rem), 1fr);
+}
 
 .watch-party-footer { min-inline-size: 0; display: grid; gap: 6px; justify-items: start; }
 .watch-party-footer > :empty { display: none; }
@@ -112,7 +131,8 @@
 .watch-party-sources button { min-block-size: 48px; }
 #dialog progress { inline-size: 100%; accent-color: var(--accent); }
 
-@container live-channel (min-width: 42rem) {
-  .live-channel-body:has(.watch-party-player:not([hidden])) { grid-template-rows: minmax(17rem, 1fr) minmax(6rem, .47fr); }
-  .live-channel-body:has(.watch-youtube-frame) { grid-template-rows: minmax(22rem, 1fr) minmax(6rem, .47fr); }
+@container live-channel (min-width: 50rem) {
+  .live-channel-body:has(.watch-party-player:not([hidden])) {
+    grid-template-rows: minmax(var(--watch-party-min-height, 17rem), 1fr) minmax(6rem, .47fr);
+  }
 }

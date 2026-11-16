@@ -17,7 +17,7 @@ function activityLink(item, snippet) {
 function streamLink(stream) {
   const person = { ...stream, id: stream.userId };
   return el("li", {}, el("a", {
-    class: "home-activity-card", href: topicHref(stream.topicId, stream.channelId), "data-feed-id": stream.id,
+    class: "home-activity-card", href: topicHref(stream.topicId, stream.channelId, { streamId: stream.id }), "data-feed-id": stream.id,
   },
     personMark(person),
     el("span", { class: "home-activity-copy" },

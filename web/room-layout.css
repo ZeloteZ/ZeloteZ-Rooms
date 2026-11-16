@@ -192,13 +192,14 @@
 
 .live-channel-body {
   display: grid;
-  grid-template: "watch" minmax(6.5rem, 1.15fr) "switch" auto "support" minmax(6rem, 1fr) / minmax(0, 1fr);
+  grid-template: "watch" minmax(6.5rem, 1.15fr) "switch" auto "support" minmax(var(--live-support-min, 6rem), 1fr) / minmax(0, 1fr);
   gap: clamp(6px, 1.15dvh, 12px);
   min-block-size: 0;
   min-inline-size: 0;
   overflow: auto;
   scrollbar-width: thin;
 }
+.live-channel[data-panel="chat"] { --live-support-min: 12rem; }
 
 .live-channel-watch { grid-area: watch; display: grid; min-inline-size: 0; min-block-size: 0; }
 .live-channel-watch > * { grid-area: 1 / 1; min-inline-size: 0; min-block-size: 0; }
@@ -273,14 +274,31 @@
   background: transparent;
 }
 .live-channel .voice-roster { max-block-size: min(7rem, 18dvh); }
-.live-channel-chat { display: grid; }
-.live-channel-chat-content:not([hidden]) { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 5px; min-block-size: 0; }
+.live-channel-chat {
+  display: grid;
+  grid-template: minmax(0, 1fr) auto / minmax(0, 1fr);
+}
+.live-channel-audience:not([hidden]) { margin-block-start: 5px; }
+.live-channel-chat-content, .live-channel-legacy-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-block-size: 0;
+  min-inline-size: 0;
+}
+.live-channel-chat-content { grid-template-rows: minmax(0, 1fr); }
+.live-channel-legacy-chat { grid-template-rows: auto minmax(0, 1fr); gap: 5px; }
+.live-channel-legacy-chat > .button { justify-self: start; }
+.room-layout .live-channel-conversation { grid-template-rows: auto auto minmax(2rem, 1fr) auto; border-radius: 13px; }
+.live-channel-conversation :is(.conversation-heading, .message-form, .message-list) { padding: 8px 10px; }
+.live-channel-conversation .chat-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; }
+.live-channel-conversation .chat-controls:has(> :not([hidden])) { padding: 5px 10px 0; }
+.live-channel-conversation .composer-shortcuts { display: none; }
+.live-channel-conversation textarea:placeholder-shown { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .live-channel-chat .stream-chat { grid-template-rows: auto minmax(0, 1fr) auto auto; min-block-size: 0; padding: 8px; }
 .live-channel-chat .stream-chat-scroll { max-block-size: none; min-block-size: 0; }
-.live-channel-chat .live-channel-chat-empty { grid-template-rows: auto auto; align-content: start; }
 .live-channel-chat .stream-viewers { max-block-size: min(9dvh, 72px); }
 
-@container live-channel (min-width: 42rem) {
+@container live-channel (min-width: 50rem) {
   .live-channel-body {
     grid-template: "watch chat" minmax(8rem, 1fr) "people chat" minmax(6rem, .47fr) / minmax(0, 1fr) minmax(16rem, .53fr);
   }
@@ -366,7 +384,7 @@
   .room-layout .chat-controls .button { min-height: 29px; padding-block: 3px; }
   .room-layout .composer-shortcuts { display: none; }
 
-  @container live-channel (width < 42rem) {
-    .live-channel-body { grid-template-rows: minmax(5rem, 1fr) auto minmax(6rem, 1fr); }
+  @container live-channel (width < 50rem) {
+    .live-channel-body { grid-template-rows: minmax(5rem, 1fr) auto minmax(var(--live-support-min, 6rem), 1fr); }
   }
 }

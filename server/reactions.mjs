@@ -72,7 +72,8 @@ export function createReactions(db, { requireSession, streams, assertChatWritabl
   })
   const chatMembership = db.prepare(`SELECT 1 FROM channels c JOIN topic_members m ON m.topic_id = c.topic_id
     LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
-    WHERE c.id = ? AND c.type = 'chat' AND m.user_id = ? AND m.joined_at IS NOT NULL
+    WHERE c.id = ? AND m.user_id = ? AND m.joined_at IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM quick_rooms q WHERE q.topic_id = c.topic_id)
     AND (d.id IS NULL OR (c.id = d.channel_id AND m.user_id IN (d.first_id, d.second_id)))`)
 
   return {

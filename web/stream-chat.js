@@ -3,7 +3,7 @@ import { t } from "./i18n.js";
 import { createMentionDirectory, mentionComposer, renderMentionText } from "./mentions.js";
 import { createReactions } from "./reactions.js";
 
-export function renderStreamChat({ signal, messageId, user }, streamId) {
+export function renderStreamChat({ signal, messageId, user, readOnly = false }, streamId) {
   const endpoint = "streams/" + streamId + "/chat";
   const log = el("ol", { class: "stream-chat-log", "aria-label": t("Messages in stream chat", "Nachrichten im Streamchat"), "aria-live": "polite" });
   const empty = el("p", { class: "subtle stream-chat-empty" }, t("No messages yet.", "Noch keine Nachrichten."));
@@ -13,7 +13,7 @@ export function renderStreamChat({ signal, messageId, user }, streamId) {
   const directory = createMentionDirectory({ signal, streamId, scope: log });
   const mentions = mentionComposer(input, directory, { signal });
   const send = el("button", { type: "submit", disabled: true, class: "button primary" }, t("Send", "Senden"));
-  const composer = el("form", { class: "stream-chat-form" }, mentions.node, send);
+  const composer = el("form", { class: "stream-chat-form", hidden: readOnly }, mentions.node, send);
   const pane = el("section", { class: "panel stream-chat", "aria-label": t("Stream chat", "Streamchat") },
     el("h2", {}, t("Stream chat", "Streamchat")), el("div", { class: "stream-chat-scroll" }, empty, log), feedback, composer);
   const scroll = log.parentElement;

@@ -90,9 +90,10 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
     }
   })
 
-  const sourceRoom = db.prepare(`SELECT c.topic_id, c.type FROM channels c JOIN topic_members tm
+  const sourceRoom = db.prepare(`SELECT c.topic_id, c.type, (q.topic_id IS NOT NULL) AS temporary FROM channels c JOIN topic_members tm
     ON tm.topic_id = c.topic_id AND tm.user_id = ? AND tm.joined_at IS NOT NULL
     LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
+    LEFT JOIN quick_rooms q ON q.topic_id = c.topic_id
     WHERE c.id = ? AND (d.id IS NULL OR (c.id = d.channel_id AND tm.user_id IN (d.first_id, d.second_id)))`)
   const userSuggestions = db.prepare(`SELECT 'user' AS kind, u.id, u.display_name AS label, '@' || u.username AS detail
     FROM topic_members tm JOIN users u ON u.id = tm.user_id
@@ -159,7 +160,7 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
     if (!mentionedUserIds.length) return
 
     const source = sourceRoom.get(senderId, channelId)
-    if (!source || source.type !== (streamId ? 'live' : 'chat')) throw unavailable()
+    if (!source || (streamId ? source.type !== 'live' : source.temporary)) throw unavailable()
     const createdAt = new Date().toISOString()
     for (const recipientId of new Set(mentionedUserIds)) {
       if (recipientId === senderId) continue
@@ -213,7 +214,7 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
         (chat !== null && !uuid.test(chat)) || (stream !== null && !streamIdPattern.test(stream))) throw invalid()
     const channelId = stream === null ? chat : streams.chatChannel(stream, userId)
     const room = sourceRoom.get(userId, channelId)
-    if (!room || room.type !== (stream === null ? 'chat' : 'live')) throw unavailable()
+    if (!room || (stream === null ? room.temporary : room.type !== 'live')) throw unavailable()
     const steps = [
       ['user', userSuggestions, room.topic_id],
       ['room', roomSuggestions, userId],

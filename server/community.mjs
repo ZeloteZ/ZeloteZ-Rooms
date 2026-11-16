@@ -242,12 +242,14 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     ORDER BY t.title COLLATE NOCASE, c.title COLLATE NOCASE, c.id`)
   const storageFor = db.prepare('SELECT messages, bytes FROM chat_storage WHERE scope = ?')
   const findChannel = db.prepare(`SELECT c.*, CASE WHEN d.id IS NULL THEN m.role ELSE 'member' END AS role,
-    (d.id IS NOT NULL) AS is_direct, t.stream_policy AS topic_stream_policy, t.title AS topic_title FROM channels c
+    (d.id IS NOT NULL) AS is_direct, (q.topic_id IS NOT NULL) AS is_temporary,
+    t.stream_policy AS topic_stream_policy, t.title AS topic_title FROM channels c
     JOIN topics t ON t.id = c.topic_id
     JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL
     LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
+    LEFT JOIN quick_rooms q ON q.topic_id = c.topic_id
     WHERE c.id = ? AND (d.id IS NULL OR (c.id = d.channel_id AND m.user_id IN (d.first_id, d.second_id)))
-    AND (m.user_id = t.owner_id OR NOT EXISTS (SELECT 1 FROM quick_rooms q WHERE q.topic_id = t.id))
+    AND (m.user_id = t.owner_id OR q.topic_id IS NULL)
     AND NOT EXISTS (SELECT 1 FROM disabled_accounts disabled WHERE disabled.user_id = m.user_id)`)
   const recipientKeys = db.prepare(`SELECT u.id, u.public_key FROM topic_members m JOIN users u ON u.id = m.user_id
     LEFT JOIN direct_conversations d ON d.topic_id = m.topic_id
@@ -301,6 +303,12 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     assertId(channelId)
     const channel = findChannel.get(userId, channelId)
     if (!channel || (type && type !== channel.type)) throw missing()
+    return channel
+  }
+
+  function getMessageChannel(userId, channelId) {
+    const channel = getChannel(userId, channelId)
+    if (channel.is_temporary) throw missing()
     return channel
   }
 
@@ -647,7 +655,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     assertId(messageId)
     return transaction(db, () => {
       const actor = requireSession(request)
-      const channel = getChannel(actor.id, channelId, 'chat')
+      const channel = getMessageChannel(actor.id, channelId)
       const row = directMessage.get(messageId)
       if (!row || row.channel_id !== channel.id) throw missing()
       const own = row.user_id === actor.id
@@ -717,7 +725,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       const bytes = await readBytes(request, fileLimit)
       if (bytes.length < 28) throw new RequestError(400, 'Die verschlüsselte Datei ist ungültig.')
       const currentUser = requireSession(request)
-      getChannel(currentUser.id, channel.id, 'chat')
+      getMessageChannel(currentUser.id, channel.id)
       const now = Date.now()
       expiredAttachments.run(now - stagingTime)
       transaction(db, () => {
@@ -825,16 +833,16 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       } else if (moving) {
         json(response, 200, moveMessage(request, id, file, body))
       } else if (action === 'messages' && file && method === 'DELETE') {
-        getChannel(user.id, id, 'chat')
+        getMessageChannel(user.id, id)
         const deletion = await readJson(request, 16384)
         json(response, 200, { message: removeMessage(request, id, file, deletion) })
       } else if (action === 'messages' && !file) {
-        const channel = getChannel(user.id, id, 'chat')
+        const channel = getMessageChannel(user.id, id)
         if (method === 'GET') json(response, 200, messagePage(user, channel, searchParams))
         else if (method === 'POST') json(response, 201, { message: post(user, channel, body) })
         else return false
       } else if (action === 'files' && file) {
-        const channel = getChannel(user.id, id, 'chat')
+        const channel = getMessageChannel(user.id, id)
         if (method === 'PUT') {
           await putFile(request, user, channel, file)
           json(response, 201, { id: file })

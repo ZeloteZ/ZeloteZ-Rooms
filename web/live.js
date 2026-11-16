@@ -1,5 +1,6 @@
 import { api, button, checkAccountResponse, el, identifier, notify, personMark, personName, sameId, status, tell, topicHref } from "./ui.js";
 import { t } from "./i18n.js";
+import { renderChat } from "./chat.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
 import { createChannelCapture } from "./channel-capture.js";
@@ -459,10 +460,9 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const living = el("span", { class: "tag live live-channel-count", role: "status", hidden: true });
   const empty = el("p", { class: "muted", role: "status" }, t("Loading streams…", "Streams werden geladen …"));
   const watchHint = el("div", { class: "live-channel-placeholder", "aria-label": t("Stream player", "Stream-Player") }, empty);
-  const chatEmpty = el("section", { class: "panel stream-chat live-channel-chat-empty", "aria-label": t("Stream chat", "Streamchat") },
-    el("h2", {}, t("Stream chat", "Streamchat")), el("p", { class: "muted" },
-      t("Choose a live stream to join its chat.", "Wähle einen laufenden Stream für seinen Chat.")));
-  const chat = el("div", { class: "live-channel-chat-content", hidden: true });
+  const channelChat = renderChat({ ...context, liveChat: true, messageId: undefined }, channel);
+  const chat = el("div", { class: "live-channel-chat-content" }, channelChat);
+  const audience = el("div", { class: "live-channel-audience", hidden: true });
   const feedback = status();
   const previewTitle = t("Your stream preview", "Deine Stream-Vorschau");
   const previewVideo = el("video", { autoplay: true, playsinline: true, "aria-label": previewTitle });
@@ -494,18 +494,21 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   });
   const watchParty = createWatchParty(context, channel, {
     onSelect() {
-      if (streams.some(stream => sameId(stream.id, player.activeId()))) player.stop();
+      autoSelectPending = false;
+      if (player.activeId()) player.stop();
       if (feedback.textContent === unavailableWatch) tell(feedback, "");
-      setPanel("people");
     },
-    onChange: renderControls,
+    onChange() {
+      selectInitialPlayback();
+      renderControls();
+    },
     onUnavailable: () => tell(feedback, unavailableWatch),
     onShareUnavailable: () => tell(feedback, t("Video sharing is unavailable in this channel.", "In diesem Kanal kannst du gerade kein Video teilen.")),
   });
   const streamsSection = el("section", {
     class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
   }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
-  el("div", { class: "stream-list" }, watchParty.card, cards));
+  el("div", { class: "stream-list" }, cards, watchParty.card));
   let streams = [];
   let streamsReady = false;
   let canStream = false;
@@ -515,11 +518,12 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   let lastSignature;
   let lastSelection;
   let lastLocalStream;
-  let chatScope;
-  let chatStreamId;
-  let chatNode;
+  let audienceScope;
+  let audienceId;
+  let legacy;
   let requestedShare = context.shareSource;
-  let destination = !context.watchId && context.streamId ? { streamId: context.streamId, messageId: context.messageId } : null;
+  let destination = !context.watchId && context.streamId ? { streamId: context.streamId } : null;
+  let autoSelectPending = !context.watchId && !context.streamId && !context.shareSource;
 
   function mine() {
     return streams.find(stream => sameId(stream.userId, user.id));
@@ -529,6 +533,31 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     node.dataset.panel = panel;
     peopleButton.setAttribute("aria-pressed", String(panel === "people"));
     chatButton.setAttribute("aria-pressed", String(panel === "chat"));
+  }
+
+  function showChannelChat() {
+    legacy?.scope.abort();
+    legacy?.node.remove();
+    legacy = undefined;
+    channelChat.hidden = false;
+  }
+
+  function showChatTarget(target) {
+    if (!target?.messageId) return;
+    setPanel("chat");
+    showChannelChat();
+    if (!target.streamId) {
+      channelChat.dispatchEvent(new CustomEvent("open-message", { detail: target }));
+      return;
+    }
+    const scope = new AbortController();
+    const chatSignal = AbortSignal.any([signal, scope.signal]);
+    const older = renderStreamChat({ ...context, messageId: target.messageId, signal: chatSignal, readOnly: true }, target.streamId);
+    const node = el("div", { class: "live-channel-legacy-chat" },
+      button(t("Back to live chat", "Zurück zum Livechat"), showChannelChat, { class: "ghost" }), older);
+    legacy = { scope, node };
+    channelChat.hidden = true;
+    chat.append(node);
   }
 
   function localNative() {
@@ -541,12 +570,26 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   }
 
   function chooseStream(stream) {
+    autoSelectPending = false;
     watchParty.leave();
-    if (stream.live) setPanel("chat");
     if (showsLocally(stream)) {
       if (streams.some(item => sameId(item.id, player.activeId()))) player.stop();
     } else {
       player.choose(channel, stream);
+    }
+  }
+
+  function selectInitialPlayback() {
+    if (!autoSelectPending || !streamsReady) return;
+    if (streams.some(stream => sameId(stream.id, player.activeId())) || watchParty.selected() || lastLocalStream) {
+      autoSelectPending = false;
+      return;
+    }
+    const firstStream = streams.find(stream => stream.live);
+    if (firstStream) chooseStream(firstStream);
+    else if (watchParty.hasSnapshot()) {
+      autoSelectPending = false;
+      watchParty.join();
     }
   }
 
@@ -557,8 +600,8 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       if (feedback.textContent !== unavailableNote) tell(feedback, unavailableNote, "error");
       return;
     }
+    destination = null;
     if (feedback.textContent === unavailableNote) tell(feedback, "");
-    setPanel("chat");
     if (!sameId(player.activeId(), stream.id)) chooseStream(stream);
   }
 
@@ -601,27 +644,16 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       if (previewMedia) previewStage.append(previewVideo);
       else previewVideo.remove();
     }
-    const nextChat = (selectedHere?.live ? selectedHere : null) ?? (own?.live ? own : null);
-    const nextChatId = nextChat?.id;
-    const target = nextChatId && sameId(nextChatId, destination?.streamId) ? destination : null;
-    if (target) destination = null;
-    if (nextChatId !== chatStreamId) {
-      chatScope?.abort();
-      chatStreamId = nextChatId;
-      chat.hidden = !nextChatId;
-      chatEmpty.hidden = Boolean(nextChatId);
-      if (nextChatId) {
-        chatScope = new AbortController();
-        const chatSignal = AbortSignal.any([signal, chatScope.signal]);
-        chatNode = renderStreamChat({ ...context, signal: chatSignal, messageId: target?.messageId }, nextChatId);
-        if (sameId(nextChat.userId, user.id)) chat.replaceChildren(chatNode, renderStreamAudience({ signal: chatSignal }, nextChatId));
-        else chat.replaceChildren(chatNode);
-      } else {
-        chatNode = null;
-        chat.replaceChildren();
-      }
-    } else if (target?.messageId) {
-      chatNode?.dispatchEvent(new CustomEvent("open-message", { detail: target }));
+    const nextAudience = own?.live && (!selectedHere || sameId(own.id, selectedHere.id)) ? own.id : undefined;
+    if (nextAudience !== audienceId) {
+      audienceScope?.abort();
+      audienceId = nextAudience;
+      audience.hidden = !audienceId;
+      if (audienceId) {
+        audienceScope = new AbortController();
+        const audienceSignal = AbortSignal.any([signal, audienceScope.signal]);
+        audience.replaceChildren(renderStreamAudience({ signal: audienceSignal }, audienceId));
+      } else audience.replaceChildren();
     }
     const signature = JSON.stringify(streams);
     const displayed = selectedHere?.id ?? (previewMedia ? sharing.id : nativeHere?.streamId);
@@ -636,12 +668,10 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       return button([
         el("span", { class: "stream-identity" }, personMark(person), personName(person)),
         el("span", { class: className }, stream.live ? "Live" : t("Waiting", "Wartet")),
-      ], event => {
-        const viaKeyboard = event.detail === 0 && event.currentTarget === document.activeElement;
+      ], () => {
         destination = null;
         if (feedback.textContent === unavailableNote) tell(feedback, "");
         chooseStream(stream);
-        if (stream.live && viaKeyboard && chatButton.offsetParent) chatButton.focus({ preventScroll: true });
       }, {
         class: "stream-pick", "aria-pressed": String(sameId(displayed, stream.id)), "data-stream-id": stream.id,
       });
@@ -653,6 +683,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
 
   async function requestStream() {
     if (pending || !canStream || mine() || screenShare?.active() || nativeBroadcast?.active()) return;
+    autoSelectPending = false;
     shareSettings.open = false;
     tell(feedback, "");
     try {
@@ -719,7 +750,6 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     if (localStream && !sameId(localStream, lastLocalStream)) {
       lastLocalStream = localStream;
       watchParty.leave();
-      setPanel("chat");
       if (streams.some(stream => sameId(stream.id, player.activeId()))) player.stop();
     } else if (!localStream) {
       lastLocalStream = null;
@@ -739,6 +769,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
         streamsReady = true;
         canStream = Boolean(data.canStream);
         selectDestination();
+        selectInitialPlayback();
         renderControls();
       }
       if (!feedback.textContent || feedback.textContent === reconnectNote) tell(feedback, "");
@@ -771,22 +802,27 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     people,
     el("aside", {
       class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat", "aria-label": t("Stream chat", "Streamchat"),
-    }, chat, chatEmpty)));
+    }, chat, audience)));
   node.addEventListener("open-message", event => {
+    if (event.detail?.messageId) showChatTarget(event.detail);
     if (event.detail?.shareSource) {
+      autoSelectPending = false;
       requestedShare = event.detail.shareSource;
       renderControls();
       return;
     }
     if (event.detail?.watchId) {
+      autoSelectPending = false;
       destination = null;
       watchParty.open(event.detail.watchId);
       return;
     }
+    if (event.detail?.streamId) autoSelectPending = false;
     destination = event.detail?.streamId ? event.detail : null;
     selectDestination();
     renderControls();
   }, { signal });
+  showChatTarget(context);
   signal.addEventListener("abort", () => {
     clearTimeout(timer);
     previewVideo.srcObject = null;
