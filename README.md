@@ -47,4 +47,6 @@ Voice and live video are encrypted in transit. MediaMTX relays live media and FF
 
 For watch parties, YouTube serves its own embedded player and video directly to each viewer. Rooms stores uploaded watch-party videos temporarily in their original form and restricts playback to viewers with access to the channel.
 
-A temporary room’s guest link grants playback for that room. Its password is carried in the URL fragment, then exchanged for a room-scoped session. The host can revoke it or replace it from **Stream access**.
+A temporary room’s guest link lets visitors watch, use the live chat, and play, pause, or seek in a watch party. The password in the link’s URL fragment is exchanged for a session limited to that room. The host can revoke or replace it from **Stream access**.
+
+Temporary live chat uses separate, short-lived keys for each participating device. The server carries encrypted messages and can see who sent them and when. Participants do not receive messages sent before they joined, and the chat is cleared when the room closes.

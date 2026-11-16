@@ -30,7 +30,9 @@ Dein Passwort entsperrt deinen privaten Kontoschlüssel. Sobald der Schlüssel g
 
 In einer Watchparty liefert YouTube den eingebetteten Player und das Video direkt an die Zuschauer. Hochgeladene Videos speichert Rooms vorübergehend im Original und liefert sie nur an Zuschauer mit Kanalzugriff aus.
 
-Der Gastlink eines temporären Raums gewährt Zugriff auf dessen Wiedergabe. Das Passwort steht im URL-Fragment und wird gegen eine Sitzung für diesen Raum eingetauscht. Unter **Stream-Zugriff** lässt sich der Link widerrufen oder ersetzen.
+Über den Gastlink eines temporären Raums können Besucher zuschauen, mitchatten und bei einer Watchparty abspielen, pausieren oder spulen. Das Passwort im URL-Fragment wird gegen eine Sitzung für genau diesen Raum eingetauscht. Unter **Stream-Zugriff** lässt sich der Link widerrufen oder ersetzen.
+
+Der temporäre Livechat verwendet für jedes teilnehmende Gerät eigene, kurzlebige Schlüssel. Der Server leitet verschlüsselte Nachrichten weiter und kann Absender und Zeitpunkte sehen. Teilnehmer sehen keine Nachrichten, die vor ihrem Beitritt gesendet wurden. Wenn der Raum geschlossen wird, wird der Chat gelöscht.
 
 ## Selbst hosten
 

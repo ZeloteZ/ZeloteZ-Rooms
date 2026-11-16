@@ -1,5 +1,7 @@
 import { language, t } from "./i18n.js";
 import { guestPassword, guestRoomId, guestSource, openGuestMedia } from "./guest-media.js";
+import { renderQuickChat } from "./quick-chat.js";
+import { createWatchControls } from "./watch-controls.js";
 
 const messages = {
   opening: ["Opening the live room…", "Live-Raum wird geöffnet …"],
@@ -13,10 +15,12 @@ const messages = {
   waiting: ["The host hasn’t started sharing yet.", "Die Freigabe hat noch nicht begonnen."],
   loading: ["Loading playback…", "Wiedergabe wird geladen …"],
   reconnecting: ["Connection interrupted. Reconnecting…", "Verbindung unterbrochen. Erneuter Verbindungsversuch …"],
-  paused: ["Playback is paused.", "Die Wiedergabe ist pausiert."],
-  localPause: ["Playback is paused on this device.", "Die Wiedergabe ist auf diesem Gerät pausiert."],
-  gesture: ["Select Play to start playback on this device.", "Wähle Abspielen, um die Wiedergabe auf diesem Gerät zu starten."],
+  gesture: ["Enable playback to start watching on this device.",
+    "Erlaube die Wiedergabe, um auf diesem Gerät zuzuschauen."],
   playbackError: ["The video couldn’t be played.", "Das Video konnte nicht wiedergegeben werden."],
+  conflict: ["Someone else changed playback. The player is catching up.",
+    "Jemand hat die Wiedergabe geändert. Der Player gleicht sich ab."],
+  commandError: ["The playback change couldn’t be sent. Try again.", "Die Steuerung konnte nicht übertragen werden. Versuche es erneut."],
 };
 
 function copy(key) {
@@ -28,7 +32,7 @@ function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
-export function renderGuestViewer({ publicId, signal, member = false, password }) {
+export function renderGuestViewer({ publicId, signal, member = false, password, host }) {
   const viewer = document.createElement("div");
   viewer.className = "guest-viewer";
   viewer.innerHTML = `
@@ -44,21 +48,24 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
       </form>
     </section>
     <section class="guest-room" hidden>
-      <div class="guest-heading">
-        <h1 class="guest-room-title"></h1>
-        <span class="tag live" hidden></span>
-      </div>
-      <div class="guest-media">
-        <p class="status guest-waiting" role="status"></p>
-      </div>
-      <p class="status guest-playback-status" role="status" hidden></p>
-      <div class="guest-controls" hidden>
-        <div class="guest-volume">
-          <button class="button guest-mute" type="button"></button>
-          <input type="range" min="0" max="100" value="100">
+      <header class="guest-heading">
+        <div class="guest-title-group">
+          <h1 class="guest-room-title"></h1>
+          <span class="guest-video-title muted" hidden></span>
         </div>
-        <button class="button guest-fullscreen" type="button" hidden></button>
-        <button class="button primary guest-play" type="button" hidden></button>
+        <span class="tag live" hidden></span>
+      </header>
+      <div class="quick-view-layout">
+        <section class="panel guest-player">
+          <div class="guest-media">
+            <p class="status guest-waiting" role="status"></p>
+          </div>
+          <div class="watch-party-footer">
+            <p class="status guest-playback-status" role="status" hidden></p>
+            <p class="status guest-command-status" role="status" hidden></p>
+            <button class="button primary guest-play" type="button" hidden></button>
+          </div>
+        </section>
       </div>
     </section>`;
   const find = selector => viewer.querySelector(selector);
@@ -71,25 +78,57 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
   const enter = find("button[type=submit]");
   const room = find(".guest-room");
   const title = find(".guest-room-title");
+  const videoTitle = find(".guest-video-title");
   const live = find(".guest-heading .tag");
+  const layout = find(".quick-view-layout");
+  const player = find(".guest-player");
   const stage = find(".guest-media");
   const waiting = find(".guest-waiting");
   const playbackStatus = find(".guest-playback-status");
-  const controls = find(".guest-controls");
-  const audio = find(".guest-volume");
-  const volume = find("input[type=range]");
-  const mute = find(".guest-mute");
-  const fullscreen = find(".guest-fullscreen");
+  const commandStatus = find(".guest-command-status");
   const play = find(".guest-play");
+  const controls = createWatchControls({
+    signal, muted: true,
+    onToggle() {
+      if (watch?.source.playing) void change("pause");
+      else if (playing?.ready) {
+        const duration = playing.surface.getDuration();
+        const restart = Number.isFinite(duration) && duration > 0 && expectedPosition() >= duration - 0.15;
+        if (restart) playing.surface.seek(0);
+        if (playing.kind !== "youtube") playing.surface.play();
+        void change("play", restart ? 0 : undefined);
+      }
+    },
+    onSeek: position => void change("seek", position),
+    onVolume: level => playing?.surface.setVolume(level),
+    onFullscreen() {
+      if (document.fullscreenElement) void document.exitFullscreen()?.catch(() => {});
+      else if (document.fullscreenEnabled) void player.requestFullscreen()?.catch(() => {});
+      else playing?.surface.element.webkitEnterFullscreen?.();
+    },
+  });
+  find(".watch-party-footer").prepend(controls.element);
+  if (host?.actions) find(".guest-heading").append(host.actions);
+  if (host?.localPlayer) {
+    player.classList.add("guest-player-local");
+    player.replaceChildren(host.localPlayer);
+  }
 
   let gateState = "opening";
   let playbackState;
+  let commandState;
   let timer;
+  let clock;
   let watch;
   let playing;
   let authorized = false;
-  let muted = true;
   let roomTitle = "";
+  let chat;
+  let chatScope;
+  let pulling = false;
+  let writing = false;
+  let nativeIntent;
+  let generation = 0;
   const base = "/api/guest/" + publicId;
 
   function updateLabels() {
@@ -97,23 +136,29 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
     setText(gateStatus, copy(gateState));
     passwordLabel.textContent = t("Password", "Passwort");
     enter.textContent = t("Open live room", "Live-Raum öffnen");
-    setText(title, watch?.source.title || roomTitle || t("Live room", "Live-Raum"));
+    setText(title, roomTitle || t("Live room", "Live-Raum"));
+    setText(videoTitle, watch?.source.title || "");
+    videoTitle.hidden = !videoTitle.textContent;
     live.textContent = t("Live", "Live");
     setText(waiting, copy("waiting"));
     setText(playbackStatus, copy(playbackState));
-    mute.textContent = muted ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
-    volume.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
-    fullscreen.textContent = t("Full screen", "Vollbild");
+    setText(commandStatus, copy(commandState));
     play.textContent = playbackState === "playbackError" ? t("Retry playback", "Wiedergabe erneut versuchen")
-      : playbackState === "localPause" ? t("Resume watching", "Weiter zuschauen") : t("Play", "Abspielen");
+      : t("Enable playback", "Wiedergabe erlauben");
   }
 
   function setPlayback(state) {
     if (state === playbackState) return;
     playbackState = state;
     playbackStatus.hidden = !state;
-    play.hidden = !["playbackError", "localPause", "gesture"].includes(state);
+    play.hidden = !["playbackError", "gesture"].includes(state);
     updateLabels();
+  }
+
+  function setCommand(state) {
+    commandState = state;
+    commandStatus.hidden = !state;
+    setText(commandStatus, copy(state));
   }
 
   function showGate(state) {
@@ -128,37 +173,45 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
     updateLabels();
   }
 
-  function audioVolume() {
-    const level = Number(volume.value) / 100;
-    playing?.surface.setVolume(muted ? 0 : level);
-    updateLabels();
-  }
-
   function discardMedia() {
     const old = playing;
     playing = undefined;
     old?.surface.destroy();
+    clearInterval(clock);
+    controls.resetPosition();
+    controls.element.hidden = true;
     waiting.hidden = false;
-    controls.hidden = true;
     live.hidden = true;
     setPlayback(undefined);
+    setCommand(undefined);
+  }
+
+  function expectedPosition() {
+    const { source, serverTime, received, roundTrip } = watch;
+    const age = serverTime - source.updatedAt + roundTrip / 2 + performance.now() - received;
+    const expected = source.position + (source.playing ? Math.max(0, age) / 1000 : 0);
+    const duration = playing?.surface.getDuration();
+    return Number.isFinite(duration) && duration > 0 ? Math.min(expected, duration) : expected;
+  }
+
+  function tick() {
+    if (watch && playing?.ready && playing.kind !== "screen") {
+      controls.setPosition(expectedPosition(), playing.surface.getDuration());
+    }
   }
 
   function applyState(force = false) {
     const current = playing;
-    if (!watch || !current?.ready || current.localPaused) return;
-    const { source, serverTime, received, roundTrip } = watch;
+    if (!watch || !current?.ready || nativeIntent) return;
+    const { source } = watch;
     if (source.kind === "screen") {
       if (force) current.surface.play();
       return;
     }
 
-    let expected = source.position;
-    if (source.playing) expected += Math.max(0, serverTime - source.updatedAt + roundTrip / 2 + performance.now() - received) / 1000;
-    const duration = current.surface.getDuration();
-    if (Number.isFinite(duration) && duration > 0) expected = Math.min(expected, duration);
+    const expected = expectedPosition();
     const changed = current.revision !== source.revision;
-    // Cueing a YouTube player that has not started can cancel its pending play command.
+    // Seeking a cued YouTube player can cancel its pending play command.
     if (source.kind === "youtube" && source.playing && !current.started) {
       if (force || changed) {
         current.revision = source.revision;
@@ -169,94 +222,126 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
     }
     const tolerance = force || changed || !source.playing ? 0.3 : 2.25;
     if (Math.abs(current.surface.getTime() - expected) > tolerance) current.surface.seek(expected);
-    if (!force && !changed && (source.playing || current.surface.isPaused())) return;
     current.revision = source.revision;
-    if (source.playing) current.surface.play();
-    else {
-      current.started = false;
-      current.surface.pause();
-      setPlayback("paused");
+    if (source.playing) {
+      if (force || changed) current.surface.play();
+    } else {
+      if (!current.surface.isPaused() || force || changed) current.surface.pause();
+      setPlayback(undefined);
     }
+    tick();
+  }
+
+  function renderTransport() {
+    controls.setTransport({
+      isPlaying: watch?.source.playing,
+      enabled: !writing && Boolean(playing?.ready),
+      shared: watch?.source.kind !== "screen",
+    });
+    controls.audio.hidden = !watch?.source.hasAudio;
+    controls.fullscreen.hidden = !document.fullscreenEnabled && !playing?.surface.element.webkitEnterFullscreen;
   }
 
   function startPlayback() {
     discardMedia();
     if (!watch) return;
     const { source } = watch;
-    const current = { id: source.id, kind: source.kind, ready: false, localPaused: false, started: false };
+    const current = { id: source.id, kind: source.kind, ready: false, started: false };
     const active = () => playing === current && !signal.aborted;
     current.surface = openGuestMedia(source, {
       onReady() {
         if (!active()) return;
         current.ready = true;
-        fullscreen.hidden = !document.fullscreenEnabled && !current.surface.element.webkitEnterFullscreen;
         applyState(true);
+        renderTransport();
       },
       onPlaying() {
         if (!active()) return;
-        if (!watch || (source.kind !== "screen" && !watch.source.playing)) {
-          current.surface.pause();
-          return;
-        }
         const started = current.started;
         current.started = true;
-        current.localPaused = false;
         setPlayback(undefined);
-        if (!started && source.kind === "youtube") applyState(true);
+        if (!started && watch?.source.playing && source.kind === "youtube") applyState(true);
       },
-      onEnded() { if (active()) current.started = false; },
+      onEnded() {
+        if (!active() || !watch?.source.playing) return;
+        const duration = current.surface.getDuration();
+        if (Number.isFinite(duration) && duration > 0 && expectedPosition() >= duration - 1) void change("pause");
+      },
       onBlocked() { if (active() && (source.kind === "screen" || watch?.source.playing)) setPlayback("gesture"); },
       onError() {
         if (!active()) return;
         current.ready = false;
         setPlayback("playbackError");
+        renderTransport();
       },
       onPlaybackChange(resumed) {
-        if (!active() || !current.ready) return;
-        current.localPaused = !resumed;
-        if (resumed) applyState(true);
-        else {
-          current.started = false;
-          setPlayback("localPause");
-        }
+        if (!active() || !current.ready || source.kind === "screen") return;
+        nativeIntent = { id: source.id, playing: resumed };
+        sendNativeIntent();
+      },
+      onTitle(value) {
+        if (!active() || !host?.channelId || watch?.source.title) return;
+        const title = [...value.trim()].slice(0, 120).join("");
+        if (!title) return;
+        const path = "/api/channels/" + host.channelId + "/watch/" + source.id + "/metadata";
+        void request(path, "PATCH", { title }, true).catch(() => {});
       },
     });
     playing = current;
     if (current.surface.element.tagName === "VIDEO") current.surface.element.setAttribute("aria-label", title.textContent);
     stage.append(current.surface.element);
     waiting.hidden = true;
-    controls.hidden = false;
-    fullscreen.hidden = true;
+    controls.element.hidden = false;
     setPlayback("loading");
-    audioVolume();
+    current.surface.setVolume(controls.volume());
+    clock = setInterval(tick, 250);
+  }
+
+  function revoke() {
+    authorized = false;
+    watch = undefined;
+    nativeIntent = undefined;
+    discardMedia();
+    chatScope?.abort();
+    chatScope = undefined;
+    chat?.remove();
+    chat = undefined;
   }
 
   function showRoom(snapshot, sent) {
     authorized = true;
-    roomTitle = typeof snapshot.title === "string" ? snapshot.title.slice(0, 120) : "";
+    const heading = snapshot.roomTitle ?? snapshot.title;
+    roomTitle = typeof heading === "string" ? heading.slice(0, 120) : "";
     room.hidden = false;
     gate.hidden = true;
     passwordInput.value = "";
+    if (!chat) {
+      chatScope = new AbortController();
+      chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]) });
+      layout.append(chat);
+    }
     const source = guestSource(snapshot, base);
     if (!source) {
       watch = undefined;
-      discardMedia();
+      if (playing) discardMedia();
       updateLabels();
       return;
     }
     const received = performance.now();
     watch = { source, serverTime: snapshot.serverTime, received, roundTrip: received - sent };
     updateLabels();
-    if (source.id !== playing?.id || source.kind !== playing?.kind) startPlayback();
-    else applyState();
-    if (playbackState === "reconnecting") setPlayback(source.kind === "screen" || source.playing ? undefined : "paused");
-    audio.hidden = !source.hasAudio;
+    if (!host?.localPlayer) {
+      if (source.id !== playing?.id || source.kind !== playing?.kind) startPlayback();
+      else applyState();
+      if (playbackState === "reconnecting") setPlayback(undefined);
+      renderTransport();
+    }
     live.hidden = source.kind !== "screen" && !source.playing;
   }
 
-  function request(path, body) {
-    return fetch(base + path, {
-      method: body ? "POST" : "GET",
+  function request(path, method = "GET", body, absolute = false) {
+    return fetch(absolute ? path : base + path, {
+      method,
       credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
@@ -267,29 +352,83 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
     });
   }
 
+  function accessLost(response) {
+    if (![401, 403, 404, 410].includes(response.status)) return false;
+    revoke();
+    showGate(!member && [401, 403].includes(response.status) ? "required" : "unavailable");
+    host?.onUnavailable?.();
+    return true;
+  }
+
+  function schedule(delay = watch?.source.kind === "local" || watch?.source.kind === "youtube" ? 1200 : 2600) {
+    clearTimeout(timer);
+    if (!signal.aborted) timer = setTimeout(refresh, delay);
+  }
+
   async function refresh() {
     if (signal.aborted) return;
+    if (pulling || writing) return schedule();
+    pulling = true;
+    const version = generation;
     const sent = performance.now();
     try {
       const response = await request("/state");
-      if (signal.aborted) return;
-      if ([401, 403, 404, 410].includes(response.status)) {
-        watch = undefined;
-        discardMedia();
-        authorized = false;
-        showGate(!member && [401, 403].includes(response.status) ? "required" : "unavailable");
-        return;
-      }
+      if (signal.aborted || version !== generation || accessLost(response)) return;
       if (!response.ok) throw new Error();
       const snapshot = await response.json();
-      if (signal.aborted) return;
-      showRoom(snapshot, sent);
+      if (!signal.aborted && version === generation) showRoom(snapshot, sent);
     } catch {
-      if (signal.aborted) return;
+      if (signal.aborted || version !== generation) return;
       if (authorized) setPlayback("reconnecting");
       else showGate("reconnecting");
+    } finally {
+      pulling = false;
     }
-    if (!signal.aborted) timer = setTimeout(refresh, watch?.source.kind === "local" || watch?.source.kind === "youtube" ? 1200 : 2600);
+    if (!signal.aborted && version === generation) schedule();
+  }
+
+  function sendNativeIntent() {
+    if (!nativeIntent || writing || signal.aborted) return;
+    const intent = nativeIntent;
+    nativeIntent = undefined;
+    if (watch?.source.id !== intent.id || !playing?.ready) return;
+    if (intent.playing === watch.source.playing) applyState(true);
+    else void change(intent.playing ? "play" : "pause");
+  }
+
+  async function change(action, position) {
+    const source = watch?.source;
+    if (!source || source.kind === "screen" || writing || signal.aborted) return;
+    writing = true;
+    generation++;
+    renderTransport();
+    setCommand(undefined);
+    const sent = performance.now();
+    try {
+      const { id, revision } = source;
+      const response = await request("/playback", "PATCH", { partyId: id, revision, action, position });
+      if (signal.aborted || accessLost(response)) return;
+      if (response.status === 409) {
+        setCommand("conflict");
+        if (playing) playing.revision = undefined;
+      } else {
+        if (!response.ok) throw new Error();
+        const snapshot = await response.json();
+        if (!signal.aborted) showRoom(snapshot, sent);
+      }
+    } catch {
+      if (!signal.aborted) {
+        setCommand("commandError");
+        applyState(true);
+      }
+    } finally {
+      writing = false;
+      if (!signal.aborted && authorized) {
+        renderTransport();
+        schedule(0);
+        sendNativeIntent();
+      }
+    }
   }
 
   async function unlock(secret) {
@@ -301,7 +440,7 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
     }
     showGate("checking");
     try {
-      const response = await request("/session", { password: secret });
+      const response = await request("/session", "POST", { password: secret });
       if (signal.aborted) return;
       if (response.ok) await refresh();
       else if (response.status === 429) showGate("limited");
@@ -315,34 +454,22 @@ export function renderGuestViewer({ publicId, signal, member = false, password }
   form.addEventListener("submit", event => {
     event.preventDefault();
     if (!member) void unlock(passwordInput.value.trim());
-  });
-  mute.addEventListener("click", () => {
-    muted = !muted;
-    if (!muted && Number(volume.value) === 0) volume.value = "100";
-    audioVolume();
-  });
-  volume.addEventListener("input", () => {
-    muted = Number(volume.value) === 0;
-    audioVolume();
-  });
-  fullscreen.addEventListener("click", () => {
-    if (document.fullscreenElement) void document.exitFullscreen()?.catch(() => {});
-    else if (document.fullscreenEnabled) void stage.requestFullscreen()?.catch(() => {});
-    else playing?.surface.element.webkitEnterFullscreen?.();
-  });
+  }, { signal });
   play.addEventListener("click", () => {
     if (playbackState === "playbackError") startPlayback();
-    else if (playing) {
-      playing.localPaused = false;
-      applyState(true);
-    }
-  });
-  viewer.addEventListener("guest-language", updateLabels);
+    else if (playing) applyState(true);
+  }, { signal });
+  viewer.addEventListener("guest-language", () => {
+    updateLabels();
+    controls.refreshLabels();
+    chat?.dispatchEvent(new Event("guest-language"));
+  }, { signal });
   signal.addEventListener("abort", () => {
     clearTimeout(timer);
-    discardMedia();
+    revoke();
   }, { once: true });
 
+  discardMedia();
   updateLabels();
   if (!guestRoomId.test(publicId)) showGate("unavailable");
   else if (!member && typeof password === "string") void unlock(password);

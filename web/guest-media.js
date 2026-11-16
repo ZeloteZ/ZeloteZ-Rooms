@@ -64,6 +64,7 @@ export function openGuestMedia(source, callbacks) {
   const { signal } = listener;
   video.addEventListener("loadedmetadata", callbacks.onReady, { signal });
   video.addEventListener("playing", callbacks.onPlaying, { signal });
+  video.addEventListener("ended", callbacks.onEnded, { signal });
   video.addEventListener("error", callbacks.onError, { signal });
   let hls;
 

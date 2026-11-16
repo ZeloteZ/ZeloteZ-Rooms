@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { Readable, Writable } from 'node:stream'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { createAuth } from '../auth.mjs'
 import { createCommunity } from '../community.mjs'
+import { RequestError } from '../http.mjs'
 import { createQuickRooms } from '../quick-rooms.mjs'
 
 const origin = 'https://rooms.example.com'
@@ -21,7 +22,12 @@ function fixture(t) {
   let time = Date.now()
   const media = { hasGuestSource: id => current.has(id), guestSnapshot: ({ channelId }) => ({
     serverTime: time, party: current.get(channelId),
-  }) }
+  }), controlGuestPlayback: ({ channelId }, { partyId, revision, action, position }) => {
+    const party = current.get(channelId)
+    if (party?.id !== partyId) throw new RequestError(404)
+    if (party.revision !== revision) throw new RequestError(409)
+    current.set(channelId, { ...party, revision: revision + 1, position: position ?? party.position, playing: action === 'play' })
+  } }
   const quick = createQuickRooms(db, { publicOrigin: origin, auth, community, streams: media, watchParties: media,
     now: () => time })
   t.after(() => {
@@ -40,9 +46,13 @@ function fixture(t) {
       revoke: () => db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(token) }
   }
 
-  async function request(method, path, { user: actor, cookie = actor?.cookie, body } = {}) {
-    const stream = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))])
+  async function request(method, path, { user: actor, cookie = actor?.cookie, body, beforeBody } = {}) {
+    const stream = Readable.from((async function* () {
+      await beforeBody?.()
+      if (body !== undefined) yield Buffer.from(JSON.stringify(body))
+    })())
     stream.method = method
+    stream.url = path
     stream.headers = { ...(cookie && { cookie }), ...(body !== undefined && { 'content-type': 'application/json' }) }
     stream.socket = { remoteAddress: '127.0.0.1' }
     const chunks = []
@@ -63,7 +73,7 @@ function fixture(t) {
 
   function start(room, owner) {
     quick.assertTemporarySource(room.channelId, owner.id, room.source)
-    current.set(room.channelId, { id: randomUUID(), title: 'Shared clip', source: room.source, position: 0, playing: false })
+    current.set(room.channelId, { id: randomUUID(), title: 'Shared clip', source: room.source, position: 0, playing: false, revision: 1 })
     quick.noteTemporarySource(room.channelId, owner.id)
   }
 
@@ -111,7 +121,7 @@ test('temporary rooms are hidden, use the selected source once, and opt in to si
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
 })
 
-test('guest passwords are hashed and redeem only a scoped read capability, which rotation and revocation invalidate', async t => {
+test('guest passwords are hashed and redeem only scoped room access, which rotation and revocation invalidate', async t => {
   const { db, user, request, start, guestPath, ownerPath } = fixture(t)
   const host = user('test-host')
   const otherHost = user('test-other-host')
@@ -143,4 +153,65 @@ test('guest passwords are hashed and redeem only a scoped read capability, which
   const replacement = (await redeem(rotated)).headers['Set-Cookie'].split(';')[0]
   host.revoke()
   await assert.rejects(request('GET', guestPath(room, 'state'), { cookie: replacement }), { status: 404 })
+})
+
+test('temporary playback controls require current guest or opted-in account access for each request', async t => {
+  const { user, request, start, guestPath, ownerPath } = fixture(t)
+  const host = user('test-host')
+  const member = user('test-friend')
+  const screenHost = user('test-screen-host')
+  const create = (actor, source) => request('POST', '/api/quick-rooms', { user: actor, body: { source, guestAccess: true } })
+    .then(result => result.body)
+  const room = await create(host, 'youtube')
+  const screen = await create(screenHost, 'screen')
+  start(room, host)
+  const exchange = await request('POST', guestPath(room, 'session'), { body: { password: room.secret } })
+  const cookie = exchange.headers['Set-Cookie'].split(';')[0]
+  const { party } = (await request('GET', guestPath(room, 'state'), { cookie })).body
+  const path = guestPath(room, 'playback')
+  const body = { partyId: party.id, action: 'play', revision: 1 }
+  await assert.rejects(request('GET', path, { cookie }), { status: 405 })
+  await assert.rejects(request('PATCH', path, { body }), { status: 401 })
+  await assert.rejects(request('PATCH', path, { user: member, body }), { status: 401 })
+  await assert.rejects(request('PATCH', guestPath(screen, 'playback'), { user: screenHost, body }), { status: 404 })
+  const { body: updated } = await request('PATCH', path, { cookie, body })
+  assert.equal(updated.party.playing, true)
+  assert.equal(updated.party.revision, 2)
+  assert.deepEqual(updated, (await request('GET', guestPath(room, 'state'), { user: host })).body)
+  await request('PATCH', ownerPath(room), { user: host, body: { memberVisibility: true } })
+  await assert.rejects(request('PATCH', path, { user: member, body }), { status: 409 })
+  const pause = { ...body, action: 'pause', revision: 2 }
+  await assert.rejects(request('PATCH', path, { cookie, body: pause, beforeBody: () =>
+    request('PATCH', ownerPath(room), { user: host, body: { renewPassword: true } }) }), { status: 401 })
+  assert.equal((await request('GET', guestPath(room, 'state'), { user: member })).body.party.revision, 2)
+  const race = await Promise.allSettled([member, host].map(user => request('PATCH', path, { user, body: pause })))
+  assert.deepEqual(race.map(result => result.status === 'fulfilled' ? result.value.status : result.reason.status).sort(), [200, 409])
+  assert.equal((await request('GET', guestPath(room, 'state'), { user: member })).body.party.playing, false)
+  await request('PATCH', ownerPath(room), { user: host, body: { memberVisibility: false } })
+  await assert.rejects(request('PATCH', path, { user: member, body }), { status: 401 })
+})
+
+test('temporary chat uses the same guest access as playback and identifies signed-in participants', async t => {
+  const { user, request, guestPath, ownerPath } = fixture(t)
+  const host = user('test-host')
+  const room = (await request('POST', '/api/quick-rooms', { user: host,
+    body: { source: 'screen', guestAccess: true } })).body
+  const join = guestPath(room, 'chat/join')
+  const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+  const body = { deviceId: randomUUID(), publicKey: publicKey.export({ format: 'jwk' }) }
+  await assert.rejects(request('POST', join, { body }), { status: 401 })
+  const { body: hostChat } = await request('POST', join, { user: host, body })
+  assert.deepEqual(hostChat.peers.map(({ name, guest }) => ({ name, guest })), [{ name: 'test-host', guest: false }])
+  const redeemed = await request('POST', guestPath(room, 'session'), { body: { password: room.secret } })
+  const cookie = redeemed.headers['Set-Cookie'].split(';')[0]
+  const deviceId = randomUUID()
+  await request('POST', join, { cookie, body: { ...body, deviceId } })
+  const chat = `${guestPath(room, 'chat')}?deviceId=${deviceId}&after=0`
+  const { body: guestChat } = await request('GET', chat, { cookie })
+  assert.equal(guestChat.deviceId, deviceId)
+  assert.equal(guestChat.peers.find(peer => peer.id === deviceId).guest, true)
+  assert.deepEqual((await request('POST', guestPath(room, 'chat/leave'), { cookie, body: { deviceId } })).body, { ok: true })
+  await assert.rejects(request('GET', chat, { cookie }), { status: 409 })
+  await request('DELETE', ownerPath(room), { user: host })
+  await assert.rejects(request('GET', chat, { cookie }), { status: 404 })
 })

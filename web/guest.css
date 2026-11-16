@@ -1,3 +1,11 @@
+.guest-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-block-size: 0;
+  block-size: 100vh;
+  block-size: 100dvh;
+  overflow: hidden;
+}
 .guest-page .bar {
   justify-content: space-between;
   min-height: 64px;
@@ -8,10 +16,12 @@
   font-size: .86rem;
 }
 .guest-page main {
-  width: min(100% - clamp(24px, 6vw, 80px), 1280px);
-  padding-block: clamp(20px, 6vh, 60px);
+  width: min(100% - clamp(24px, 6vw, 80px), 1480px);
+  min-block-size: 0;
+  padding-block: clamp(10px, 2.4dvh, 24px);
+  overflow: auto;
 }
-.guest-viewer { min-width: 0; }
+.guest-viewer { min-width: 0; min-block-size: 0; block-size: 100%; }
 .guest-viewer .guest-gate {
   width: min(100%, 480px);
   margin: clamp(12px, 5vh, 58px) auto;
@@ -20,43 +30,70 @@
 }
 .guest-viewer .guest-gate h1,
 .guest-viewer .guest-room-title {
-  font-size: clamp(1.65rem, 4vw, 2.7rem);
+  font-size: clamp(1.4rem, 3.4vw, 2.4rem);
   line-height: 1.12;
   letter-spacing: -.045em;
+  overflow-wrap: anywhere;
 }
 .guest-viewer .guest-access-form { gap: 12px; }
 .guest-viewer .guest-access-form .button { justify-self: start; }
 .guest-viewer .guest-gate-status { min-height: 1.4em; }
-.guest-viewer .guest-room {
+.guest-room {
   display: grid;
-  gap: 14px;
-  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  min-inline-size: 0;
+  block-size: 100%;
 }
-.guest-viewer .guest-heading {
+.guest-heading {
   display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-inline-size: 0;
 }
-.guest-viewer .guest-room-title { min-width: 0; }
-.guest-viewer .guest-media {
+.guest-title-group { display: grid; gap: 4px; min-inline-size: 0; }
+.guest-video-title { font-size: .9rem; overflow-wrap: anywhere; }
+.quick-view-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.quick-view-actions .room-actions { gap: 6px; }
+.quick-view-actions .button { min-block-size: 34px; padding: 5px 9px; }
+.quick-view-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 29%);
+  align-items: stretch;
+  gap: clamp(8px, 1.4vw, 16px);
+  min-block-size: 0;
+}
+.guest-player {
+  display: grid;
+  grid-template-rows: minmax(204px, 1fr) auto;
+  gap: 8px;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: clamp(6px, 1.2vw, 12px);
+  border-radius: 16px;
+}
+.guest-player-local { display: block; padding: 0; border: 0; }
+.guest-player-local > .live-channel { block-size: 100%; }
+.guest-media {
   position: relative;
   display: grid;
   place-items: center;
   isolation: isolate;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 10px;
   background: #08080c;
-  min-height: 204px;
-  max-height: min(68dvh, 800px);
-  aspect-ratio: 16 / 9;
 }
-.guest-viewer .guest-media:has(.guest-waiting:not([hidden])) {
+.guest-media:has(.guest-waiting:not([hidden])) {
   background: radial-gradient(ellipse at 28% 5%, #252d56, #101018 72%);
 }
-.guest-viewer .guest-media video,
-.guest-viewer .guest-media iframe {
+.guest-media video, .guest-media iframe {
   position: absolute;
   inset: 0;
   border: 0;
@@ -64,41 +101,18 @@
   height: 100%;
   object-fit: contain;
 }
-.guest-viewer .guest-waiting {
-  text-align: center;
-  padding: 20px;
-}
-.guest-viewer .guest-playback-status { margin-left: 3px; }
-.guest-viewer .guest-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 16px;
-}
-.guest-viewer .guest-volume {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.guest-viewer .guest-volume input[type="range"] {
-  width: 112px;
-  min-height: 24px;
-  padding: 0;
-  accent-color: var(--accent);
-  background: transparent;
-  border: 0;
-}
-.guest-viewer .guest-media:fullscreen {
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  border-radius: 0;
+.guest-waiting { text-align: center; padding: 20px; }
+.guest-playback-status, .guest-command-status { padding-inline: 3px; }
+.guest-player:fullscreen { padding: 12px; background: #08090d; border-radius: 0; }
+@media (max-width: 760px) {
+  .guest-room { grid-template-rows: auto minmax(452px, 1fr); }
+  .quick-view-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(204px, 1fr) minmax(240px, .8fr); }
+  .guest-room:has(.watch-party-controls:not([hidden])) { grid-template-rows: auto minmax(550px, 1fr); }
+  .quick-view-layout:has(.watch-party-controls:not([hidden])) { grid-template-rows: minmax(295px, 1fr) minmax(240px, .8fr); }
+  .guest-player:has(.watch-party-controls:not([hidden])) { grid-template-rows: minmax(204px, 1fr) auto; }
 }
 @media (max-width: 520px) {
-  .guest-page .bar { width: calc(100% - 24px); }
-  .guest-viewer .guest-heading { gap: 8px; }
-  .guest-viewer .guest-heading .tag { align-self: center; }
-  .guest-viewer .guest-media { border-radius: 12px; }
+  .guest-page .bar { inline-size: calc(100% - 24px); min-height: 54px; }
+  .guest-heading { gap: 6px 8px; }
+  .quick-view-actions { margin-inline-start: 0; }
 }

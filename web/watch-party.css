@@ -29,13 +29,49 @@
 .live-channel-body:has(.watch-party-player:not([hidden])) { grid-template-rows: minmax(17rem, 1fr) auto minmax(6rem, 1fr); }
 .live-channel-body:has(.watch-youtube-frame) { grid-template-rows: minmax(22rem, 1fr) auto minmax(6rem, 1fr); }
 
-.watch-party-controls { min-inline-size: 0; display: grid; gap: 6px; }
-.watch-party-transport { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; }
-.watch-party-controls input[type="range"] { min-block-size: 26px; min-inline-size: 5ch; padding: 0; accent-color: var(--accent); }
-.watch-party-transport input { flex: 1 1 6ch; inline-size: auto; }
-.watch-party-time { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
-.watch-party-audio { gap: 5px 8px; }
-.watch-party-audio input { inline-size: min(8rem, 33%); }
+.watch-party-footer { min-inline-size: 0; display: grid; gap: 6px; justify-items: start; }
+.watch-party-footer > :empty { display: none; }
+.watch-party-controls {
+  display: grid;
+  gap: 2px;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 5px 8px 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 80%, #101118);
+}
+.watch-timeline { display: grid; grid-template-columns: 4ch minmax(0, 1fr) 4ch; align-items: center; gap: 10px; }
+.watch-duration { text-align: end; }
+.watch-party-transport { display: flex; align-items: center; gap: 6px; }
+.watch-party-controls input[type="range"] {
+  min-block-size: 22px;
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+.watch-party-time { color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.watch-audio { display: flex; align-items: center; gap: 5px; margin-inline-start: auto; min-inline-size: 0; }
+.watch-audio input { inline-size: clamp(45px, 11vw, 102px); }
+.watch-party-controls .watch-play-button { display: grid; place-items: center; inline-size: 42px; }
+.watch-play-icon {
+  display: block;
+  inline-size: 0;
+  block-size: 0;
+  border: solid transparent;
+  border-width: 6px 0 6px 10px;
+  border-inline-start-color: currentColor;
+}
+.watch-play-button[data-playing] .watch-play-icon {
+  inline-size: 10px;
+  block-size: 12px;
+  border: solid currentColor;
+  border-width: 0 3px;
+}
+.watch-fullscreen-icon { font-size: 1.2rem; line-height: 1; }
+.watch-party-player:fullscreen { padding: 12px; background: #08090d; }
 
 .watch-party-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 9px; }
 .watch-party-sources button { min-block-size: 48px; }

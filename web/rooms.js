@@ -3,8 +3,10 @@ import { renderActivity } from "./activity.js";
 import { applyTopicCover, applyTopicDesign, editTopicDesign } from "./appearance.js";
 import { renderChat } from "./chat.js";
 import { renderHomeActivity } from "./home-activity.js";
+import { renderGuestViewer } from "./guest-viewer.js";
 import { renderLive } from "./live.js";
 import { openStreamNow, quickRoomActions } from "./quick-start.js";
+import { createWatchParty } from "./watch-party.js";
 import { api, button, closeDialog, el, field, form, identifier, notify, personRow, sameId, select, showDialog, status, tell, topicHref } from "./ui.js";
 
 const visibilityOptions = [["public", t("Everyone in the group", "Für alle im Freundeskreis")], ["private", t("Private · invite only", "Privat · nur auf Einladung")]];
@@ -585,17 +587,26 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   };
   const playerMount = el("div", { class: "live-channel-player" });
   const child = { ...context, room: topic, shareSource: sameId(channel.id, selectedId) ? target?.shareSource : undefined };
-  const live = renderLive(child, channel, null, context.player, null, playerMount);
-  const hero = el("div", { class: "panel room-hero section-heading" },
-    el("div", { class: "room-title" },
-      el("div", { class: "inline" }, el("a", { href: "#/rooms", class: "subtle" }, t("All rooms", "Alle Räume")),
-        el("span", { class: "tag" }, t("Temporary room", "Temporärer Raum"))),
-      el("h1", { title: topic.title }, topic.title)), quickRoomActions(context, topic, stopCapture));
-  const node = el("div", { class: "topic-view", "data-joined": true, "data-temporary": true }, hero, live);
-  context.player.setLocation(topic, channel, playerMount);
+  const screenRoom = topic.quickSource === "screen";
+  const localPlayer = screenRoom ? renderLive(child, channel, null, context.player, null, playerMount) : null;
+  const setup = screenRoom ? null : createWatchParty(child, channel, {
+    setupOnly: true,
+    onShareUnavailable: () => notify(t("Video sharing is unavailable in this room.", "Hier kannst du gerade kein Video teilen.")),
+  });
+  if (child.shareSource) setup?.prepareSource(child.shareSource);
+  const actions = el("div", { class: "quick-view-actions" }, setup?.share, quickRoomActions(context, topic, stopCapture));
+  const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true,
+    host: { actions, channelId: channel.id, localPlayer, onUnavailable() {
+      context.quickRoomHeader.ended(topic.id);
+      location.hash = "#/rooms";
+    } } });
+  node.dataset.temporary = "true";
+  context.player.setLocation(topic, channel, screenRoom ? playerMount : null);
   context.voice.setLocation(null);
   return { node, select(id, next) {
-    if (sameId(id, channel.id) && next?.shareSource) live.dispatchEvent(new CustomEvent("open-message", { detail: next }));
+    if (!sameId(id, channel.id) || !next?.shareSource) return;
+    if (localPlayer) localPlayer.dispatchEvent(new CustomEvent("open-message", { detail: next }));
+    else setup.prepareSource(next.shareSource);
   } };
 }
 

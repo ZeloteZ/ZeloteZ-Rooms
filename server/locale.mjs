@@ -48,6 +48,7 @@ const catalogs = {
       'Die Anfrage muss JSON enthalten.': 'The request must contain JSON.',
       'Das Video darf höchstens 256 MiB groß sein.': 'The video can be up to 256 MiB.',
       'Die Watchparty wurde inzwischen geändert.': 'The watch party has changed.',
+      'Der Livechat hat sich inzwischen geändert.': 'The live chat has changed.',
       'Die Anmeldung ist gerade ausgelastet. Versuche es gleich erneut.': 'Sign-in is busy right now. Try again in a moment.',
       'Die Channel-Liste hat sich geändert. Lade sie erneut.': 'The channel list has changed. Refresh it and try again.',
       'Die Einladung ist ungültig, abgelaufen oder schon eingelöst.': 'The invite is invalid, expired, or already used.',

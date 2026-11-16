@@ -2,11 +2,12 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import { requestAddress } from './auth.mjs'
 import { json, readJson, RequestError, transaction } from './http.mjs'
 import { responseLocale } from './locale.mjs'
+import { createQuickChat } from './quick-chat.mjs'
 
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}'
 const roomIdPattern = new RegExp(`^${uuid}$`, 'u')
 const quickRoute = new RegExp(`^/api/quick-rooms(?:/(${uuid}))?$`, 'u')
-const guestRoute = new RegExp(`^/api/guest/(${uuid})/(session|state|media/(${uuid}))$`, 'u')
+const guestRoute = new RegExp(`^/api/guest/(${uuid})/(session|state|playback|chat(?:/join|/leave)?|media/(${uuid}))$`, 'u')
 const passwordPattern = /^[A-Za-z0-9_-]{43}$/u
 const ticketPattern = /^(\d{10})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/u
 const sources = new Set(['screen', 'youtube', 'local'])
@@ -63,6 +64,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
   const signingKey = randomBytes(32)
   const redeemAttempts = new Map()
   const createAttempts = new Map()
+  const chat = createQuickChat({ isGuestActive, now })
   const roomSelect = `SELECT q.*, t.title FROM quick_rooms q JOIN topics t ON t.id = q.topic_id`
   const byId = db.prepare(`${roomSelect} WHERE q.topic_id = ?`)
   const byOwner = db.prepare(`${roomSelect} WHERE q.owner_id = ?`)
@@ -89,7 +91,13 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
     for (const buckets of [redeemAttempts, createAttempts]) {
       for (const [id, entry] of buckets) if (entry.expiresAt <= time) buckets.delete(id)
     }
-    for (const room of all.all()) if (!isActive(room, time)) community.removeTemporaryTopic(room.topic_id, room.owner_id)
+    for (const room of all.all()) if (!isActive(room, time)) removeRoom(room)
+    chat.sweep()
+  }
+
+  function removeRoom(room) {
+    community.removeTemporaryTopic(room.topic_id, room.owner_id)
+    chat.removeRoom(room.topic_id)
   }
 
   function activeRoom(id) {
@@ -197,7 +205,9 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
     if (ticketValid(room, ticket)) return scope(room, { token: ticket })
     const user = auth.session(request)
     const session = user ? auth.sessionKey(request) : null
-    if (user && accountAccess(room, user.id, session)) return scope(room, { userId: user.id, session })
+    if (user && accountAccess(room, user.id, session)) {
+      return { ...scope(room, { userId: user.id, session }), displayName: user.displayName }
+    }
     if (!room.guest_hash) throw missing()
     throw unauthorized()
   }
@@ -215,7 +225,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
       throw error
     }) : null
     const watch = !room.used || room.source === 'screen' ? null : watchParties.guestSnapshot(mediaScope)
-    return { title: watch?.party?.title || room.title, source: room.source, stream,
+    return { title: watch?.party?.title || room.title, roomTitle: room.title, source: room.source, stream,
       party: watch?.party ?? null, serverTime: watch?.serverTime ?? now() }
   }
 
@@ -241,13 +251,22 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
       exchange(request, response, activeRoom(id), password)
     } else {
       const mediaScope = guestAccess(request, id)
-      if (partyId) {
+      const isActive = () => isGuestActive(mediaScope.guestKey, id)
+      if (action.startsWith('chat')) {
+        await chat.handle(request, response, mediaScope, action.split('/')[1] ?? 'chat', new URL(request.url, publicOrigin))
+      } else if (partyId) {
         if (!['GET', 'HEAD'].includes(request.method)) throw methodInvalid()
-        await watchParties.serveGuestMedia(request, response, mediaScope, partyId, () => isGuestActive(mediaScope.guestKey, id))
+        await watchParties.serveGuestMedia(request, response, mediaScope, partyId, isActive)
       } else {
-        if (request.method !== 'GET') throw methodInvalid()
+        if (action === 'playback') {
+          if (request.method !== 'PATCH') throw methodInvalid()
+          if (mediaScope.source === 'screen') throw missing()
+          const input = await readJson(request, 256)
+          if (!isActive()) throw unauthorized()
+          watchParties.controlGuestPlayback(mediaScope, input)
+        } else if (request.method !== 'GET') throw methodInvalid()
         const state = await stateFor(byId.get(id), mediaScope)
-        if (!isGuestActive(mediaScope.guestKey, id)) throw unauthorized()
+        if (!isActive()) throw unauthorized()
         json(response, 200, state)
       }
     }
@@ -276,8 +295,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
     } else if (id && method === 'GET') json(response, 200, details(ownedRoom(user, id)))
     else if (id && method === 'PATCH') change(response, ownedRoom(user, id), input)
     else if (id && method === 'DELETE') {
-      const room = ownedRoom(user, id)
-      community.removeTemporaryTopic(room.topic_id, user.id)
+      removeRoom(ownedRoom(user, id))
       response.writeHead(204).end()
     } else throw methodInvalid()
     return true
@@ -297,7 +315,12 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
   }, 4000)
   cleanup.unref()
 
+  function close() {
+    clearInterval(cleanup)
+    chat.close()
+  }
+
   return { handle, handleGuest, checkGuestViewer, homeActivity, assertTemporarySource, noteTemporarySource,
     isTemporaryTopic: topicId => Boolean(byId.get(topicId)),
-    isTemporaryChannel: channelId => Boolean(byChannel.get(channelId)), close: () => clearInterval(cleanup) }
+    isTemporaryChannel: channelId => Boolean(byChannel.get(channelId)), close }
 }

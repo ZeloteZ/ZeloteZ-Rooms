@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import { json, readBytes, readJson, RequestError } from './http.mjs'
 
 const uuid = '[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}'
+const partyIdPattern = new RegExp(`^${uuid}$`, 'u')
 const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media|metadata))?)?$`, 'u')
 const storedName = new RegExp(`^${uuid}\\.video$`, 'u')
 const youtubeId = /^[\w-]{11}$/u
@@ -28,6 +29,15 @@ const conflict = () => new RequestError(409, 'Die Watchparty wurde inzwischen ge
 const unsupported = () => new RequestError(415, 'Wähle ein Video im MP4- oder WebM-Format.')
 const positionAt = (party, time) => Math.min(maxPosition, party.position + (party.playing ? (time - party.updatedAt) / 1000 : 0))
 const validPosition = position => Number.isFinite(position) && position >= 0 && position <= maxPosition
+const invalidControl = () => new RequestError(400, 'Ungültige Videosteuerung.')
+
+function playbackCommand({ action, revision, position }) {
+  if (!['play', 'pause', 'seek'].includes(action) || !Number.isSafeInteger(revision) || revision < 1 ||
+      ((action === 'seek' || position !== undefined) && (!['seek', 'play'].includes(action) || !validPosition(position)))) {
+    throw invalidControl()
+  }
+  return { action, revision, position }
+}
 
 function watchTitle(value, source) {
   if (typeof value !== 'string') return ''
@@ -377,17 +387,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     return serve(request, response, party, { key, isActive, verifyAccess() { if (!isActive()) throw missing() } })
   }
 
-  async function control(request, response, actor, party) {
-    const { action, revision, position } = await readJson(request)
-    if (!['play', 'pause', 'seek'].includes(action) || !Number.isSafeInteger(revision) || revision < 1 ||
-        ((action === 'seek' || position !== undefined) && (!['seek', 'play'].includes(action) || !validPosition(position)))) {
-      throw new RequestError(400, 'Ungültige Videosteuerung.')
-    }
-    const current = requireSession(request)
-    if (current.id !== actor.id) throw missing()
-    const access = accessTo(current, party.channelId)
-    const time = now()
-    specificParty(party.channelId, party.id, time)
+  function updatePlayback(party, { action, revision, position }, time) {
     if (party.state !== 'ready' || party.revision !== revision) throw conflict()
     if (party.commandWindowUntil <= time) {
       party.commandWindowUntil = time + 1000
@@ -399,6 +399,25 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     party.updatedAt = time
     party.commandCount++
     party.revision++
+  }
+
+  function controlGuestPlayback(scope, input) {
+    if (closing) throw missing()
+    const { partyId } = input
+    if (typeof partyId !== 'string' || !partyIdPattern.test(partyId)) throw invalidControl()
+    const time = now()
+    const party = guestParty(scope, time)
+    if (party?.id !== partyId) throw missing()
+    updatePlayback(party, playbackCommand(input), time)
+  }
+
+  async function control(request, response, actor, party) {
+    const command = playbackCommand(await readJson(request))
+    const current = requireSession(request)
+    if (current.id !== actor.id) throw missing()
+    const access = accessTo(current, party.channelId)
+    const time = now()
+    updatePlayback(specificParty(party.channelId, party.id, time), command, time)
     return json(response, 200, snapshot(current, access, party, time))
   }
 
@@ -437,5 +456,5 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     for (const party of parties.values()) retire(party)
   }
 
-  return { handle, homeActivity, hasGuestSource, guestSnapshot, serveGuestMedia, close }
+  return { handle, homeActivity, hasGuestSource, guestSnapshot, serveGuestMedia, controlGuestPlayback, close }
 }

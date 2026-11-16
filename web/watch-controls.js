@@ -1,0 +1,121 @@
+import { t } from "./i18n.js";
+
+function item(tag, className, children = []) {
+  const node = document.createElement(tag);
+  node.className = className;
+  node.append(...children);
+  return node;
+}
+
+function button(className, action, signal) {
+  const node = item("button", "button " + className);
+  node.type = "button";
+  node.addEventListener("click", action, { signal });
+  return node;
+}
+
+function range(className, max, step, value) {
+  const node = item("input", className);
+  node.type = "range";
+  node.min = "0";
+  node.max = String(max);
+  node.step = String(step);
+  node.value = String(value);
+  return node;
+}
+
+function timeLabel(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(whole / 60);
+  return minutes + ":" + String(whole % 60).padStart(2, "0");
+}
+
+export function createWatchControls({ signal, onToggle, onSeek, onVolume, onFullscreen, muted = false }) {
+  let scrubbing = false;
+  let position = 0;
+  let duration;
+  let playing = false;
+  let previousVolume = 100;
+  const icon = item("span", "watch-play-icon");
+  icon.setAttribute("aria-hidden", "true");
+  const toggle = button("watch-play-button", onToggle, signal);
+  toggle.append(icon);
+  const progress = range("watch-position", 0, 0.1, 0);
+  const time = item("span", "watch-party-time", ["0:00"]);
+  const total = item("span", "watch-party-time watch-duration");
+  const timeline = item("div", "watch-timeline", [time, progress, total]);
+  const level = range("watch-volume", 100, 1, muted ? 0 : 100);
+  const mute = button("ghost watch-mute-button", () => {
+    level.value = Number(level.value) === 0 ? String(previousVolume) : "0";
+    volumeChanged();
+  }, signal);
+  const audio = item("div", "watch-audio", [mute, level]);
+  const fullscreen = button("ghost icon-button watch-fullscreen", onFullscreen, signal);
+  const expand = item("span", "watch-fullscreen-icon", ["⛶"]);
+  expand.setAttribute("aria-hidden", "true");
+  fullscreen.append(expand);
+  const transport = item("div", "watch-party-transport", [toggle, audio, fullscreen]);
+  const element = item("div", "watch-party-controls", [timeline, transport]);
+
+  function refreshLabels() {
+    const action = playing ? t("Pause together", "Gemeinsam pausieren") : t("Play together", "Gemeinsam abspielen");
+    toggle.title = action;
+    toggle.setAttribute("aria-label", action);
+    toggle.toggleAttribute("data-playing", playing);
+    progress.setAttribute("aria-label", t("Playback position for everyone", "Wiedergabeposition für alle"));
+    level.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
+    mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
+    fullscreen.title = t("Full screen", "Vollbild");
+    fullscreen.setAttribute("aria-label", fullscreen.title);
+  }
+
+  function paintTimeline() {
+    if (!scrubbing) progress.value = String(position);
+    const preview = timeLabel(scrubbing ? Number(progress.value) : position);
+    time.textContent = preview;
+    total.textContent = duration ? timeLabel(duration) : "";
+    progress.setAttribute("aria-valuetext", preview);
+  }
+
+  function volumeChanged() {
+    const value = Number(level.value);
+    if (value > 0) previousVolume = value;
+    onVolume(value / 100);
+    refreshLabels();
+  }
+
+  progress.addEventListener("input", () => { scrubbing = true; paintTimeline(); }, { signal });
+  progress.addEventListener("change", () => {
+    const value = Number(progress.value);
+    scrubbing = false;
+    onSeek(value);
+  }, { signal });
+  progress.addEventListener("blur", () => { scrubbing = false; paintTimeline(); }, { signal });
+  level.addEventListener("input", volumeChanged, { signal });
+  refreshLabels();
+
+  return {
+    element, audio, fullscreen,
+    refreshLabels,
+    volume: () => Number(level.value) / 100,
+    setTransport({ isPlaying = false, enabled = false, shared = true } = {}) {
+      playing = isPlaying;
+      toggle.disabled = !enabled;
+      toggle.hidden = !shared;
+      timeline.hidden = !shared;
+      progress.disabled = !enabled || !duration;
+      refreshLabels();
+    },
+    setPosition(seconds, length) {
+      position = seconds;
+      duration = Number.isFinite(length) && length > 0 ? length : undefined;
+      progress.max = duration ? String(duration) : "0";
+      progress.disabled = toggle.disabled || !duration;
+      paintTimeline();
+    },
+    resetPosition() {
+      scrubbing = false;
+      this.setPosition(0);
+    },
+  };
+}

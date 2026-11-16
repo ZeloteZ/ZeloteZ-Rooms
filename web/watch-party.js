@@ -1,6 +1,7 @@
 import { t } from "./i18n.js";
 import { api, button, closeDialog, el, field, form, identifier, showDialog, status, tell } from "./ui.js";
 import { createYoutubePlayer } from "./youtube-player.js";
+import { createWatchControls } from "./watch-controls.js";
 
 const chunkSize = 4 * 1024 * 1024;
 const maxFileSize = 64 * chunkSize;
@@ -28,12 +29,6 @@ function localVideoType(file) {
   return null;
 }
 
-function timeLabel(seconds) {
-  const whole = Math.max(0, Math.floor(seconds || 0));
-  const minutes = Math.floor(whole / 60);
-  return minutes + ":" + String(whole % 60).padStart(2, "0");
-}
-
 function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
   const element = el("video", { playsinline: true, preload: "auto", "aria-label": t("Shared video", "Geteiltes Video") });
   element.addEventListener("loadedmetadata", onReady, { once: true });
@@ -52,7 +47,8 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
   };
 }
 
-export function createWatchParty({ signal, user, watchId, room, quickRoomHeader }, channel, { onSelect, onChange, onUnavailable, onShareUnavailable }) {
+export function createWatchParty({ signal, user, watchId, room, quickRoomHeader }, channel,
+  { onSelect, onChange, onUnavailable, onShareUnavailable, setupOnly = false }) {
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
   const sourceLimit = room?.temporary ? room.quickSource : null;
@@ -67,36 +63,31 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
   const media = el("div", { class: "watch-party-media" });
   const enable = button(t("Enable playback on this device", "Wiedergabe auf diesem Gerät erlauben"), enablePlayback,
     { hidden: true });
-  const toggle = button("", () => {
-    if (!sample || !ready) return;
-    if (sample.party.playing) {
-      void change("pause");
-      return;
-    }
-    const start = restartPosition();
-    if (start === 0) surface.seek(0);
-    surface.play();
-    void change("play", start);
-  }, { class: "primary" });
-  const progress = el("input", { type: "range", min: 0, max: 0, step: 0.1, disabled: true,
-    "aria-label": t("Playback position for everyone", "Wiedergabeposition für alle") });
-  const time = el("span", { class: "watch-party-time" }, "0:00");
-  const volume = el("input", { type: "range", min: 0, max: 100, value: 100,
-    "aria-label": t("Your volume", "Deine Lautstärke") });
-  const mute = button(t("Mute", "Ton aus"), () => {
-    const muted = Number(volume.value) === 0;
-    volume.value = muted ? String(lastVolume) : "0";
-    updateVolume();
-  }, { class: "ghost" });
+  const controls = createWatchControls({
+    signal,
+    onToggle() {
+      if (!sample || !ready) return;
+      if (sample.party.playing) return void change("pause");
+      const start = restartPosition();
+      if (start === 0) surface.seek(0);
+      surface.play();
+      void change("play", start);
+    },
+    onSeek: position => void change("seek", position),
+    onVolume: level => surface?.setVolume(level),
+    onFullscreen() {
+      if (document.fullscreenElement) void document.exitFullscreen()?.catch(() => {});
+      else if (document.fullscreenEnabled) void player.requestFullscreen()?.catch(() => {});
+      else surface?.element.webkitEnterFullscreen?.();
+    },
+  });
   const stop = button(t("End watch party", "Watchparty beenden"), stopParty, { class: "danger", hidden: true });
   const leave = button("×", leaveParty, { class: "ghost icon-button", title: t("Close player", "Player schließen"),
     "aria-label": t("Close player", "Player schließen") });
   const player = el("section", { class: "panel watch-party-player", hidden: true, "aria-label": playbackLabel },
     el("header", { class: "section-heading watch-party-heading" }, title, el("div", { class: "inline" }, stop, leave)),
     media,
-    el("div", { class: "watch-party-controls" },
-      el("div", { class: "watch-party-transport" }, toggle, progress, time),
-      el("div", { class: "inline watch-party-audio" }, mute, volume, enable), statusNode));
+    el("div", { class: "watch-party-footer" }, controls.element, enable, statusNode));
 
   let sample;
   let hasSnapshot = false;
@@ -105,12 +96,10 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
   let selectedId;
   let surface;
   let ready = false;
-  let lastVolume = 100;
   let appliedRevision;
   let nativeIntent;
   let canShare = false;
   let canStop = false;
-  let scrubbing = false;
   let busy = false;
   let polling = false;
   let generation = 0;
@@ -130,24 +119,6 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     if (Number.isFinite(duration) && duration > 0 && desiredPosition() >= duration - 0.15) return 0;
   }
 
-  function updateVolume() {
-    const value = Number(volume.value);
-    if (value > 0) lastVolume = value;
-    mute.textContent = value === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
-    mute.setAttribute("aria-pressed", String(value === 0));
-    surface?.setVolume(value / 100);
-  }
-
-  function updateTimeline(position, duration) {
-    const known = Number.isFinite(duration) && duration > 0;
-    progress.disabled = busy || !ready || !known;
-    if (known) progress.max = String(duration);
-    if (!scrubbing) progress.value = String(position);
-    const preview = scrubbing ? Number(progress.value) : position;
-    time.textContent = timeLabel(preview) + (known ? " / " + timeLabel(duration) : "");
-    progress.setAttribute("aria-valuetext", timeLabel(preview));
-  }
-
   function sync(force = false) {
     const party = sample?.party;
     if (!party || selectedId !== party.id || !surface || !ready || nativeIntent) return;
@@ -163,17 +134,17 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
         enable.hidden = true;
       }
     }
-    updateTimeline(position, surface.getDuration());
+    controls.setPosition(position, surface.getDuration());
   }
 
   function tick() {
-    if (selectedId && ready) updateTimeline(desiredPosition(), surface.getDuration());
+    if (selectedId && ready) controls.setPosition(desiredPosition(), surface.getDuration());
   }
 
   function render() {
     const party = sample?.party;
     const isReady = party?.state === "ready";
-    share.hidden = !canShare;
+    share.hidden = !canShare || (setupOnly && Boolean(party));
     share.disabled = busy || Boolean(party);
     share.title = party ? t("A watch party is already shared in this channel.", "In diesem Kanal wird bereits ein Video geteilt.") : "";
     card.hidden = !isReady;
@@ -185,9 +156,9 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     }
     stop.hidden = !canStop;
     stop.disabled = busy;
-    toggle.disabled = busy || !ready;
-    toggle.textContent = party?.playing ? t("Pause together", "Gemeinsam pausieren") : t("Play together", "Gemeinsam abspielen");
-    onChange();
+    controls.setTransport({ isPlaying: party?.playing, enabled: !busy && ready });
+    controls.fullscreen.hidden = !document.fullscreenEnabled && !surface?.element.webkitEnterFullscreen;
+    onChange?.();
   }
 
   function leaveParty() {
@@ -196,7 +167,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     const hadSelection = Boolean(selectedId);
     selectedId = null;
     ready = false;
-    scrubbing = false;
+    controls.resetPosition();
     appliedRevision = undefined;
     nativeIntent = undefined;
     clearInterval(clockTimer);
@@ -210,7 +181,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
 
   function join() {
     const party = sample?.party;
-    if (party?.state !== "ready" || selectedId === party.id || signal.aborted) return;
+    if (setupOnly || party?.state !== "ready" || selectedId === party.id || signal.aborted) return;
     selectedId = party.id;
     onSelect();
     player.hidden = false;
@@ -259,7 +230,7 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
         if (!current()) return;
         ready = true;
         tell(statusNode, "");
-        updateVolume();
+        surface.setVolume(controls.volume());
         sync(true);
         render();
       },
@@ -499,14 +470,6 @@ export function createWatchParty({ signal, user, watchId, room, quickRoomHeader 
     input.focus();
   }
 
-  volume.addEventListener("input", updateVolume, { signal });
-  progress.addEventListener("input", () => { scrubbing = true; tick(); }, { signal });
-  progress.addEventListener("change", () => {
-    const position = Number(progress.value);
-    scrubbing = false;
-    void change("seek", position);
-  }, { signal });
-  progress.addEventListener("blur", () => { scrubbing = false; }, { signal });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(0); }, { signal });
   signal.addEventListener("abort", () => {
     clearTimeout(pollTimer);

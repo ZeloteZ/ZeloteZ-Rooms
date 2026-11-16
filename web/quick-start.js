@@ -122,9 +122,9 @@ function audienceFields(settings = {}) {
   return {
     node: el("div", { class: "quick-options" },
       sharingOption(guest, t("Allow guests with the link", "Gäste mit Link zulassen"),
-        t("A password in the link gives guests access to the video.", "Das Passwort im Link gibt Gästen Zugriff auf das Video.")),
+        t("A password in the link gives guests access to the stream and live chat.", "Das Passwort im Link gibt Gästen Zugriff auf den Stream und Livechat.")),
       sharingOption(members, t("Show in Live Now for members", "Mitgliedern unter „Gerade live“ anzeigen"),
-        t("Signed-in members can open the video without a password.", "Angemeldete Mitglieder können das Video ohne Passwort öffnen."))),
+        t("Signed-in members can open this room without a password.", "Angemeldete Mitglieder können diesen Raum ohne Passwort öffnen."))),
     values: () => ({ guestAccess: guest.checked, memberVisibility: members.checked }),
   };
 }

@@ -101,7 +101,8 @@ async function fixture(t) {
     assert.fail('Watch party files were left behind')
   }
 
-  return { request, guestRequest, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot, homeActivity: watch.homeActivity,
+  return { request, guestRequest, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot,
+    controlGuestPlayback: watch.controlGuestPlayback, homeActivity: watch.homeActivity,
     waitForCleanup, tick: milliseconds => { now += milliseconds } }
 }
 
@@ -138,6 +139,35 @@ test('guest media is limited to read-only byte ranges for the authorized tempora
   temporary.delete(channel)
   assert.equal(guestSnapshot(scope).party, null)
   await assert.rejects(guestRequest(scope, draft.id, 'GET', () => true), { status: 404 })
+})
+
+test('guest and member playback use one canonical revision for the authorized temporary party', async t => {
+  const { request, session, users, room, channel, temporary, guestSnapshot, controlGuestPlayback, tick } = await fixture(t)
+  const host = session(users.host)
+  const viewer = session(users.viewer)
+  const { party } = (await request(host, 'POST', '', { source: 'youtube', videoId: 'K5ABskPJN1Q' })).data
+  const scope = { roomId: room, channelId: channel, ownerId: users.host, source: 'youtube' }
+  const command = { partyId: party.id, action: 'play', revision: party.revision }
+  assert.throws(() => controlGuestPlayback(scope, command), { status: 404 })
+  temporary.add(channel)
+  for (const wrong of [{ ownerId: users.viewer }, { channelId: randomUUID() }, { source: 'local' }, { source: 'screen' }]) {
+    assert.throws(() => controlGuestPlayback({ ...scope, ...wrong }, command), { status: 404 })
+  }
+  assert.throws(() => controlGuestPlayback(scope, { ...command, partyId: randomUUID() }), { status: 404 })
+  assert.throws(() => controlGuestPlayback(scope, { ...command, action: 'seek', position: -1 }), { status: 400 })
+  controlGuestPlayback(scope, { ...command, position: 30 })
+  tick(3500)
+  await assert.rejects(request(viewer, 'PATCH', `/${party.id}`, { action: 'pause', revision: 1 }), { status: 409 })
+  const paused = (await request(viewer, 'PATCH', `/${party.id}`, { action: 'pause', revision: 2 })).data.party
+  assert.equal(paused.position, 33.5)
+  assert.throws(() => controlGuestPlayback(scope, { ...command, revision: 2 }), { status: 409 })
+  controlGuestPlayback(scope, { ...command, action: 'seek', position: 12.5, revision: 3 })
+  const guest = guestSnapshot(scope).party
+  assert.equal(guest.position, 12.5)
+  assert.equal(guest.playing, false)
+  assert.equal(guest.revision, 4)
+  assert.equal(Object.hasOwn(guest, 'hostId'), false)
+  assert.equal((await request(host)).data.party.revision, guest.revision)
 })
 
 test('Live Now shows visible ready watch parties and the original host can supply YouTube title metadata once', async t => {
