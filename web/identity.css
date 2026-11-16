@@ -85,20 +85,37 @@
   font-variant-numeric: tabular-nums;
 }
 
-.message-row:has(> .message-delete) {
+.message-row:has(> .message-actions) {
   grid-template-columns: var(--message-avatar) minmax(0, 1fr) auto;
 }
 
-.message-delete {
+.message-actions {
+  display: flex;
+  align-items: start;
+  gap: 2px;
   grid-column: 3;
-  align-self: start;
+}
+
+.message-actions > .button {
   min-height: 28px;
   padding: 3px 6px;
   font-size: .76rem;
 }
 
+.message-move:hover:not(:disabled) { color: var(--accent); }
 .message-delete:hover:not(:disabled) { color: var(--danger); }
 .message-removed { color: var(--muted); overflow-wrap: anywhere; }
+
+@media (max-width: 520px) {
+  .message-row:has(> .message-actions .message-move) {
+    grid-template-columns: var(--message-avatar) minmax(0, 1fr);
+  }
+
+  .message-actions:has(.message-move) {
+    grid-column: 2;
+    justify-self: end;
+  }
+}
 
 .message-reactions {
   display: flex;

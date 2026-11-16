@@ -1,4 +1,4 @@
-import { api, button, closeDialog, el, field, form, identifier, localizedTime, openChatImage, personMark, personName, showDialog, status, tell, validHttpLink } from "./ui.js";
+import { api, button, closeDialog, el, field, form, identifier, localizedTime, notify, openChatImage, personMark, personName, select, showDialog, status, tell, validHttpLink } from "./ui.js";
 import { locale, t } from "./i18n.js";
 import { createMentionDirectory, mentionComposer, renderMentionText } from "./mentions.js";
 import { createReactions } from "./reactions.js";
@@ -168,6 +168,7 @@ export function renderChat(context, channel, edit) {
   const fileEndpoint = "channels/" + identifier(channel.id) + "/files/";
   const rows = new Map();
   const tombstones = new Set();
+  const departedSequences = new Map();
   const fileViews = new Map();
   const list = el("ol", { class: "message-list", role: "log", tabindex: "0", "aria-label": t("Messages", "Nachrichten"), "aria-live": "off" });
   const reactions = createReactions({ endpoint: messageEndpoint, scope: channel.id, user: context.user, signal, scroll: list });
@@ -218,6 +219,8 @@ export function renderChat(context, channel, edit) {
   let newest = 0;
   let historyVersion = 0;
   let deletionVersion = 0;
+  let movementVersion = 0;
+  let historyGeneration = 0;
   let timer;
   let pendingFocus;
   let locating = false;
@@ -403,7 +406,8 @@ export function renderChat(context, channel, edit) {
           const text = reason.value.trim();
           if (!text) throw new Error(t("Enter a reason for deleting the message.", "Gib einen Grund für die Löschung an."));
           const fresh = await api(messageEndpoint + "?after=" + newest, { signal });
-          const { envelope } = await ClubCrypto.sealMessage(ClubCrypto.deletionScope(channel.id), message.id, { reason: text }, fresh.recipients);
+          const scope = ClubCrypto.deletionScope(message.cryptoChannelId ?? channel.id);
+          const { envelope } = await ClubCrypto.sealMessage(scope, message.id, { reason: text }, fresh.recipients);
           payload = { reason: envelope };
         }
         const result = await api(messageEndpoint + "/" + identifier(message.id), { method: "DELETE", body: payload, signal });
@@ -417,6 +421,38 @@ export function renderChat(context, channel, edit) {
       }));
   }
 
+  function confirmMove(message) {
+    const destinations = context.moveDestinations();
+    if (!destinations.length) {
+      notify(t("There are no other text channels in this room.", "Dieser Raum hat keine anderen Text-Channels."));
+      return;
+    }
+    const picker = select([
+      ["", t("Choose a channel", "Channel auswählen")],
+      ...destinations.map(destination => [destination.id, "# " + destination.title]),
+    ], "");
+    picker.required = true;
+    const panel = form([
+      el("p", { class: "muted" }, t("Move this message and its attachments to another channel.", "Verschiebe diese Nachricht samt Anhängen in einen anderen Channel.")),
+      field(t("Destination channel", "Ziel-Channel"), picker),
+      button(t("Cancel", "Abbrechen"), closeDialog, { class: "ghost" }),
+    ], t("Move message", "Nachricht verschieben"), async () => {
+      const destination = destinations.find(candidate => candidate.id === picker.value);
+      if (!destination) return;
+      await api(messageEndpoint + "/" + identifier(message.id) + "/move", {
+        method: "POST", body: { channelId: destination.id }, signal,
+      });
+      if (signal.aborted) return;
+      const restoreFocus = panel.isConnected;
+      if (restoreFocus) closeDialog();
+      removeMovedMessages([{ messageId: message.id, seq: message.seq }], restoreFocus ? message.id : null);
+      notify(t("Message moved to #{channel}.", "Nachricht in #{channel} verschoben.", { channel: destination.title }));
+      void poll();
+    });
+    showDialog(t("Move message", "Nachricht verschieben"), panel);
+    picker.focus();
+  }
+
   async function deletionNote(message, author) {
     const { by, reason } = message.deleted;
     const names = { author: author.displayName ?? String(author), moderator: by.displayName };
@@ -425,7 +461,8 @@ export function renderChat(context, channel, edit) {
       : t("Message from {author} was deleted.", "Nachricht von {author} wurde gelöscht.", names));
     if (reason) {
       try {
-        const result = await ClubCrypto.openMessage(ClubCrypto.deletionScope(channel.id), message.id, reason);
+        const scope = ClubCrypto.deletionScope(message.cryptoChannelId ?? channel.id);
+        const result = await ClubCrypto.openMessage(scope, message.id, reason, channel.id);
         const text = result?.content?.reason;
         if (typeof text === "string" && text.trim()) note.append(t(" Reason: {text}", " Grund: {text}", { text }));
         else note.append(t(" The reason is unavailable to your account.", " Der Grund ist für dein Konto nicht verfügbar."));
@@ -449,6 +486,52 @@ export function renderChat(context, channel, edit) {
     fileViews.delete(id);
   }
 
+  function removeMovedMessages(moves, focusId = null) {
+    const removed = new Set();
+    for (const { messageId, seq } of moves) {
+      if (typeof messageId !== "string" || !Number.isSafeInteger(seq) || seq < 1) continue;
+      const latest = Math.max(departedSequences.get(messageId) ?? 0, seq);
+      departedSequences.set(messageId, latest);
+      const row = rows.get(messageId);
+      if (row && Number(row.dataset.sequence) <= latest) removed.add(row);
+    }
+    if (!removed.size) return;
+    const retained = Array.from(list.children).filter(row => !removed.has(row));
+    const viewTop = list.getBoundingClientRect().top;
+    const anchor = retained.find(row => row.getBoundingClientRect().bottom > viewTop);
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    let nextFocus;
+    for (const row of removed) {
+      const id = row.dataset.messageId;
+      if (id === focusId || row.contains(document.activeElement)) {
+        nextFocus = retained.find(candidate => Number(candidate.dataset.sequence) > Number(row.dataset.sequence)) ?? retained.at(-1) ?? list;
+      }
+      const next = row.nextElementSibling;
+      releaseFiles(id);
+      reactions.remove(id);
+      rows.delete(id);
+      row.remove();
+      updateMessageGroup(next);
+    }
+    if (!rows.size) list.append(empty);
+    if (anchor) list.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+    nextFocus?.focus({ preventScroll: true });
+  }
+
+  function resetMessageWindow() {
+    historyGeneration++;
+    for (const id of rows.keys()) {
+      releaseFiles(id);
+      reactions.remove(id);
+    }
+    rows.clear();
+    tombstones.clear();
+    departedSequences.clear();
+    oldest = Infinity;
+    newest = 0;
+    list.replaceChildren(empty);
+  }
+
   function historyGrant(message) {
     return (message.deleted ? message.deleted.reason : message.envelope)?.historyGrant;
   }
@@ -462,18 +545,23 @@ export function renderChat(context, channel, edit) {
         el("time", { datetime: time ? date.toISOString() : undefined, title: localizedTime(message.at) }, time)));
     let fileView;
     let reactionKey;
-    let remove;
+    let actions;
+    const cryptoScope = message.cryptoChannelId ?? channel.id;
     if (message.deleted) {
       body.append(await deletionNote(message, author));
     } else {
       const own = context.user?.id === message.author?.id;
       if (own || edit) {
-        remove = button(t("Delete", "Löschen"), () => confirmRemoval(message, own), { class: "ghost message-delete",
+        const remove = button(t("Delete", "Löschen"), () => confirmRemoval(message, own), { class: "ghost message-delete",
           "aria-label": own ? t("Delete your message", "Eigene Nachricht löschen")
             : t("Delete message from {name}", "Nachricht von {name} löschen", { name: author.displayName }) });
+        const move = !context.direct && context.moveDestinations?.().length &&
+          button(t("Move", "Verschieben"), () => confirmMove(message), { class: "ghost message-move", "aria-haspopup": "dialog",
+            "aria-label": t("Move message from {name}", "Nachricht von {name} verschieben", { name: author.displayName }) });
+        actions = el("div", { class: "message-actions" }, move || null, remove);
       }
       try {
-        const result = await ClubCrypto.openMessage(channel.id, message.id, message.envelope);
+        const result = await ClubCrypto.openMessage(cryptoScope, message.id, message.envelope, channel.id);
         if (!result) {
           body.append(el("p", { class: "subtle" }, t("Your account does not have a key for this message.", "Für diese Nachricht ist auf deinem Konto kein Schlüssel verfügbar.")));
         } else {
@@ -496,26 +584,30 @@ export function renderChat(context, channel, edit) {
       "data-author-id": !message.deleted && message.author?.id, "data-deleted": Boolean(message.deleted),
       "data-reason-granted": Boolean(message.deleted?.reason?.historyGrant),
       "data-history-grant-revision": historyGrant(message)?.revision,
-      tabindex: "-1", "data-sent-at": date.getTime() }, personMark(author), body, remove);
-    return { row, fileView, reactionKey, reactionMount: body };
+      tabindex: "-1", "data-sent-at": date.getTime() }, personMark(author), body, actions);
+    return { row, fileView, reactionKey, reactionMount: body, cryptoScope };
   }
 
   async function addMessages(messages, { olderBatch = false, keepPosition = false } = {}) {
+    const generation = historyGeneration;
     const canRender = message => {
       const current = rows.get(message.id);
+      const sequence = Number(message.seq);
+      const currentSequence = Number(current?.dataset.sequence ?? 0);
+      if (sequence <= (departedSequences.get(message.id) ?? 0) || sequence < currentSequence) return false;
       const revision = historyGrant(message)?.revision;
       const newerGrant = Number.isSafeInteger(revision) && revision > Number(current?.dataset.historyGrantRevision ?? 0);
       if (message.deleted) {
         return !current?.hasAttribute("data-deleted") || newerGrant ||
           Boolean(message.deleted.reason?.historyGrant && !current.hasAttribute("data-reason-granted"));
       }
-      return !tombstones.has(message.id) && (!current || newerGrant);
+      return !tombstones.has(message.id) && (!current || sequence > currentSequence || newerGrant);
     };
     for (const message of messages) if (message?.deleted) tombstones.add(message.id);
     const incoming = messages.filter(msg => msg && canRender(msg) && Number.isSafeInteger(Number(msg.seq)));
     if (!incoming.length) return;
     const elements = await Promise.all(incoming.map(async msg => [msg, await messageRow(msg)]));
-    if (signal.aborted) return;
+    if (signal.aborted || generation !== historyGeneration) return;
     const wasNearEnd = list.scrollHeight - list.clientHeight - list.scrollTop < 64;
     const preservedHeight = list.scrollHeight;
     const preservedScroll = list.scrollTop;
@@ -524,26 +616,28 @@ export function renderChat(context, channel, edit) {
       row !== empty && row.getBoundingClientRect().bottom > viewTop);
     const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
     empty.remove();
-    for (const [msg, { row, fileView, reactionKey, reactionMount }] of elements) {
+    for (const [msg, { row, fileView, reactionKey, reactionMount, cryptoScope }] of elements) {
       if (!canRender(msg)) continue;
       const previous = rows.get(msg.id);
       const sequence = Number(msg.seq);
-      const next = previous ? previous.nextElementSibling : Array.from(list.children).find(child => Number(child.dataset.sequence) > sequence);
+      const sameSlot = sequence === Number(previous?.dataset.sequence);
+      const before = sameSlot ? previous : Array.from(list.children).find(child => Number(child.dataset.sequence) > sequence);
+      const previousNext = !sameSlot && previous?.nextElementSibling;
+      list.insertBefore(row, before ?? null);
       if (previous) {
         releaseFiles(msg.id);
         reactions.remove(msg.id);
         const hadFocus = previous.contains(document.activeElement);
-        list.insertBefore(row, previous);
         previous.remove();
         if (hadFocus) row.focus({ preventScroll: true });
       } else {
-        list.insertBefore(row, next ?? null);
         oldest = Math.min(oldest, sequence);
       }
+      updateMessageGroup(previousNext);
       updateMessageGroup(row);
-      updateMessageGroup(next);
+      updateMessageGroup(row.nextElementSibling);
       rows.set(msg.id, row);
-      if (reactionKey) reactions.track(msg.id, reactionKey, row, reactionMount);
+      if (reactionKey) reactions.track(msg.id, reactionKey, row, reactionMount, cryptoScope);
       if (fileView) {
         fileViews.set(msg.id, fileView);
         for (const attachment of fileView.attachments) {
@@ -563,8 +657,11 @@ export function renderChat(context, channel, edit) {
     older.disabled = true;
     try {
       const first = oldest;
+      const generation = historyGeneration;
       const batch = await api(messageEndpoint + "?before=" + first, { signal });
+      if (generation !== historyGeneration) return;
       await addMessages(batch.messages ?? [], { olderBatch: true });
+      if (generation !== historyGeneration) return;
       older.hidden = !batch.more;
       return oldest < first;
     } catch (error) {
@@ -643,18 +740,28 @@ export function renderChat(context, channel, edit) {
     fetching = true;
     let delay = 3000;
     try {
-      const fullPage = !initialized || (newest === 0 && rows.size === 0);
-      const result = await api(messageEndpoint + (fullPage ? "" : "?after=" + newest + "&deletionsAfter=" + deletionVersion), { signal });
+      let fullPage = !initialized || (newest === 0 && rows.size === 0);
+      const changes = new URLSearchParams({ after: newest, deletionsAfter: deletionVersion });
+      if (!context.direct) changes.set("movesAfter", movementVersion);
+      let result = await api(messageEndpoint + (fullPage ? "" : "?" + changes), { signal });
+      if (result.movesReset && !signal.aborted) {
+        result = await api(messageEndpoint, { signal });
+        if (signal.aborted) return;
+        resetMessageWindow();
+        fullPage = true;
+      }
       if (signal.aborted) return;
       const messages = result.messages ?? [];
       recipients = result.recipients ?? [];
+      removeMovedMessages(result.moves ?? []);
+      if (Number.isSafeInteger(result.nextMovementVersion)) movementVersion = result.nextMovementVersion;
       const deletions = result.deletions ?? [];
       for (const message of deletions) tombstones.add(message.id);
       const visibleDeletions = deletions.filter(message => rows.has(message.id) || message.seq >= oldest);
       await addMessages(visibleDeletions, { keepPosition: true });
       if (visibleDeletions.length < deletions.length) older.hidden = false;
       if (Number.isSafeInteger(result.nextDeletionVersion)) deletionVersion = result.nextDeletionVersion;
-      if (result.moreDeletions) delay = 1000;
+      if (result.moreDeletions || result.moreMoves) delay = 1000;
       await addMessages(messages);
       if (signal.aborted) return;
       for (const msg of messages) newest = Math.max(newest, Number(msg.seq) || 0);
@@ -662,6 +769,7 @@ export function renderChat(context, channel, edit) {
       if (fullPage) {
         historyVersion = revision;
         deletionVersion = Number.isSafeInteger(result.deletionVersion) ? result.deletionVersion : 0;
+        movementVersion = Number.isSafeInteger(result.movementVersion) ? result.movementVersion : 0;
         older.hidden = !result.more;
         initialized = true;
         empty.textContent = t("No messages yet.", "Noch keine Nachrichten.");

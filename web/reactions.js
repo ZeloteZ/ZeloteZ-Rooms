@@ -172,7 +172,7 @@ export function createReactions({ endpoint, scope, user, signal, scroll }) {
     ++entry.revision;
     const own = entry.groups.get(emoji)?.get(user.id);
     try {
-      const sealed = own ? null : await ClubCrypto.sealReaction(entry.key, scope, entry.id, user.id, emoji);
+      const sealed = own ? null : await ClubCrypto.sealReaction(entry.key, entry.scope, entry.id, user.id, emoji);
       const reactionId = own?.id ?? sealed.id;
       await api(base + "/" + identifier(entry.id) + "/" + identifier(reactionId), own
         ? { method: "DELETE", signal: entry.signal }
@@ -209,7 +209,7 @@ export function createReactions({ endpoint, scope, user, signal, scroll }) {
       const snapshot = snapshots.get(reaction.messageId);
       if (!snapshot || typeof reaction.userId !== "string" || typeof reaction.displayName !== "string") return;
       try {
-        const emoji = await ClubCrypto.openReaction(snapshot.entry.key, scope, reaction.messageId, reaction);
+        const emoji = await ClubCrypto.openReaction(snapshot.entry.key, snapshot.entry.scope, reaction.messageId, reaction);
         if (emojiNames.has(emoji)) addReaction(snapshot.groups, emoji, reaction);
       } catch {
         // Leave unreadable encrypted reactions out of the count.
@@ -281,10 +281,11 @@ export function createReactions({ endpoint, scope, user, signal, scroll }) {
   }, { once: true });
 
   return {
-    track(id, key, row, mount = row) {
+    track(id, key, row, mount = row, messageScope = scope) {
       if (signal.aborted || entries.has(id)) return;
       const controller = new AbortController();
-      const entry = { id, key, row, controller, signal: controller.signal, groups: new Map(), chips: new Map(), revision: 0, busy: false };
+      const entry = { id, key, row, scope: messageScope, controller, signal: controller.signal,
+        groups: new Map(), chips: new Map(), revision: 0, busy: false };
       entry.trigger = button(el("span", { "aria-hidden": "true" }, "+"), () => openPicker(entry),
         { class: "reaction-add", "aria-label": addLabel, title: addLabel, "aria-haspopup": "dialog", "aria-expanded": "false" });
       entry.bar = el("div", { class: "message-reactions", "aria-live": "off" }, entry.trigger);

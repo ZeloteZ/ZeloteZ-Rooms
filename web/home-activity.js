@@ -41,7 +41,7 @@ function talkLink(room) {
 
 async function activityCard(item) {
   try {
-    const message = await ClubCrypto.openMessage(item.channelId, item.id, item.envelope);
+    const message = await ClubCrypto.openMessage(item.cryptoChannelId ?? item.channelId, item.id, item.envelope, item.channelId);
     if (!message) return null;
     const { text, attachments } = message.content ?? {};
     const snippet = typeof text === "string" && text.trim()

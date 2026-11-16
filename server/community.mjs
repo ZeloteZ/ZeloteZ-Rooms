@@ -18,6 +18,7 @@ const maxStoredMessages = 300_000
 const maxMessagesPerUser = 50_000
 const totalChatBytes = 256 * 1024 * 1024
 const userChatBytes = 32 * 1024 * 1024
+const retainedMovements = 2048
 
 const missing = () => new RequestError(404, 'Dieser Bereich ist nicht verfügbar.')
 const forbidden = () => new RequestError(403, 'Dafür fehlt dir die Berechtigung.')
@@ -59,19 +60,20 @@ function topicView(row, appearance) {
 function messageView(row, profileFor) {
   const envelope = JSON.parse(row.envelope)
   const author = { id: row.user_id, displayName: row.display_name, ...profileFor(row.user_id) }
+  const scope = row.crypto_channel_id ? { cryptoChannelId: row.crypto_channel_id } : {}
   if (envelope && row.history_wrapper) {
     envelope.keys = {}
     envelope.historyGrant = { ...JSON.parse(row.history_wrapper), grantorId: row.history_grantor, revision: row.history_revision }
   }
   if (row.deleted_at) {
     return {
-      id: row.id, seq: row.seq, author, at: row.created_at,
+      id: row.id, seq: row.seq, author, at: row.created_at, ...scope,
       deleted: { at: row.deleted_at, by: { id: row.deleted_by, displayName: row.deleted_by_name, ...profileFor(row.deleted_by) }, reason: envelope },
     }
   }
   return {
     id: row.id, seq: row.seq, author,
-    at: row.created_at, envelope,
+    at: row.created_at, envelope, ...scope,
   }
 }
 
@@ -132,7 +134,8 @@ function initializeChatStorage(db) {
 }
 
 export function createCommunity(db, { requireSession, appearance, recordMentions = () => {},
-  recordFriendRequest = () => {}, recordDirectMessage = () => {}, recordDirectRead = () => {} }) {
+  recordFriendRequest = () => {}, recordDirectMessage = () => {}, recordDirectRead = () => {},
+  updateMovedMention = () => {}, requeueMovedHistory = () => {} }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS friendships (
       first_id TEXT NOT NULL REFERENCES users(id), second_id TEXT NOT NULL REFERENCES users(id),
@@ -162,6 +165,17 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       user_id TEXT NOT NULL REFERENCES users(id), envelope TEXT NOT NULL, created_at TEXT NOT NULL
     ) STRICT;
     CREATE INDEX IF NOT EXISTS channel_messages ON messages(channel_id, seq);
+    CREATE TABLE IF NOT EXISTS message_move_departures (
+      revision INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      message_id TEXT NOT NULL,
+      source_seq INTEGER NOT NULL
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS channel_move_departures ON message_move_departures(channel_id, revision);
+    CREATE TABLE IF NOT EXISTS message_move_watermarks (
+      channel_id TEXT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS message_deletions (
       revision INTEGER PRIMARY KEY AUTOINCREMENT,
       message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
@@ -181,6 +195,12 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       scope TEXT PRIMARY KEY, messages INTEGER NOT NULL, bytes INTEGER NOT NULL
     ) STRICT, WITHOUT ROWID;
   `)
+  transaction(db, () => {
+    if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'crypto_channel_id')) {
+      // Preserve the AEAD scope even if the empty original channel is later deleted.
+      db.exec('ALTER TABLE messages ADD COLUMN crypto_channel_id TEXT')
+    }
+  })
   initializeChatStorage(db)
   initializeChannelOrder(db)
   const direct = createDirect(db, appearance.profile)
@@ -200,7 +220,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   const countOwnedRooms = db.prepare(`SELECT count(*) AS count FROM topics t WHERE owner_id = ? AND ${listedTopic}`)
   const storageFor = db.prepare('SELECT messages, bytes FROM chat_storage WHERE scope = ?')
   const findChannel = db.prepare(`SELECT c.*, CASE WHEN d.id IS NULL THEN m.role ELSE 'member' END AS role,
-    t.stream_policy AS topic_stream_policy FROM channels c
+    (d.id IS NOT NULL) AS is_direct, t.stream_policy AS topic_stream_policy FROM channels c
     JOIN topics t ON t.id = c.topic_id
     JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL
     LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
@@ -215,6 +235,20 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   const listChannels = db.prepare(channelList)
   const directMessage = db.prepare(`SELECT m.*, u.display_name, ${deletionFields}
     FROM messages m JOIN users u ON u.id = m.user_id ${joinDeletion} WHERE m.id = ?`)
+  const allocateSequence = db.prepare(`UPDATE sqlite_sequence SET seq = max(seq, (SELECT max(seq) FROM messages)) + 1
+    WHERE name = 'messages' RETURNING seq`)
+  const moveMessageRow = db.prepare(`UPDATE messages SET seq = ?, channel_id = ?,
+    crypto_channel_id = coalesce(crypto_channel_id, channel_id) WHERE id = ?`)
+  const moveAttachments = db.prepare('UPDATE attachments SET channel_id = ? WHERE message_id = ?')
+  const recordDeparture = db.prepare('INSERT INTO message_move_departures(channel_id, message_id, source_seq) VALUES (?, ?, ?)')
+  const latestMovement = db.prepare('SELECT coalesce(max(revision), 0) AS version FROM message_move_departures WHERE channel_id = ?')
+  const movementWatermark = db.prepare('SELECT revision FROM message_move_watermarks WHERE channel_id = ?')
+  const movesAfter = db.prepare(`SELECT revision, message_id AS messageId, source_seq AS seq
+    FROM message_move_departures WHERE channel_id = ? AND revision > ? ORDER BY revision LIMIT 41`)
+  const overMovementLimit = db.prepare('SELECT revision FROM message_move_departures WHERE channel_id = ? ORDER BY revision DESC LIMIT 1 OFFSET ?')
+  const advanceMovementWatermark = db.prepare(`INSERT INTO message_move_watermarks(channel_id, revision) VALUES (?, ?)
+    ON CONFLICT(channel_id) DO UPDATE SET revision = excluded.revision`)
+  const pruneMovements = db.prepare('DELETE FROM message_move_departures WHERE channel_id = ? AND revision <= ?')
   const latestDeletion = db.prepare('SELECT coalesce(max(revision), 0) AS version FROM message_deletions WHERE channel_id = ?')
   const deletionsAfter = db.prepare(`SELECT m.*, u.display_name, ${deletionFields}, d.revision
     FROM message_deletions d JOIN messages m ON m.id = d.message_id JOIN users u ON u.id = m.user_id
@@ -451,6 +485,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     const before = params.has('before') ? Number(params.get('before')) : null
     const grantsAfter = params.get('grantsAfter')
     const afterDeletion = params.get('deletionsAfter')
+    const afterMove = params.get('movesAfter')
     const cursor = after ?? before ?? Number.MAX_SAFE_INTEGER
     if (!Number.isSafeInteger(cursor) || cursor < 0 || (after !== null && before !== null)) {
       throw new RequestError(400, 'Ungültige Position im Chatverlauf.')
@@ -459,7 +494,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       JOIN messages m ON m.id = g.message_id WHERE g.recipient_id = ? AND m.channel_id = ?`).get(user.id, channel.id).version
     if (grantsAfter !== null) {
       const afterGrant = Number(grantsAfter)
-      if (before !== null || after !== null || afterDeletion !== null || !/^\d+$/.test(grantsAfter) || !Number.isSafeInteger(afterGrant)) {
+      if (before !== null || after !== null || afterDeletion !== null || afterMove !== null ||
+          !/^\d+$/.test(grantsAfter) || !Number.isSafeInteger(afterGrant)) {
         throw new RequestError(400, 'Ungültige Position bei den Verlaufsfreigaben.')
       }
       const granted = db.prepare(`SELECT m.*, u.display_name, ${historyFields}, ${deletionFields}, g.revision FROM message_history_grants g
@@ -469,6 +505,23 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       const page = granted.slice(0, 40)
       return { messages: page.map(showMessage), more: granted.length > 40, historyVersion,
         nextGrantVersion: page.at(-1)?.revision ?? afterGrant }
+    }
+    const movementVersion = latestMovement.get(channel.id).version
+    let movementUpdates = {}
+    if (afterMove !== null) {
+      const version = Number(afterMove)
+      if (before !== null || !/^\d+$/.test(afterMove) || !Number.isSafeInteger(version)) {
+        throw new RequestError(400, 'Ungültige Position bei verschobenen Nachrichten.')
+      }
+      const reset = version < (movementWatermark.get(channel.id)?.revision ?? 0)
+      const movements = !reset && version < movementVersion ? movesAfter.all(channel.id, version) : []
+      const page = movements.slice(0, 40)
+      movementUpdates = {
+        moves: page.map(({ messageId, seq }) => ({ messageId, seq })),
+        nextMovementVersion: reset ? movementVersion : page.at(-1)?.revision ?? Math.min(version, movementVersion),
+        moreMoves: movements.length > 40,
+        ...(reset ? { movesReset: true } : {}),
+      }
     }
     const deletionVersion = latestDeletion.get(channel.id).version
     let deletionUpdates = {}
@@ -491,7 +544,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       .all(user.id, channel.id, cursor, user.id)
     const messages = rows.slice(0, 40).map(showMessage)
     return {
-      messages: after === null ? messages.reverse() : messages, more: rows.length > 40, historyVersion, deletionVersion, ...deletionUpdates,
+      messages: after === null ? messages.reverse() : messages, more: rows.length > 40,
+      historyVersion, deletionVersion, movementVersion, ...deletionUpdates, ...movementUpdates,
       recipients: recipientKeys.all(channel.topic_id).map(({ id, public_key }) => ({ id, publicKey: JSON.parse(public_key) })),
     }
   }
@@ -594,6 +648,42 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     })
   }
 
+  function moveMessage(request, channelId, messageId, input) {
+    assertId(messageId)
+    const targetId = input.channelId
+    assertId(targetId)
+    if (Object.keys(input).length !== 1) throw new RequestError(400, 'Ungültige Auswahl.')
+    return transaction(db, () => {
+      const actor = requireSession(request)
+      const source = getChannel(actor.id, channelId, 'chat')
+      requireManager(source.role)
+      const target = getChannel(actor.id, targetId, 'chat')
+      if (source.is_direct || target.is_direct || source.topic_id !== target.topic_id || source.id === target.id) {
+        throw new RequestError(400, 'Wähle einen anderen Text-Channel im selben Raum.')
+      }
+      const row = db.prepare(`SELECT m.*, u.display_name, ${historyFields}, ${deletionFields}
+        FROM messages m JOIN users u ON u.id = m.user_id ${joinHistory} ${joinDeletion}
+        WHERE m.id = ? AND m.channel_id = ? AND (d.revision IS NOT NULL OR g.revision IS NOT NULL OR ${originalAccess})`)
+        .get(actor.id, messageId, source.id, actor.id)
+      if (!row) throw missing()
+      if (row.deleted_at) throw new RequestError(409, 'Gelöschte Nachrichten können nicht verschoben werden.')
+      // A fresh delivery cursor makes the move visible to readers who already passed the original sequence.
+      const { seq } = allocateSequence.get()
+      moveMessageRow.run(seq, target.id, row.id)
+      moveAttachments.run(target.id, row.id)
+      updateMovedMention({ channelId: target.id, messageId: row.id })
+      requeueMovedHistory({ channelId: target.id, messageId: row.id })
+      recordDeparture.run(source.id, row.id, row.seq)
+      const floor = overMovementLimit.get(source.id, retainedMovements)
+      if (floor) {
+        advanceMovementWatermark.run(source.id, floor.revision)
+        pruneMovements.run(source.id, floor.revision)
+      }
+      return { channelId: target.id,
+        message: showMessage({ ...row, seq, crypto_channel_id: row.crypto_channel_id ?? source.id }) }
+    })
+  }
+
   async function putFile(request, user, channel, fileId) {
     assertId(fileId)
     direct.assertCanSend(channel.id, user.id)
@@ -647,10 +737,11 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   async function handle(request, response, url) {
     const { pathname: path, searchParams } = url
     const method = request.method
-    const [api, resource, id, action, file, extra] = path.slice(1).split('/')
-    if (api !== 'api' || extra !== undefined) return false
+    const [api, resource, id, action, file, extra, rest] = path.slice(1).split('/')
+    const moving = method === 'POST' && resource === 'channels' && id && action === 'messages' && file && extra === 'move'
+    if (api !== 'api' || rest !== undefined || (extra !== undefined && !moving)) return false
     requireSession(request)
-    const body = ['POST', 'PATCH'].includes(method) ? await readJson(request, action === 'messages' ? 65536 : 8192) : null
+    const body = ['POST', 'PATCH'].includes(method) ? await readJson(request, action === 'messages' && !moving ? 65536 : 8192) : null
     const user = requireSession(request)
     if (resource === 'people' && !id && method === 'GET') {
       json(response, 200, { people: people(user.id, searchParams.get('query')) })
@@ -706,6 +797,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
         const channel = getChannel(user.id, id)
         requireManager(channel.role)
         json(response, 200, { channel: changeChannel(channel.topic_id, channel, body) })
+      } else if (moving) {
+        json(response, 200, moveMessage(request, id, file, body))
       } else if (action === 'messages' && file && method === 'DELETE') {
         getChannel(user.id, id, 'chat')
         const deletion = await readJson(request, 16384)

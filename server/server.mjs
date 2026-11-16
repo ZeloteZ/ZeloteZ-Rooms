@@ -37,6 +37,8 @@ const community = createCommunity(db, { requireSession, appearance, recordMentio
   recordFriendRequest: input => notifications.recordFriendRequest(input),
   recordDirectMessage: input => notifications.recordDirectMessage(input),
   recordDirectRead: input => notifications.recordDirectRead(input),
+  updateMovedMention: input => notifications.updateMovedMention(input),
+  requeueMovedHistory: input => history.requeueMovedHistory(input),
 })
 const channelManagement = createChannelManagement(db, { requireSession })
 const history = createHistory(db, { requireSession })

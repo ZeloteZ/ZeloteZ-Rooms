@@ -65,15 +65,17 @@ function pendingCursor(params) {
 }
 
 export function createHistory(db, { requireSession }) {
-  const queueExisting = (targetFilter = '') => `INSERT INTO history_share_jobs
+  const queueExisting = (targetFilter = '', messageFilter = '') => `INSERT INTO history_share_jobs
     (topic_id, channel_id, recipient_id, admitted_at, latest_sequence)
     SELECT member.topic_id, c.id, member.user_id, member.joined_at,
       (SELECT max(seq) FROM messages WHERE channel_id = c.id)
     FROM topic_members member JOIN channels c ON c.topic_id = member.topic_id AND c.type = 'chat'
     WHERE member.joined_at IS NOT NULL ${targetFilter}
     AND NOT EXISTS (SELECT 1 FROM direct_conversations d WHERE d.topic_id = member.topic_id) AND EXISTS (
-      SELECT 1 FROM messages m WHERE m.channel_id = c.id AND m.created_at <= member.joined_at AND ${needsKey('member.user_id')})
-    ON CONFLICT(channel_id, recipient_id) DO UPDATE SET complete = 0`
+      SELECT 1 FROM messages m WHERE m.channel_id = c.id AND m.created_at <= member.joined_at
+        ${messageFilter} AND ${needsKey('member.user_id')})
+    ON CONFLICT(channel_id, recipient_id) DO UPDATE SET complete = 0,
+      latest_sequence = max(history_share_jobs.latest_sequence, excluded.latest_sequence)`
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS message_history_grants (
@@ -165,7 +167,7 @@ export function createHistory(db, { requireSession }) {
     WHERE topic_id = ? AND user_id = ? AND joined_at IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = topic_members.user_id)`)
 
-  const eligible = db.prepare(`SELECT m.id, m.seq,
+  const eligible = db.prepare(`SELECT m.id, m.seq, m.crypto_channel_id AS cryptoChannelId,
     json_extract(CASE WHEN mine.key IS NOT NULL THEN m.envelope ELSE held.wrapper END, '$.ephemeral') AS ephemeral,
     json_extract(CASE WHEN mine.key IS NOT NULL THEN mine.value ELSE held.wrapper END, '$.nonce') AS nonce,
     json_extract(CASE WHEN mine.key IS NOT NULL THEN mine.value ELSE held.wrapper END, '$.blob') AS blob,
@@ -195,6 +197,7 @@ export function createHistory(db, { requireSession }) {
     DO UPDATE SET failures = failures + 1, retry_at = excluded.retry_at`)
   const removeRejected = db.prepare('DELETE FROM message_history_grants WHERE revision = ?')
   const reopen = db.prepare(queueExisting('AND member.topic_id = ? AND member.user_id = ? AND c.id = ?'))
+  const queueMoved = db.prepare(queueExisting('AND c.id = ?', 'AND m.id = ?'))
   const pendingJobs = `SELECT j.*, u.public_key FROM history_share_jobs j
     JOIN topic_members actor ON actor.topic_id = j.topic_id AND actor.user_id = ? AND actor.joined_at IS NOT NULL
     JOIN topic_members recipient ON recipient.topic_id = j.topic_id AND recipient.user_id = j.recipient_id
@@ -230,8 +233,9 @@ export function createHistory(db, { requireSession }) {
   function keyPage(actorId, channelId, recipient, before, limit) {
     const rows = eligible.all(actorId, actorId, channelId, before, recipient.joined_at,
       recipient.id, recipient.id, recipient.id, actorId, limit + 1)
-    const messages = rows.slice(0, limit).map(({ ephemeral, grantorId, grantRevision, deletionRevision, ...box }) => ({
-      ...box, ephemeral: JSON.parse(ephemeral), ...(grantorId ? { grantorId, grantRevision } : {}),
+    const messages = rows.slice(0, limit).map(({ ephemeral, grantorId, grantRevision, deletionRevision, cryptoChannelId, ...box }) => ({
+      ...box, ephemeral: JSON.parse(ephemeral), ...(cryptoChannelId ? { cryptoChannelId } : {}),
+      ...(grantorId ? { grantorId, grantRevision } : {}),
       ...(deletionRevision === null ? {} : { deletionRevision }),
     }))
     return {
@@ -342,5 +346,5 @@ export function createHistory(db, { requireSession }) {
     return true
   }
 
-  return { handle }
+  return { handle, requeueMovedHistory: ({ channelId, messageId }) => queueMoved.run(channelId, messageId) }
 }

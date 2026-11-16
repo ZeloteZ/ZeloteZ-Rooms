@@ -640,7 +640,9 @@ export async function renderTopic(context, topicId, selectedId, target) {
       context.player.refreshPlacement();
       context.voice.setLocation(channel, topic, voiceMount);
     } else {
-      channelNode = renderChat(childContext, channel, edit);
+      const moveDestinations = manager ? () => channels.filter(candidate =>
+        candidate.type === "chat" && !sameId(candidate.id, channel.id)) : undefined;
+      channelNode = renderChat({ ...childContext, moveDestinations }, channel, edit);
       content.replaceChildren(channelNode);
     }
   }

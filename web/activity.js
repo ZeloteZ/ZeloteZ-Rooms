@@ -6,7 +6,7 @@ const previewLimit = 12;
 
 async function preview(entry) {
   try {
-    const decoded = await globalThis.ClubCrypto.openMessage(entry.channelId, entry.id, entry.envelope);
+    const decoded = await globalThis.ClubCrypto.openMessage(entry.cryptoChannelId ?? entry.channelId, entry.id, entry.envelope, entry.channelId);
     if (!decoded) return t("Encrypted message", "Verschlüsselte Nachricht");
     const content = decoded.content;
     const text = typeof content?.text === "string" ? content.text.trim().replace(/\s+/gu, " ") : "";

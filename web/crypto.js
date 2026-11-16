@@ -151,7 +151,7 @@ window.ClubCrypto = (() => {
     return { envelope: { v: 1, ephemeral, nonce: base64(iv), body: base64(body), keys: Object.fromEntries(boxes) }, key };
   }
 
-  async function wrapHistoryKey(channelId, entry, recipient) {
+  async function wrapHistoryKey(channelId, entry, recipient, routeChannelId) {
     const identity = active;
     if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
     const pub = publicPoint(recipient.publicKey);
@@ -164,7 +164,7 @@ window.ClubCrypto = (() => {
         rawKey = await unwrapMessageKey(identity.key, entry.ephemeral, source, entry);
         await verifyHistoryKey(channelId, entry, rawKey);
       } catch (error) {
-        reportHistoryFailure(identity, channelId, entry.id, entry.grantRevision, error);
+        reportHistoryFailure(identity, channelId, entry.id, entry.grantRevision, error, routeChannelId);
         throw error;
       }
       if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
@@ -191,16 +191,16 @@ window.ClubCrypto = (() => {
     failedHistoryKeys.addEventListener("failure", event => listener(event.detail), { signal });
   }
 
-  function reportHistoryFailure(identity, scope, messageId, revision, error) {
+  function reportHistoryFailure(identity, scope, messageId, revision, error, routeChannelId) {
     if (active !== identity || !Number.isSafeInteger(revision) || revision < 1 ||
         (error.name !== "OperationError" && error.name !== "DataError")) return;
-    const channelId = scope.endsWith("/deletion") ? scope.slice(0, -"/deletion".length) : scope;
+    const channelId = routeChannelId ?? (scope.endsWith("/deletion") ? scope.slice(0, -"/deletion".length) : scope);
     failedHistoryKeys.dispatchEvent(new CustomEvent("failure", {
       detail: { channelId, messageId, revision, recipientId: identity.id },
     }));
   }
 
-  async function openMessage(channelId, messageId, envelope) {
+  async function openMessage(channelId, messageId, envelope, routeChannelId) {
     const identity = active;
     if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
     const original = envelope?.keys?.[identity.id];
@@ -220,7 +220,7 @@ window.ClubCrypto = (() => {
       reactionKeys.set(key, reactionKey);
       return { content: JSON.parse(decoder.decode(content)), key };
     } catch (error) {
-      if (!original) reportHistoryFailure(identity, channelId, messageId, grant.revision, error);
+      if (!original) reportHistoryFailure(identity, channelId, messageId, grant.revision, error, routeChannelId);
       throw error;
     } finally {
       rawKey?.fill(0);

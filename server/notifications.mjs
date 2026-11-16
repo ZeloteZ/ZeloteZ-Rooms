@@ -149,6 +149,7 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
   const markDirect = db.prepare(`UPDATE inbox_notifications AS n SET read_at = ?
     WHERE recipient_id = ? AND conversation_id = ? AND read_at IS NULL
     AND (SELECT seq FROM messages WHERE id = n.chat_message_id) <= ?`)
+  const moveMention = db.prepare("UPDATE inbox_notifications SET channel_id = ? WHERE kind = 'mention' AND chat_message_id = ?")
 
   // Both message handlers call this in the same transaction as their new message.
   function recordMentions({ channelId, senderId, messageId, streamId, mentionedUserIds }) {
@@ -291,5 +292,6 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
     } else throw new RequestError(405, 'Diese Anfrage wird hier nicht unterstützt.')
     return true
   }
-  return { handle, recordMentions, recordFriendRequest, recordDirectMessage, recordDirectRead, recordLive }
+  return { handle, recordMentions, recordFriendRequest, recordDirectMessage, recordDirectRead, recordLive,
+    updateMovedMention: ({ channelId, messageId }) => moveMention.run(channelId, messageId) }
 }

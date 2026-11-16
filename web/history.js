@@ -47,10 +47,10 @@ export function startHistorySharing(signal, accountId) {
 
     // A stale key or a damaged old key box must not block other messages or chats.
     const entries = await Promise.allSettled(messages.map(async entry => {
-      const { deletionRevision } = entry;
-      const scope = deletionRevision === undefined ? channelId : ClubCrypto.deletionScope(channelId);
+      const { deletionRevision, cryptoChannelId = channelId } = entry;
+      const scope = deletionRevision === undefined ? cryptoChannelId : ClubCrypto.deletionScope(cryptoChannelId);
       return {
-        messageId: entry.id, wrapper: await ClubCrypto.wrapHistoryKey(scope, entry, recipient),
+        messageId: entry.id, wrapper: await ClubCrypto.wrapHistoryKey(scope, entry, recipient, channelId),
         ...(deletionRevision === undefined ? {} : { deletionRevision }),
       };
     }));
