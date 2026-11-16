@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; form-action 'none'">
+    <title>ZeloteZ Rooms</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="index.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><img src="icon.png" width="24" height="24" alt="">ZeloteZ Rooms</div>
+      <h1 id="heading"></h1>
+      <p class="note" id="description"></p>
+      <form id="server-form" hidden>
+        <label id="address-label" for="address"></label>
+        <input id="address" type="url" required maxlength="2048" placeholder="https://rooms.example.com" spellcheck="false">
+        <p class="error" id="error" role="status" hidden></p>
+        <div class="actions">
+          <button id="server-cancel" type="button" hidden></button>
+          <button class="primary" id="connect" type="submit"></button>
+        </div>
+      </form>
+      <section id="source-picker" hidden>
+        <div class="sources" id="sources" aria-label="Capture sources"></div>
+        <p class="error" id="picker-error" role="status" hidden></p>
+        <div class="actions">
+          <button id="picker-cancel" type="button"></button>
+          <button class="primary" id="share" type="button" disabled></button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,5 +1,6 @@
 import { api, button, el, identifier, notify, topicHref } from "./ui.js";
 import { language, t } from "./i18n.js";
+import { cropDesktopShare } from "./desktop-share.js";
 
 const streamId = /^[a-f0-9]{32}$/u;
 
@@ -49,14 +50,21 @@ function requestWhip(path, method, options = {}) {
   });
 }
 
-async function captureDisplay(withAudio) {
+async function captureDisplay(withAudio, desktopOptions) {
   const devices = globalThis.navigator?.mediaDevices;
   if (!devices?.getDisplayMedia || typeof RTCPeerConnection !== "function") {
     throw new Error(t("Screen sharing is unavailable in this browser.", "Die Bildschirmfreigabe ist in diesem Browser nicht verfügbar."));
   }
+  const fps = desktopOptions?.fps ?? 30;
+  const height = desktopOptions?.height ?? 1080;
+  const width = Math.round(height * 16 / 9);
+  const size = desktopOptions?.region ? {} : {
+    width: { ideal: width, ...(desktopOptions && { max: width }) },
+    height: { ideal: height, ...(desktopOptions && { max: height }) },
+  };
   try {
     return await devices.getDisplayMedia({
-      video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } },
+      video: { ...size, frameRate: { ideal: fps, max: fps } },
       audio: withAudio,
       systemAudio: "exclude",
       windowAudio: "window",
@@ -122,7 +130,8 @@ export function createScreenShareController({ signal }, dock) {
     clearTimeout(entry.heartbeat);
     clearTimeout(entry.disconnectTimer);
     entry.peer?.close();
-    for (const track of entry.media?.getTracks() ?? []) track.stop();
+    const tracks = new Set([...(entry.source?.getTracks() ?? []), ...(entry.media?.getTracks() ?? [])]);
+    for (const track of tracks) track.stop();
     release(entry);
     update();
     if (message && !signal.aborted) notify(message);
@@ -155,26 +164,44 @@ export function createScreenShareController({ signal }, dock) {
     if (sharing === entry) entry.heartbeat = setTimeout(heartbeat, 12000);
   }
 
-  async function start(room, channel, withAudio) {
+  async function start(room, channel, withAudio, desktopOptions = null) {
     if (signal.aborted || sharing) return;
     const controller = new AbortController();
     const entry = { controller, room, channel, phase: "choosing" };
     sharing = entry;
     update();
     try {
-      const media = await captureDisplay(withAudio);
+      const useAudio = withAudio && !desktopOptions;
+      const source = await captureDisplay(useAudio, desktopOptions);
       if (controller.signal.aborted) {
-        for (const track of media.getTracks()) track.stop();
+        for (const track of source.getTracks()) track.stop();
+        return;
+      }
+      entry.source = source;
+      const input = source.getVideoTracks()[0];
+      if (!input || input.readyState !== "live") {
+        throw new Error(t("The selected screen source ended.", "Die ausgewählte Bildschirmquelle wurde beendet."));
+      }
+      const sourceEnded = () => {
+        if (sharing === entry) stop(t("Screen sharing ended.", "Die Bildschirmfreigabe wurde beendet."));
+      };
+      input.addEventListener("ended", sourceEnded, { once: true, signal: controller.signal });
+      const media = desktopOptions?.region
+        ? await cropDesktopShare(source, desktopOptions, controller.signal, resized => {
+          if (sharing !== entry) return;
+          if (!resized) sourceEnded();
+          else stop(t("The capture source changed size. Select a region again.",
+            "Die Größe der Aufnahme hat sich geändert. Wähle den Ausschnitt erneut."));
+        }) : source;
+      if (!media || controller.signal.aborted) {
+        if (sharing === entry) stop();
         return;
       }
       entry.media = media;
       const video = media.getVideoTracks()[0];
-      if (!video || video.readyState !== "live") {
-        throw new Error(t("The selected screen source ended.", "Die ausgewählte Bildschirmquelle wurde beendet."));
-      }
       video.contentHint = "detail";
-      const displaySurface = video.getSettings().displaySurface;
-      const audio = withAudio && ["browser", "window"].includes(displaySurface) ? media.getAudioTracks()[0] : null;
+      const displaySurface = input.getSettings().displaySurface;
+      const audio = useAudio && ["browser", "window"].includes(displaySurface) ? media.getAudioTracks()[0] : null;
       const capabilities = new Map();
       for (const track of [video, audio].filter(Boolean)) {
         const codecs = globalThis.RTCRtpSender?.getCapabilities?.(track.kind)?.codecs;
@@ -190,9 +217,7 @@ export function createScreenShareController({ signal }, dock) {
           media.removeTrack(track);
         }
       }
-      video.addEventListener("ended", () => {
-        if (sharing === entry) stop(t("Screen sharing ended.", "Die Bildschirmfreigabe wurde beendet."));
-      }, { once: true, signal: controller.signal });
+      if (video !== input) video.addEventListener("ended", sourceEnded, { once: true, signal: controller.signal });
       entry.phase = "connecting";
       update();
       // Keep the reservation response alive during cancel so its ID can still be released.

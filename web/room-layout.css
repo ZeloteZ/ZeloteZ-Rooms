@@ -153,6 +153,13 @@
 .room-layout .room-live-content .voice-roster { max-block-size: min(9rem, 18dvh); }
 .screen-preview .stage { max-block-size: clamp(8rem, 32dvh, 18rem); }
 
+.desktop-share-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.desktop-share-controls > .inline { align-self: end; min-block-size: 2.5rem; }
+.desktop-crop-dialog { width: min(100% - 24px, 920px); }
+.desktop-crop-stage { position: relative; overflow: hidden; border-radius: 10px; background: #08090d; touch-action: none; cursor: crosshair; }
+.desktop-crop-stage video { display: block; width: 100%; height: min(52dvh, 32rem); object-fit: contain; pointer-events: none; }
+.desktop-crop-selection { position: absolute; border: 2px solid #93a2ff; box-shadow: 0 0 0 200vmax #08090da6; pointer-events: none; }
+
 .room-layout > .live-player[data-mode="full"] {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;

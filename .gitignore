@@ -2,5 +2,6 @@
 deploy/secrets/
 deploy/tls/
 node_modules/
+desktop/portable/dist/
 __pycache__/
 *.py[cod]

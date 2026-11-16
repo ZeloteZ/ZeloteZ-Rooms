@@ -30,10 +30,10 @@ rtmpServerKey: /tls/privkey.pem
 hls: true
 hlsAddress: :8888
 hlsAlwaysRemux: true
-hlsVariant: lowLatency
+# Use full fMP4 segments for native players on HTTPS proxies without HTTP/2.
+hlsVariant: fmp4
 hlsSegmentCount: 7
 hlsSegmentDuration: 1s
-hlsPartDuration: 200ms
 hlsSegmentMaxSize: 16M
 hlsAllowOrigins: []
 

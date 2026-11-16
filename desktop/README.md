@@ -1,18 +1,12 @@
-# ZeloteZ Rooms for Linux
+# ZeloteZ Rooms Desktop
 
-The desktop app opens the same Rooms interface as the website. Its native capture window shares a monitor, a region, or an app window through the system’s ScreenCast portal. It requires Libadwaita 1.4 or later, WebKitGTK 6.0, PipeWire, and a graphical session with a ScreenCast portal such as GNOME on Wayland. App window capture requires support from the portal.
+## Windows and portable Linux
 
-## Install on CachyOS or Arch Linux with GNOME
+On Windows x64, run the `ZeloteZ-Rooms-…-x64.exe` installer. On Linux x64, mark the AppImage as executable and open it. Use the KDE or GNOME ScreenCast portal and PipeWire for sharing on Wayland.
 
-```bash
-sudo pacman -S --needed python-gobject python-cairo gtk4 libadwaita libportal libportal-gtk4 \
-  pipewire gst-plugin-pipewire xdg-desktop-portal xdg-desktop-portal-gnome \
-  gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly \
-  gst-plugin-gtk4 gst-libav glib-networking ca-certificates webkitgtk-6.0
-```
+Open a live channel and click **Share screen**. Choose the resolution and frame rate and select a screen or application window. For a region, enable the crop option and select the area in the local preview before starting. Screen shares in this build transmit video. The voice chat still uses your microphone. On Linux, native capture also offers isolated application audio.
 
-
-Enter your server’s HTTPS address on first launch. The app remembers the address on this device. Change it from the server settings in the title bar. Choose English or German at sign-in or in your profile.
+Open **Server settings** with Ctrl+, to change your server address. Use Alt to show the application menu on Windows or Linux.
 
 ## Share your screen
 

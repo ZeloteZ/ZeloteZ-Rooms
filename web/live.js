@@ -2,8 +2,12 @@ import { api, button, el, identifier, notify, personMark, personName, sameId, st
 import { language, t } from "./i18n.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
+import { desktopShareControls } from "./desktop-share.js";
 
 const viewerHeartbeat = 8000;
+const startupTimeout = 24000;
+const progressInterval = 4000;
+const stallTimeout = 12000;
 
 function streamsPath(channel) {
   return "channels/" + identifier(channel.id) + "/streams";
@@ -28,8 +32,15 @@ export function createLivePlayer(context, dock) {
   const title = el("h3", {});
   const detail = el("p");
   const start = button(t("Start playback", "Wiedergabe starten"), () => {
-    if (hasMedia) playVideo();
-    else connect();
+    if (!playback) {
+      connect();
+      return;
+    }
+    if (!playback.started) {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(retry, startupTimeout);
+    }
+    playVideo();
   }, { class: "primary", hidden: true });
   const overlay = el("div", { class: "stage-overlay" },
     el("div", { class: "stack", role: "status" }, title, detail), start);
@@ -64,12 +75,12 @@ export function createLivePlayer(context, dock) {
   let heartbeat;
   let retryTimer;
   let watchdog;
+  let playback;
   let viewerTimer;
   let viewerStream;
   let viewerPosition;
   let viewerRevision = 0;
   const viewerPlayerId = crypto.randomUUID().replaceAll("-", "");
-  let hasMedia = false;
   let version = 0;
   const changes = new EventTarget();
 
@@ -102,7 +113,7 @@ export function createLivePlayer(context, dock) {
 
   function movePlayer(target) {
     if (node.parentNode === target) return;
-    const playing = hasMedia && !video.paused;
+    const playing = playback && !video.paused;
     if (target.moveBefore && target.isConnected && node.isConnected) target.moveBefore(node, null);
     else {
       target.append(node);
@@ -154,7 +165,7 @@ export function createLivePlayer(context, dock) {
   function reportPlaying() {
     clearTimeout(viewerTimer);
     const stream = selected?.stream;
-    if (!user || !hasMedia || signal.aborted || video.paused || !stream?.live || sameId(stream.userId, user.id)) {
+    if (!user || !playback || signal.aborted || video.paused || !stream?.live || sameId(stream.userId, user.id)) {
       releaseViewer();
       return;
     }
@@ -172,10 +183,11 @@ export function createLivePlayer(context, dock) {
     clearTimeout(watchdog);
     const old = hls;
     hls = null;
-    hasMedia = false;
+    playback = null;
     old?.destroy();
     video.pause();
     video.removeAttribute("src");
+    video.removeAttribute("disableremoteplayback");
     video.load();
   }
 
@@ -192,18 +204,20 @@ export function createLivePlayer(context, dock) {
     if (note && hadSelection && !signal.aborted) notify(note);
   }
 
-  function retry(description = t("Reconnecting playback.", "Die Wiedergabe wird neu verbunden.")) {
-    if (!selected || signal.aborted) return;
+  function retry(allowNative = true) {
+    if (!selected || !playback || signal.aborted) return;
+    const switchToNative = allowNative && playback.usingHlsJs && playback.nativeAvailable;
     disconnect();
-    show(t("Connection lost", "Verbindung unterbrochen"), description, t("Reconnect", "Erneut verbinden"));
-    retryTimer = setTimeout(connect, 4000);
+    if (switchToNative) selected.nativeOnly = true;
+    show(t("Connection lost", "Verbindung unterbrochen"), t("Reconnecting playback.", "Die Wiedergabe wird neu verbunden."), t("Reconnect", "Erneut verbinden"));
+    retryTimer = setTimeout(connect, switchToNative ? 0 : 4000);
   }
 
   function playVideo() {
-    if (!hasMedia) return;
-    const attempt = version;
+    const attempt = playback;
+    if (!attempt) return;
     video.play().catch(error => {
-      if (attempt !== version || !hasMedia || error.name === "AbortError") return;
+      if (attempt !== playback || error.name === "AbortError") return;
       if (error.name === "NotAllowedError") {
         clearTimeout(watchdog);
         show(t("Stream is ready", "Stream bereit"), t("Click to start playback.", "Starte die Wiedergabe mit einem Klick."), t("Start playback", "Wiedergabe starten"));
@@ -211,6 +225,27 @@ export function createLivePlayer(context, dock) {
         retry();
       }
     });
+  }
+
+  function monitorProgress() {
+    clearTimeout(watchdog);
+    const attempt = playback;
+    if (!attempt?.started || video.paused || document.hidden) return;
+    let position = video.currentTime;
+    let lastAdvance = performance.now();
+    function check() {
+      if (attempt !== playback || video.paused || document.hidden) return;
+      const now = performance.now();
+      if (video.seeking || video.currentTime !== position) {
+        position = video.currentTime;
+        lastAdvance = now;
+      } else if (now - lastAdvance >= stallTimeout) {
+        retry();
+        return;
+      }
+      watchdog = setTimeout(check, progressInterval);
+    }
+    watchdog = setTimeout(check, progressInterval);
   }
 
   function connect() {
@@ -223,24 +258,30 @@ export function createLivePlayer(context, dock) {
       show(t("Playback unavailable", "Wiedergabe nicht verfügbar"), error.message);
       return;
     }
-    const native = Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
-    if (!native && !window.Hls?.isSupported()) {
+    const Hls = window.Hls;
+    const usingHlsJs = !selected.nativeOnly && Boolean(Hls?.isSupported());
+    const nativeAvailable = Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
+    if (!usingHlsJs && !nativeAvailable) {
       show(t("Playback unavailable", "Wiedergabe nicht verfügbar"), t("This browser does not support the live stream.", "Dieser Browser unterstützt den Livestream nicht."));
       return;
     }
-    hasMedia = true;
+    playback = { usingHlsJs, nativeAvailable, started: false };
     show(t("Loading live stream", "Livestream wird geladen"), t("Connecting to the stream.", "Der Stream verbindet sich."));
-    watchdog = setTimeout(retry, 24000);
-    if (native) {
+    watchdog = setTimeout(retry, startupTimeout);
+    if (!usingHlsJs) {
       video.src = url;
-    } else {
-      hls = new window.Hls({ maxBufferLength: 18, backBufferLength: 24, maxLiveSyncPlaybackRate: 1.1 });
+      return;
+    }
+    try {
+      hls = new Hls({ preferManagedMediaSource: true, maxBufferLength: 18, backBufferLength: 24, maxLiveSyncPlaybackRate: 1.1 });
       const active = hls;
-      active.on(window.Hls.Events.ERROR, (_, data) => {
-        if (active === hls && data.fatal) retry();
+      active.on(Hls.Events.ERROR, (_, data) => {
+        if (active === hls && data.fatal) retry(data.type !== Hls.ErrorTypes?.NETWORK_ERROR);
       });
       active.attachMedia(video);
-      active.loadSource(url);
+      if (active === hls) active.loadSource(url);
+    } catch {
+      retry();
     }
   }
 
@@ -297,33 +338,44 @@ export function createLivePlayer(context, dock) {
     heartbeat = setTimeout(() => monitor(version), 4100);
   }
 
-  video.addEventListener("canplay", playVideo);
+  video.addEventListener("canplay", () => {
+    if (playback && !playback.started) playVideo();
+  });
+  video.addEventListener("play", () => {
+    if (playback?.started) monitorProgress();
+  });
   video.addEventListener("playing", () => {
-    if (!hasMedia) return;
+    if (!playback) return;
+    if (!playback.started) {
+      playback.started = true;
+      monitorProgress();
+    }
     reportPlaying();
-    clearTimeout(watchdog);
-    watchdog = null;
     overlay.hidden = true;
     video.controls = true;
     video.setAttribute("aria-hidden", "false");
     updateSound();
   });
-  video.addEventListener("waiting", () => {
-    if (hasMedia && !watchdog) watchdog = setTimeout(retry, 24000);
-  });
   video.addEventListener("error", () => {
-    if (hasMedia) retry();
+    if (video.error) retry();
   });
   video.addEventListener("ended", () => {
-    if (hasMedia) retry();
+    if (video.ended) retry();
   });
   video.addEventListener("pause", () => {
-    if (video.paused) releaseViewer();
+    if (!video.paused) return;
+    releaseViewer();
+    if (playback?.started) clearTimeout(watchdog);
   });
   video.addEventListener("volumechange", updateSound);
+  document.addEventListener("visibilitychange", () => {
+    if (playback?.started) monitorProgress();
+  }, { signal });
   window.addEventListener("pagehide", releaseViewer, { signal });
   window.addEventListener("pageshow", event => {
-    if (event.persisted) reportPlaying();
+    if (!event.persisted) return;
+    reportPlaying();
+    if (playback?.started) monitorProgress();
   }, { signal });
   signal.addEventListener("abort", () => stop(), { once: true });
 
@@ -363,6 +415,7 @@ export function renderLive(context, channel, edit, player) {
   const reconnectNote = t("Reconnecting the stream list.", "Die Stream-Liste wird neu verbunden.");
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
   const desktop = window.webkit?.messageHandlers?.roomsCapture;
+  const portableShare = window.roomsDesktop === true && !desktop ? desktopShareControls() : null;
   const reserve = button(t("Share screen", "Bildschirm teilen"), requestStream, { class: "primary", hidden: true });
   const audio = el("input", { type: "checkbox" });
   const audioOption = el("label", { class: "inline subtle", hidden: true }, audio,
@@ -407,7 +460,8 @@ export function renderLive(context, channel, edit, player) {
     const sharing = screenShare?.active();
     const sharingHere = sharing && sameId(sharing.channel.id, channel.id);
     reserve.hidden = !canStream || Boolean(own || sharing);
-    audioOption.hidden = Boolean(desktop) || reserve.hidden;
+    audioOption.hidden = Boolean(desktop || portableShare) || reserve.hidden;
+    if (portableShare) portableShare.element.hidden = reserve.hidden;
     finish.hidden = !own && !sharingHere;
     finish.textContent = sharingHere && sharing.phase !== "live"
       ? t("Cancel screen sharing", "Bildschirmfreigabe abbrechen") : t("End my stream", "Meinen Stream beenden");
@@ -476,7 +530,7 @@ export function renderLive(context, channel, edit, player) {
         desktop.postMessage({ action: "open", channelId: channel.id, language: language() });
         return;
       }
-      await screenShare.start(room, channel, audio.checked);
+      await screenShare.start(room, channel, audio.checked, portableShare?.options());
       refreshSoon();
     } catch (error) {
       if (!signal.aborted) {
@@ -550,6 +604,7 @@ export function renderLive(context, channel, edit, player) {
 
   const node = el("section", { class: "panel stack" },
     el("div", { class: "section-heading" }, el("h2", {}, channel.title), edit),
+    portableShare?.element,
     el("div", { class: "inline" }, reserve, audioOption, finish),
     cards, empty, feedback, preview, chat);
   node.addEventListener("open-message", event => {

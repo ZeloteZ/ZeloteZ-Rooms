@@ -15,7 +15,7 @@ Englisch ist die Standardsprache. Deutsch lässt sich beim Anmelden oder im Prof
 - Bei **Erwähnungen** schlägt dir der Chat Personen, Räume und Channels vor, sobald du `@` tippst. Du kannst zugängliche Räume oder Channels verlinken. Persönliche Erwähnungen erscheinen in der Benachrichtigungsglocke der erwähnten Person.
 - **Aussehen** umfasst Profilbild und Namensfarbe sowie Cover, Banner, Akzentfarbe, Flächenfarbe und Chat-Hintergrund eines Raums. Der Ersteller kann das Designrecht an einzelne beigetretene Mitglieder vergeben und wieder entziehen. Bilder in diesen Einstellungen sind JPEG, PNG oder WebP bis 8 MiB und werden auf dem VPS aufbereitet.
 - **Live-Kanäle** sind Sprachräume. Wenn du gerade in keinem Talk bist, trittst du beim Öffnen als Zuhörer bei. Du kannst das Mikrofon einschalten und stummschalten. Dein Konto kann immer nur an einem Talk teilnehmen. Für einen anderen Talk öffnest du dessen Live-Kanal und wählst **Sprachchat wechseln**.
-- **Bildschirmfreigabe** startest du über **Bildschirm teilen** im Live-Kanal. Im Browser wählst du im Freigabedialog einen Bildschirm, ein Fenster oder einen Tab. Ob Ton für einen Tab oder ein Fenster verfügbar ist, hängt vom Browser ab. In der [Desktop-App für Linux](desktop/README.md) öffnet derselbe Button die native Aufnahme mit Ausschnittwahl, Anwendungston, Vorschau und Statistiken. Die Zuschauerliste und den Streamchat findest du im Live-Kanal.
+- **Bildschirmfreigabe** startest du über **Bildschirm teilen** im Live-Kanal. Im Browser wählst du einen Bildschirm, ein Fenster oder einen Tab. Ob Ton für einen Tab oder ein Fenster verfügbar ist, hängt vom Browser ab. [ZeloteZ Rooms Desktop](desktop/README.md) bietet Bildschirm-, Fenster- und Ausschnittfreigabe auf Windows und Linux. Die native Linux-Version unterstützt auch isolierten Anwendungston. Die Zuschauerliste und den Streamchat findest du im Live-Kanal.
 - **Talk und Wiedergabe** laufen beim Wechsel zwischen Seiten weiter. Neben deinem Profil findest du die Bedienelemente zum Verlassen des Talks, zum Beenden der Wiedergabe und den Link zurück zum jeweiligen Live-Kanal. Beim Abmelden oder Schließen des Tabs enden beide.
 
 ## Was verschlüsselt ist
@@ -26,7 +26,7 @@ Das Passwort entsperrt auch den privaten Schlüssel. Bei einem Passwortverlust g
 
 Für persönliche Erwähnungen erhält der Server die IDs der erwähnten Konten sowie der Nachricht und ihres Chats. Der Nachrichtentext und die darin enthaltenen Links bleiben verschlüsselt.
 
-Sprache und Bildschirmfreigaben aus dem Browser verwenden WebRTC mit Transportverschlüsselung. Die Desktop-App streamt per RTMPS. Die Wiedergabe erfolgt per HTTPS. MediaMTX verteilt Audio und verarbeitet Video für die HLS-Wiedergabe. Der VPS zeichnet die Live-Übertragungen nicht auf. Die VPS-Uploadrate muss für alle gleichzeitigen Zuschauer und Streams ausreichen.
+Sprache und Bildschirmfreigaben aus dem Browser und der plattformübergreifenden Desktop-Version verwenden WebRTC mit Transportverschlüsselung. Die native Linux-Version streamt per RTMPS. Die Wiedergabe erfolgt per HTTPS. MediaMTX verteilt Audio und verarbeitet Video für die HLS-Wiedergabe. Der VPS zeichnet die Live-Übertragungen nicht auf. Die VPS-Uploadrate muss für alle gleichzeitigen Zuschauer und Streams ausreichen.
 
 ## Auf dem VPS betreiben
 

@@ -1,0 +1,48 @@
+{
+  "name": "zelotez-rooms-desktop",
+  "version": "0.1.0",
+  "description": "ZeloteZ Rooms desktop client",
+  "author": "ZeloteZ",
+  "desktopName": "de.zelotez.rooms.desktop",
+  "private": true,
+  "main": "main.cjs",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis --x64 --publish never",
+    "build:linux": "electron-builder --linux AppImage --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
+  },
+  "overrides": {
+    "minimatch@>=7.0.0 <11.0.1": "11.0.8"
+  },
+  "build": {
+    "appId": "de.zelotez.rooms",
+    "productName": "ZeloteZ Rooms",
+    "artifactName": "ZeloteZ-Rooms-${version}-${arch}.${ext}",
+    "files": [
+      "*.cjs",
+      "ui/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "ui/icon.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "ui/icon.png",
+      "syncDesktopName": true,
+      "category": "Network"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    }
+  }
+}
