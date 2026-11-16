@@ -102,12 +102,13 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
     }
     if (changed && value === 0) onEnded?.();
     if (changed && value === 1) onPlaying?.();
-    if (value !== 1 && value !== 2) return;
+    if (value !== 1 && value !== 2 && value !== 3) return;
 
     const now = performance.now();
     const confirming = expectedTransport && now <= expectedTransport.expiresAt;
     if (expectedTransport && (!confirming || (value === expectedTransport.target && (changed || stateEvent)))) expectedTransport = null;
-    const playing = value === 1;
+    // Native Play can buffer before state 1. Forward that trusted intent before a paused room poll cancels it.
+    const playing = value !== 2;
     // Player state can also change because of buffering, browser policy, or our own commands.
     if (!stateEvent || confirming || now < ignoreSeekUntil || playing === wantsPlayback ||
         !presenting || !document.hasFocus() ||
