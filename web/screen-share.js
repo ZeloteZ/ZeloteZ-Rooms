@@ -1,4 +1,4 @@
-import { api, button, el, identifier, notify, topicHref } from "./ui.js";
+import { accountHeaders, api, button, checkAccountResponse, el, identifier, notify, topicHref } from "./ui.js";
 import { language, t } from "./i18n.js";
 import { cropDesktopShare } from "./desktop-share.js";
 import { prepareDesktopAudio } from "./desktop-audio.js";
@@ -43,12 +43,13 @@ function requestWhip(path, method, options = {}) {
     method, body, credentials: "same-origin", cache: "no-store", redirect: "error",
     referrer: location.origin + "/", referrerPolicy: "same-origin",
     headers: {
+      ...accountHeaders(),
       "Accept-Language": language(),
       ...(body === undefined ? {} : { "Content-Type": "application/sdp", Accept: "application/sdp" }),
     },
     keepalive: method === "DELETE",
     signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
-  });
+  }).then(checkAccountResponse);
 }
 
 async function captureDisplay(withAudio, desktopOptions) {

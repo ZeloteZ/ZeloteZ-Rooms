@@ -15,15 +15,31 @@ export function element(tag, attributes = {}, ...children) {
 }
 
 let onUnauthorized = () => {};
+let expectedAccount;
 export function requireLoginOnExpiry(callback) {
   onUnauthorized = callback;
 }
 
+export function setExpectedAccount(id) {
+  expectedAccount = id;
+}
+
+export function accountHeaders() {
+  return expectedAccount ? { "X-Rooms-Account": expectedAccount } : {};
+}
+
+export function checkAccountResponse(response) {
+  if (response.headers.get("X-Rooms-Error") === "account-changed") onUnauthorized("changed");
+  return response;
+}
+
 export async function api(path, { method = "GET", body, signal, binary = false, buffer = false } = {}) {
-  const response = await fetch("/api/" + path, {
+  const unauthenticated = ["auth/login", "auth/register", "auth/session"].includes(path);
+  const response = checkAccountResponse(await fetch("/api/" + path, {
     method,
     body: body === undefined ? undefined : binary ? body : JSON.stringify(body),
     headers: { "Accept-Language": language(),
+      ...(unauthenticated ? {} : accountHeaders()),
       ...(body === undefined ? {} : { "Content-Type": binary ? "application/octet-stream" : "application/json" }) },
     credentials: "same-origin",
     cache: "no-store",
@@ -31,7 +47,7 @@ export async function api(path, { method = "GET", body, signal, binary = false, 
     referrer: location.origin + "/",
     referrerPolicy: "same-origin",
     signal,
-  });
+  }));
   if (response.status === 204) return null;
   if (response.ok) return buffer ? response.arrayBuffer() : response.json();
   if (response.status === 401 && !path.startsWith("auth/")) onUnauthorized();

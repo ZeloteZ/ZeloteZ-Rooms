@@ -6,6 +6,7 @@ const notificationRoute = /^\/api\/notifications(?:\/([1-9]\d{0,15}))?$/u
 const maxMentions = 12
 const retention = 200
 const pageSize = 50
+const suggestionPageSize = 160
 
 const unavailable = () => new RequestError(404, 'Dieser Bereich ist nicht verfügbar.')
 const invalid = () => new RequestError(400, 'Ungültige Markierungen.')
@@ -43,20 +44,20 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
   const sourceRoom = db.prepare(`SELECT c.topic_id, c.type FROM channels c JOIN topic_members tm
     ON tm.topic_id = c.topic_id AND tm.user_id = ? AND tm.joined_at IS NOT NULL WHERE c.id = ?`)
   const userSuggestions = db.prepare(`SELECT 'user' AS kind, u.id, u.display_name AS label, '@' || u.username AS detail
-    FROM topic_members tm JOIN users u ON u.id = tm.user_id WHERE tm.topic_id = ? AND tm.joined_at IS NOT NULL
-    ORDER BY u.display_name COLLATE NOCASE, u.id`)
+    FROM topic_members tm JOIN users u ON u.id = tm.user_id WHERE tm.topic_id = ? AND tm.joined_at IS NOT NULL AND u.id > ?
+    AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = u.id) ORDER BY u.id LIMIT ?`)
   const roomSuggestions = db.prepare(`SELECT 'room' AS kind, t.id, t.title AS label FROM topics t
     LEFT JOIN topic_members tm ON tm.topic_id = t.id AND tm.user_id = ?
-    WHERE t.visibility = 'public' OR tm.joined_at IS NOT NULL OR tm.approved = 1
-    ORDER BY t.title COLLATE NOCASE, t.id`)
+    WHERE t.id > ? AND (t.visibility = 'public' OR tm.joined_at IS NOT NULL OR tm.approved = 1) ORDER BY t.id LIMIT ?`)
   const channelSuggestions = db.prepare(`SELECT 'channel' AS kind, c.id, c.title AS label,
     c.topic_id AS roomId, t.title AS detail
     FROM topic_members tm JOIN topics t ON t.id = tm.topic_id JOIN channels c ON c.topic_id = t.id
-    WHERE tm.user_id = ? AND tm.joined_at IS NOT NULL ORDER BY t.title COLLATE NOCASE, c.position, c.id`)
+    WHERE tm.user_id = ? AND tm.joined_at IS NOT NULL AND c.id > ? ORDER BY c.id LIMIT ?`)
   const insert = db.prepare(`INSERT INTO mention_notifications
     (recipient_id, sender_id, channel_id, chat_message_id, stream_message_id, created_at)
     SELECT ?, ?, ?, ?, ?, ? FROM topic_members tm
     WHERE tm.topic_id = ? AND tm.user_id = ? AND tm.joined_at IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = tm.user_id)
     ON CONFLICT DO NOTHING`)
   const prune = db.prepare(`DELETE FROM mention_notifications WHERE recipient_id = ? AND id <= (
     SELECT id FROM mention_notifications WHERE recipient_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)`)
@@ -103,7 +104,29 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
     const channelId = stream === null ? chat : streams.chatChannel(stream, userId)
     const room = sourceRoom.get(userId, channelId)
     if (!room || room.type !== (stream === null ? 'chat' : 'live')) throw unavailable()
-    return [...userSuggestions.all(room.topic_id), ...channelSuggestions.all(userId), ...roomSuggestions.all(userId)]
+    const steps = [
+      ['user', userSuggestions, room.topic_id],
+      ['room', roomSuggestions, userId],
+      ['channel', channelSuggestions, userId],
+    ]
+    const cursor = params.get('after')
+    let offset = 0
+    let start = ''
+    if (cursor !== null) {
+      const [kind, value, extra] = cursor.split(':')
+      offset = steps.findIndex(([supported]) => supported === kind)
+      if (offset < 0 || !value || !uuid.test(value) || extra !== undefined) throw invalid()
+      start = value
+    }
+    const result = []
+    for (const [, select, key] of steps.slice(offset)) {
+      result.push(...select.all(key, start, suggestionPageSize + 1 - result.length))
+      if (result.length > suggestionPageSize) break
+      start = ''
+    }
+    const page = result.slice(0, suggestionPageSize)
+    const last = page.at(-1)
+    return { suggestions: page, next: result.length > suggestionPageSize ? `${last.kind}:${last.id}` : null }
   }
 
   function visibleInbox(userId) {
@@ -138,7 +161,7 @@ export function createNotifications(db, { requireSession, streams, profileFor = 
     if (!mentionPath && !match) return false
     const user = requireSession(request)
     if (mentionPath && request.method === 'GET') {
-      json(response, 200, { suggestions: suggestions(user.id, searchParams) })
+      json(response, 200, suggestions(user.id, searchParams))
     } else if (match && !match[1] && request.method === 'GET') {
       const rows = visibleInbox(user.id)
       const unreadCount = rows.reduce((count, row) => count + Number(row.read_at === null), 0)

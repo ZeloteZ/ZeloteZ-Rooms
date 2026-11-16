@@ -21,6 +21,7 @@ const playbackLimit = 256
 const retention = 24 * 60 * 60_000
 const viewerLease = 32_000
 const playerLimitPerSession = 32
+const broadcastLimit = 8
 
 const digest = value => createHash('sha256').update(value).digest()
 const asTime = value => new Date(value).toISOString()
@@ -108,6 +109,7 @@ export function createStreams(db, config, {
       connect_until INTEGER NOT NULL,
       publish_until INTEGER NOT NULL,
       mode TEXT NOT NULL DEFAULT 'rtmp' CHECK (mode IN ('rtmp', 'browser')),
+      session_key TEXT,
       publisher_id TEXT,
       claimed_at INTEGER,
       ended_at INTEGER
@@ -119,6 +121,9 @@ export function createStreams(db, config, {
   `)
   if (!db.prepare('PRAGMA table_info(broadcasts)').all().some(column => column.name === 'mode')) {
     db.exec("ALTER TABLE broadcasts ADD mode TEXT NOT NULL DEFAULT 'rtmp' CHECK (mode IN ('rtmp', 'browser'))")
+  }
+  if (!db.prepare('PRAGMA table_info(broadcasts)').all().some(column => column.name === 'session_key')) {
+    db.exec('ALTER TABLE broadcasts ADD session_key TEXT')
   }
   const getBroadcast = db.prepare('SELECT * FROM broadcasts WHERE id = ?')
   const getChannel = db.prepare(`
@@ -134,15 +139,19 @@ export function createStreams(db, config, {
     WHERE b.ended_at IS NULL AND b.publisher_id IS NOT NULL AND b.publish_until > ?
     ORDER BY b.created_at DESC LIMIT 48`)
   const insert = db.prepare(`
-    INSERT INTO broadcasts (id, channel_id, user_id, key_hash, created_at, connect_until, publish_until, mode)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO broadcasts (id, channel_id, user_id, key_hash, created_at, connect_until, publish_until, mode, session_key)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE (SELECT count(*) FROM broadcasts WHERE ended_at IS NULL) < ?
+      AND NOT EXISTS (SELECT 1 FROM broadcasts WHERE user_id = ? AND ended_at IS NULL)
     ON CONFLICT DO NOTHING
   `)
+  const openForUser = db.prepare('SELECT 1 FROM broadcasts WHERE user_id = ? AND ended_at IS NULL')
   const claim = db.prepare(`
     UPDATE broadcasts SET publisher_id = ?, claimed_at = ?
     WHERE id = ? AND publisher_id IS NULL AND ended_at IS NULL
   `)
   const end = db.prepare('UPDATE broadcasts SET ended_at = ? WHERE id = ? AND ended_at IS NULL')
+  const endForUser = db.prepare('UPDATE broadcasts SET ended_at = ? WHERE user_id = ? AND ended_at IS NULL')
   const clearPublisher = db.prepare('UPDATE broadcasts SET publisher_id = NULL WHERE id = ? AND ended_at IS NOT NULL')
   const purge = db.prepare('DELETE FROM broadcasts WHERE ended_at < ?')
   const recent = db.prepare('SELECT count(*) AS count FROM broadcasts WHERE user_id = ? AND created_at > ?')
@@ -207,6 +216,7 @@ export function createStreams(db, config, {
   function validBroadcast(row, now) {
     if (!row || row.ended_at !== null || row.publish_until <= now ||
         (!row.publisher_id && row.connect_until <= now) || !channelAccess(row.user_id, row.channel_id)?.canStream) return false
+    if (!isSessionActive(row.session_key, row.user_id)) return false
     if (row.mode !== 'browser') return true
     const publisher = browserPublishers.get(row.id)
     return publisher?.until > now && isSessionActive(publisher.session, row.user_id)
@@ -601,18 +611,22 @@ export function createStreams(db, config, {
       const { mode = 'rtmp' } = await readJson(request)
       if (mode !== 'rtmp' && mode !== 'browser') throw new RequestError(400, 'Ungültige Auswahl.')
       await channelStatus(channelId)
-      if (!canSee(requireSession(request), channelId).canStream) {
+      const currentUser = requireSession(request)
+      if (currentUser.id !== user.id || !canSee(currentUser, channelId).canStream) {
         throw new RequestError(403, 'Du darfst in diesem Channel nicht streamen.')
       }
       const now = Date.now()
       if (recent.get(user.id, now - 60_000).count >= 5) throw new RequestError(429, 'Warte kurz vor einer weiteren Stream-Anfrage.')
       const id = randomBytes(16).toString('hex')
       const key = randomBytes(32).toString('hex')
-      const session = mode === 'browser' ? sessionKey(request) : null
-      if (mode === 'browser' && !session) throw new RequestError(404, 'Stream nicht gefunden.')
+      const session = sessionKey(request)
+      if (!isSessionActive(session, user.id)) throw new RequestError(404, 'Stream nicht gefunden.')
       const connectUntil = now + (mode === 'browser' ? browserConnectLifetime : connectLifetime)
-      if (!insert.run(id, channelId, user.id, digest(key), now, connectUntil, now + publishLifetime, mode).changes) {
-        throw new RequestError(409, 'Du hast hier bereits einen Stream vorbereitet oder gestartet.')
+      closeInvalid(getOpen.all(), now)
+      if (!insert.run(id, channelId, user.id, digest(key), now, connectUntil, now + publishLifetime, mode,
+        session, broadcastLimit, user.id).changes) {
+        if (openForUser.get(user.id)) throw new RequestError(409, 'Du hast bereits einen Stream vorbereitet oder gestartet.')
+        throw new RequestError(503, 'Alle Streamplätze sind gerade belegt.')
       }
       const stream = publicStream({ id, user_id: user.id, display_name: user.displayName, created_at: now }, false)
       if (mode === 'browser') {
@@ -697,5 +711,6 @@ export function createStreams(db, config, {
     if (pendingRelayStops.size) void flushPlaybackStops()
   }
 
-  return { handle, handleMedia, checkViewer, homeActivity, viewersFor, chatChannel, close }
+  return { handle, handleMedia, checkViewer, homeActivity, viewersFor, chatChannel,
+    revokeUser: userId => endForUser.run(Date.now(), userId), close }
 }

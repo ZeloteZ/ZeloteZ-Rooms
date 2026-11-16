@@ -10,7 +10,7 @@ import { createNativeBroadcast } from "./native-broadcast.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
 import { createTutorials } from "./tutorial.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
-import { api, button, closeDialog, el, field, form, paintPersonMark, paintPersonName, requireLoginOnExpiry, select } from "./ui.js";
+import { api, button, closeDialog, el, field, form, paintPersonMark, paintPersonName, requireLoginOnExpiry, select, setExpectedAccount } from "./ui.js";
 
 const navigation = document.querySelector("#navigation");
 const profile = document.querySelector("#profile");
@@ -28,6 +28,7 @@ const broadcastDock = document.querySelector("#broadcast-dock");
 const nativeBroadcastDock = document.querySelector("#native-broadcast-dock");
 const notificationDock = document.querySelector("#notification-dock");
 const profileUpdates = new EventTarget();
+const sessionChanges = typeof BroadcastChannel === "function" ? new BroadcastChannel("zelotez-rooms-session") : null;
 
 let user = null;
 let view;
@@ -133,6 +134,7 @@ profileEditor.addEventListener("click", () => {
 
 async function showWorkspace(nextUser) {
   user = nextUser;
+  setExpectedAccount(user.id);
   workspaceSession?.abort();
   workspaceSession = new AbortController();
   const { signal } = workspaceSession;
@@ -169,6 +171,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
   view = null;
   activeTopic = null;
   user = null;
+  setExpectedAccount(null);
   globalThis.ClubCrypto?.lock();
   closeDialog();
   bootstrap.hidden = true;
@@ -209,6 +212,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
         username: loginName, password: await ClubCrypto.credential(loginName, plainPassword),
       } });
     password.value = "";
+    sessionChanges?.postMessage("changed");
     if (!await ClubCrypto.unlock(result.user, plainPassword)) {
       throw new Error(t("Your keys could not be unlocked.", "Deine Schlüssel konnten nicht entsperrt werden."));
     }
@@ -280,8 +284,29 @@ async function render(force = false) {
   }
 }
 
-requireLoginOnExpiry(() => {
-  if (user) showAuth(t("Your session expired. Please sign in again.", "Deine Sitzung ist abgelaufen. Melde dich erneut an."));
+function lockOnAccountChange() {
+  if (user) showAuth(t("The signed-in account has changed. Sign in again.", "Das angemeldete Konto hat sich geändert. Melde dich erneut an."));
+}
+
+let checkingAccount = false;
+async function checkTabAccount() {
+  if (!user || checkingAccount) return;
+  const current = user;
+  checkingAccount = true;
+  try {
+    const session = await api("auth/session");
+    if (user === current && session.user?.id !== current.id) lockOnAccountChange();
+  } catch {
+    // Requests from this tab retain their expected-account guard during an interruption.
+  } finally {
+    checkingAccount = false;
+  }
+}
+sessionChanges?.addEventListener("message", checkTabAccount);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void checkTabAccount(); });
+requireLoginOnExpiry(reason => {
+  if (reason === "changed") lockOnAccountChange();
+  else if (user) showAuth(t("Your session expired. Please sign in again.", "Deine Sitzung ist abgelaufen. Melde dich erneut an."));
 });
 document.querySelector(".skip-link").addEventListener("click", event => {
   event.preventDefault();
@@ -306,6 +331,7 @@ logout.addEventListener("click", async () => {
     await window.roomsNativeCapture?.close().catch(() => {});
     await releaseVoiceForLogout();
     await api("auth/logout", { method: "POST", body: {} });
+    sessionChanges?.postMessage("changed");
     showAuth();
   } catch (error) {
     if (error.status === 401) showAuth();

@@ -1,4 +1,4 @@
-import { api, button, el, identifier, notify, personMark, personName, sameId, status, tell, topicHref } from "./ui.js";
+import { accountHeaders, api, button, checkAccountResponse, el, identifier, notify, personMark, personName, sameId, status, tell, topicHref } from "./ui.js";
 import { t } from "./i18n.js";
 
 const heartbeatDelay = 5000;
@@ -53,20 +53,21 @@ function closeEndpoint(endpoint) {
   if (!endpoint) return;
   return fetch("/api/" + endpoint, {
     method: "DELETE", keepalive: true, signal: AbortSignal.timeout(2500),
+    headers: accountHeaders(),
     credentials: "same-origin", referrer: location.origin + "/", referrerPolicy: "same-origin",
     cache: "no-store", redirect: "error",
-  }).catch(() => {});
+  }).then(checkAccountResponse).catch(() => {});
 }
 
 async function negotiate(peer, base, route, signal, saveResource) {
   await peer.setLocalDescription(await peer.createOffer());
   await waitForIce(peer, signal);
-  const response = await fetch("/api/" + base + "/" + route, {
-    method: "POST", headers: { "Content-Type": "application/sdp", Accept: "application/sdp" },
+  const response = checkAccountResponse(await fetch("/api/" + base + "/" + route, {
+    method: "POST", headers: { ...accountHeaders(), "Content-Type": "application/sdp", Accept: "application/sdp" },
     body: peer.localDescription.sdp, signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]),
     credentials: "same-origin", referrer: location.origin + "/", referrerPolicy: "same-origin",
     cache: "no-store", redirect: "error",
-  });
+  }));
   if (response.status !== 201) {
     const data = await response.json().catch(() => null);
     throw new Error(data?.error || t("The voice server is unavailable right now.", "Der Sprachserver ist gerade nicht erreichbar."));

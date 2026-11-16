@@ -10,12 +10,19 @@ const totalFileLimit = 2 * 1024 * 1024 * 1024
 const userFileLimit = 250 * 1024 * 1024
 const stagingTime = 60 * 60 * 1000
 const maxMembers = 80
+const maxRooms = 200
+const maxRoomsPerUser = 32
+const roomsPerPage = 48
+const maxStoredMessages = 300_000
+const maxMessagesPerUser = 50_000
+const totalChatBytes = 256 * 1024 * 1024
+const userChatBytes = 32 * 1024 * 1024
 
 const missing = () => new RequestError(404, 'Dieser Bereich ist nicht verfügbar.')
 const forbidden = () => new RequestError(403, 'Dafür fehlt dir die Berechtigung.')
 const joinHistory = 'LEFT JOIN message_history_grants g ON g.message_id = m.id AND g.recipient_id = ?'
 const originalAccess = `EXISTS (SELECT 1 FROM json_each(m.envelope, '$.keys') WHERE key = ?)`
-const historyFields = 'g.wrapper AS history_wrapper, g.grantor_id AS history_grantor'
+const historyFields = 'g.wrapper AS history_wrapper, g.grantor_id AS history_grantor, g.revision AS history_revision'
 const joinDeletion = 'LEFT JOIN message_deletions d ON d.message_id = m.id LEFT JOIN users moderator ON moderator.id = d.user_id'
 const deletionFields = 'd.deleted_at, d.user_id AS deleted_by, moderator.display_name AS deleted_by_name'
 const undeleted = 'NOT EXISTS (SELECT 1 FROM message_deletions WHERE message_id = m.id)'
@@ -53,7 +60,7 @@ function messageView(row, profileFor) {
   const author = { id: row.user_id, displayName: row.display_name, ...profileFor(row.user_id) }
   if (envelope && row.history_wrapper) {
     envelope.keys = {}
-    envelope.historyGrant = { ...JSON.parse(row.history_wrapper), grantorId: row.history_grantor }
+    envelope.historyGrant = { ...JSON.parse(row.history_wrapper), grantorId: row.history_grantor, revision: row.history_revision }
   }
   if (row.deleted_at) {
     return {
@@ -91,6 +98,38 @@ export function validateEnvelope(value, recipients) {
   })
 }
 
+function initializeChatStorage(db) {
+  transaction(db, () => {
+    if (!db.prepare("SELECT 1 FROM chat_storage WHERE scope = ''").get()) {
+      db.exec(`
+        INSERT INTO chat_storage
+          SELECT '', count(*), coalesce(sum(length(CAST(envelope AS BLOB))), 0) FROM messages;
+        INSERT INTO chat_storage
+          SELECT user_id, count(*), sum(length(CAST(envelope AS BLOB))) FROM messages GROUP BY user_id;
+      `)
+    }
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS count_chat_storage_insert AFTER INSERT ON messages
+      BEGIN
+        UPDATE chat_storage SET messages = messages + 1, bytes = bytes + length(CAST(NEW.envelope AS BLOB)) WHERE scope = '';
+        INSERT INTO chat_storage VALUES (NEW.user_id, 1, length(CAST(NEW.envelope AS BLOB)))
+          ON CONFLICT(scope) DO UPDATE SET messages = messages + 1, bytes = bytes + excluded.bytes;
+      END;
+      CREATE TRIGGER IF NOT EXISTS count_chat_storage_delete AFTER DELETE ON messages
+      BEGIN
+        UPDATE chat_storage SET messages = messages - 1, bytes = bytes - length(CAST(OLD.envelope AS BLOB))
+          WHERE scope IN ('', OLD.user_id);
+        DELETE FROM chat_storage WHERE scope = OLD.user_id AND messages = 0;
+      END;
+      CREATE TRIGGER IF NOT EXISTS count_chat_storage_update AFTER UPDATE OF envelope ON messages
+      BEGIN
+        UPDATE chat_storage SET bytes = bytes + length(CAST(NEW.envelope AS BLOB)) - length(CAST(OLD.envelope AS BLOB))
+          WHERE scope IN ('', OLD.user_id);
+      END;
+    `)
+  })
+}
+
 export function createCommunity(db, { requireSession, appearance, recordMentions = () => {} }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS friendships (
@@ -103,6 +142,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       visibility TEXT NOT NULL CHECK (visibility IN ('private', 'public')), created_at TEXT NOT NULL,
       stream_policy TEXT NOT NULL DEFAULT 'all' CHECK (stream_policy IN ('all', 'admins', 'disabled'))
     ) STRICT;
+    CREATE INDEX IF NOT EXISTS topics_by_owner ON topics(owner_id);
+    CREATE INDEX IF NOT EXISTS topics_by_recency ON topics(created_at DESC, id DESC);
     CREATE TABLE IF NOT EXISTS topic_members (
       topic_id TEXT NOT NULL REFERENCES topics(id), user_id TEXT NOT NULL REFERENCES users(id),
       role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')), approved INTEGER NOT NULL DEFAULT 0,
@@ -134,19 +175,33 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     ) STRICT;
     CREATE INDEX IF NOT EXISTS pending_attachments ON attachments(message_id, created_at);
     CREATE INDEX IF NOT EXISTS user_uploads ON attachments(user_id);
+    CREATE TABLE IF NOT EXISTS chat_storage (
+      scope TEXT PRIMARY KEY, messages INTEGER NOT NULL, bytes INTEGER NOT NULL
+    ) STRICT, WITHOUT ROWID;
   `)
+  initializeChatStorage(db)
   initializeChannelOrder(db)
 
   const topicSelect = `SELECT t.*, m.role, m.approved, m.joined_at, m.visited_at, m.favorite,
     EXISTS (SELECT 1 FROM topic_designers d WHERE d.topic_id = t.id AND d.user_id = m.user_id) AS design_grant
     FROM topics t LEFT JOIN topic_members m ON m.topic_id = t.id AND m.user_id = ?`
   const topicById = db.prepare(`${topicSelect} WHERE t.id = ? AND (t.visibility = 'public' OR m.user_id IS NOT NULL)`)
-  const listTopics = db.prepare(`${topicSelect} WHERE t.visibility = 'public' OR m.user_id IS NOT NULL ORDER BY t.created_at DESC`)
+  const visibleTopics = `${topicSelect} WHERE (t.visibility = 'public' OR m.user_id IS NOT NULL)`
+  const listTopics = db.prepare(`${visibleTopics} AND (? IS NULL OR (t.created_at, t.id) < (?, ?))
+    ORDER BY t.created_at DESC, t.id DESC LIMIT ?`)
+  const favoriteTopics = db.prepare(`${topicSelect} WHERE m.joined_at IS NOT NULL AND m.favorite = 1 ORDER BY m.visited_at DESC, t.id DESC`)
+  const recentTopics = db.prepare(`${topicSelect} WHERE m.joined_at IS NOT NULL AND m.visited_at IS NOT NULL
+    ORDER BY m.visited_at DESC, t.id DESC LIMIT 8`)
+  const countRooms = db.prepare('SELECT count(*) AS count FROM topics')
+  const countOwnedRooms = db.prepare('SELECT count(*) AS count FROM topics WHERE owner_id = ?')
+  const storageFor = db.prepare('SELECT messages, bytes FROM chat_storage WHERE scope = ?')
   const findChannel = db.prepare(`SELECT c.*, m.role, t.stream_policy AS topic_stream_policy FROM channels c
     JOIN topics t ON t.id = c.topic_id
-    JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL WHERE c.id = ?`)
+    JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL
+    WHERE c.id = ? AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = m.user_id)`)
   const recipientKeys = db.prepare(`SELECT u.id, u.public_key FROM topic_members m JOIN users u ON u.id = m.user_id
-    WHERE m.topic_id = ? AND m.joined_at IS NOT NULL ORDER BY u.id`)
+    WHERE m.topic_id = ? AND m.joined_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = u.id)
+    ORDER BY u.id`)
   const channelTopic = db.prepare('SELECT topic_id FROM channels WHERE id = ?')
   const listChannels = db.prepare(channelList)
   const directMessage = db.prepare(`SELECT m.*, u.display_name, ${deletionFields}
@@ -244,6 +299,9 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     const topicId = randomUUID()
     const now = new Date().toISOString()
     transaction(db, () => {
+      if (countRooms.get().count >= maxRooms || countOwnedRooms.get(user.id).count >= maxRoomsPerUser) {
+        throw new RequestError(409, 'Die maximale Anzahl von Räumen ist erreicht.')
+      }
       db.prepare('INSERT INTO topics(id, owner_id, title, visibility, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(topicId, user.id, title, visibility, now)
       db.prepare("INSERT INTO topic_members(topic_id,user_id,role,approved,joined_at,visited_at) VALUES (?,?,'owner',1,?,?)")
@@ -253,6 +311,25 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       channel.run(randomUUID(), topicId, 'Live', 'live')
     })
     return showTopic(getTopic(user.id, topicId))
+  }
+
+  function topicPage(userId, before) {
+    let createdAt = null
+    let id = null
+    if (before !== null) {
+      const pieces = before.split('|')
+      if (pieces.length !== 2 || !pieces[0] || pieces[0].length > 64 || !uuid.test(pieces[1])) {
+        throw new RequestError(400, 'Ungültige Auswahl.')
+      }
+      createdAt = pieces[0]
+      id = pieces[1]
+    }
+    const rows = listTopics.all(userId, createdAt, createdAt, id, roomsPerPage + 1)
+    const topics = rows.slice(0, roomsPerPage).map(showTopic)
+    const last = topics.at(-1)
+    const next = rows.length > roomsPerPage ? `${last.createdAt}|${last.id}` : null
+    return before === null ? { topics, next, favorites: favoriteTopics.all(userId).map(showTopic), recent: recentTopics.all(userId).map(showTopic) }
+      : { topics, next }
   }
 
   function changeTopic(user, topic, input) {
@@ -450,6 +527,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     const envelope = validateEnvelope(input.envelope, recipientKeys.all(channel.topic_id))
     const createdAt = new Date(time).toISOString()
     const seq = transaction(db, () => {
+      checkChatStorage(user.id, Buffer.byteLength(envelope), 1)
       const result = db.prepare('INSERT INTO messages(id,channel_id,user_id,envelope,created_at) VALUES (?,?,?,?,?)')
         .run(input.id, channel.id, user.id, envelope, createdAt)
       const linkFile = db.prepare(`UPDATE attachments SET message_id = ? WHERE id = ? AND channel_id = ?
@@ -461,6 +539,16 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       return Number(result.lastInsertRowid)
     })
     return showMessage({ id: input.id, seq, user_id: user.id, display_name: user.displayName, created_at: createdAt, envelope })
+  }
+
+  function checkChatStorage(userId, additionalBytes, additionalMessages = 0) {
+    const storage = storageFor.get('')
+    const owned = storageFor.get(userId)
+    const overCount = additionalMessages > 0 && (storage.messages + additionalMessages > maxStoredMessages ||
+      (owned?.messages ?? 0) + additionalMessages > maxMessagesPerUser)
+    const overBytes = additionalBytes > 0 && (storage.bytes + additionalBytes > totalChatBytes ||
+      (owned?.bytes ?? 0) + additionalBytes > userChatBytes)
+    if (overCount || overBytes) throw new RequestError(413, 'Der Speicher für Chatnachrichten ist voll.')
   }
 
   function removeMessage(request, channelId, messageId, input) {
@@ -481,6 +569,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
         }
         reason = validateEnvelope(input.reason, recipientKeys.all(channel.topic_id))
       }
+      checkChatStorage(row.user_id, Buffer.byteLength(reason) - Buffer.byteLength(row.envelope))
       db.prepare('UPDATE messages SET envelope = ? WHERE id = ?').run(reason, row.id)
       db.prepare('DELETE FROM attachments WHERE message_id = ?').run(row.id)
       db.prepare('DELETE FROM message_history_grants WHERE message_id = ?').run(row.id)
@@ -552,7 +641,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       mutateFriend(user, id, select(body.action, ['request', 'accept', 'remove']))
       json(response, 200, { ok: true })
     } else if (resource === 'topics' && !id) {
-      if (method === 'GET') json(response, 200, { topics: listTopics.all(user.id).map(showTopic) })
+      if (method === 'GET') json(response, 200, topicPage(user.id, searchParams.get('before')))
       else if (method === 'POST') json(response, 201, { topic: createTopic(user, body, responseLocale(response)) })
       else return false
     } else if (resource === 'topics' && id && !file) {

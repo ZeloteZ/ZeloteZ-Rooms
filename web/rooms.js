@@ -81,24 +81,45 @@ function topicCard(topic, context) {
   return card;
 }
 
-function collection(title, topics, empty, context) {
+function collection(title, topics, empty, context, nextPage = null) {
   const heading = el("h2", {}, title);
   if (!topics.length) {
     return el("section", { class: "home-shelf" }, heading, el("p", { class: "panel collection-empty muted" }, empty));
   }
   const grid = el("div", { class: "topic-grid" }, topics.map(topic => topicCard(topic, context)));
-  const turn = direction => grid.scrollBy({
-    left: direction * grid.clientWidth,
-    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
-  });
+  let loading = false;
+  function atEnd() {
+    return grid.scrollWidth - grid.clientWidth - grid.scrollLeft < 2;
+  }
+  async function turn(direction) {
+    if (loading) return;
+    if (direction > 0 && atEnd() && nextPage) {
+      loading = true;
+      updateControls();
+      try {
+        const page = await api("topics?before=" + encodeURIComponent(nextPage), { signal: context.signal });
+        if (context.signal.aborted) return;
+        nextPage = page.next ?? null;
+        grid.append(...page.topics.map(topic => topicCard(topic, context)));
+      } catch (error) {
+        if (!context.signal.aborted) notify(error.message);
+        return;
+      } finally {
+        loading = false;
+        updateControls();
+      }
+    }
+    grid.scrollBy({ left: direction * grid.clientWidth,
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  }
   const back = button("‹", () => turn(-1), { "aria-label": t("Previous in “{title}”", "In „{title}“ zurückblättern", { title }), class: "icon-button" });
   const forward = button("›", () => turn(1), { "aria-label": t("Next in “{title}”", "In „{title}“ weiterblättern", { title }), class: "icon-button" });
   const controls = el("div", { class: "shelf-controls", hidden: true }, back, forward);
   function updateControls() {
     const extent = grid.scrollWidth - grid.clientWidth;
-    controls.hidden = extent < 2;
+    controls.hidden = extent < 2 && !nextPage;
     back.disabled = grid.scrollLeft < 2;
-    forward.disabled = grid.scrollLeft >= extent - 2;
+    forward.disabled = loading || (atEnd() && !nextPage);
   }
   const resize = new ResizeObserver(updateControls);
   resize.observe(grid);
@@ -117,9 +138,8 @@ function greeting(name) {
 }
 
 export async function renderTopics(context) {
-  const { topics } = await api("topics", { signal: context.signal });
-  const recent = topics.filter(topic => topic.joined && topic.visitedAt).sort(timeOrder("visitedAt")).slice(0, 8);
-  const favorites = topics.filter(topic => topic.favorite).sort(timeOrder("visitedAt"));
+  const { topics, next, recent = topics.filter(topic => topic.joined && topic.visitedAt).sort(timeOrder("visitedAt")).slice(0, 8),
+    favorites = topics.filter(topic => topic.favorite).sort(timeOrder("visitedAt")) } = await api("topics", { signal: context.signal });
   const newest = [...topics].sort(timeOrder("createdAt"));
   const tabs = [
     button(t("Rooms", "Räume"), () => selectPane("topics"), { "aria-pressed": "true" }),
@@ -132,7 +152,7 @@ export async function renderTopics(context) {
     el("div", { class: "home-tabs", role: "group", "aria-label": t("Room overview", "Raumübersicht") }, tabs),
     el("div", { class: "home-content" },
       el("div", { class: "home-topics" },
-        collection(t("New rooms", "Neue Räume"), newest, t("Create the first room for your group.", "Erstelle den ersten Raum für deinen Freundeskreis."), context),
+        collection(t("New rooms", "Neue Räume"), newest, t("Create the first room for your group.", "Erstelle den ersten Raum für deinen Freundeskreis."), context, next),
         collection(t("Your favorites", "Deine Favoriten"), favorites, t("Star rooms to see them here.", "Markiere Räume mit einem Stern, damit sie hier erscheinen."), context),
         collection(t("Recently opened", "Zuletzt geöffnet"), recent, t("Find the rooms you opened recently.", "Hier findest du die Räume wieder, die du zuletzt geöffnet hast."), context)),
       renderHomeActivity(context)));

@@ -6,6 +6,7 @@ const betweenPages = 1200;
 const idleDelay = 15000;
 const firstRetry = 3000;
 const maxRetry = 60000;
+const maxQueuedRepairs = 240;
 
 export function startHistorySharing(signal, accountId) {
   if (signal.aborted || !accountId) return;
@@ -15,6 +16,7 @@ export function startHistorySharing(signal, accountId) {
   let running = false;
   let sessionChanged = false;
   let retryDelay = firstRetry;
+  const failedKeys = new Map();
 
   function schedule(delay) {
     clearTimeout(timer);
@@ -22,6 +24,7 @@ export function startHistorySharing(signal, accountId) {
   }
 
   async function sharePage() {
+    if (failedKeys.size) return reportFailedKeys();
     const query = new URLSearchParams({ limit: String(batchSize) });
     if (cursor !== null) query.set("cursor", cursor);
     const { job, nextCursor, grantorId } = await api("history/pending?" + query, { signal });
@@ -67,6 +70,22 @@ export function startHistorySharing(signal, accountId) {
     return betweenPages;
   }
 
+  async function reportFailedKeys() {
+    const channelId = failedKeys.values().next().value.channelId;
+    const batch = [...failedKeys.entries()].filter(([, entry]) => entry.channelId === channelId).slice(0, batchSize);
+    const rejections = batch.map(([, { messageId, revision }]) => ({ messageId, revision }));
+    try {
+      await api("channels/" + identifier(channelId) + "/history-rejections", {
+        method: "POST", signal, body: { recipientId: accountId, rejections },
+      });
+    } catch (error) {
+      if (error.status === 409) sessionChanged = true;
+      else if (![403, 404].includes(error.status)) throw error;
+    }
+    for (const [key, entry] of batch) if (failedKeys.get(key) === entry) failedKeys.delete(key);
+    return betweenPages;
+  }
+
   async function run() {
     if (running || signal.aborted || sessionChanged || navigator.onLine === false) return;
     running = true;
@@ -76,7 +95,7 @@ export function startHistorySharing(signal, accountId) {
           lock && !signal.aborted ? sharePage() : firstRetry)
         : await sharePage();
       retryDelay = firstRetry;
-      schedule(delay);
+      schedule(failedKeys.size ? Math.min(delay, betweenPages) : delay);
     } catch (error) {
       if (!signal.aborted && error.status !== 401) {
         schedule(retryDelay);
@@ -89,5 +108,13 @@ export function startHistorySharing(signal, accountId) {
 
   signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
   window.addEventListener("online", () => schedule(0), { signal });
+  ClubCrypto.onHistoryKeyFailure?.(entry => {
+    if (entry.recipientId !== accountId || signal.aborted || sessionChanged) return;
+    const key = entry.channelId + "/" + entry.messageId;
+    const previous = failedKeys.get(key);
+    if (previous ? previous.revision >= entry.revision : failedKeys.size >= maxQueuedRepairs) return;
+    failedKeys.set(key, entry);
+    if (!running) schedule(200);
+  }, signal);
   run();
 }

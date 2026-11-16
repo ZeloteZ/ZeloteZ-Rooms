@@ -1,5 +1,5 @@
 import { t } from "./i18n.js";
-import { api, button, copyField, el, field, form, identifier, localizedTime, notify, personRow, select, status, tell } from "./ui.js";
+import { api, button, closeDialog, copyField, el, field, form, identifier, localizedTime, notify, personRow, select, showDialog, status, tell } from "./ui.js";
 
 const relationships = {
   friend: ["Friend", "Befreundet"],
@@ -128,6 +128,65 @@ function inviteState(invite) {
   return "active";
 }
 
+function accountPanel(signal) {
+  const title = t("Accounts", "Konten");
+  const list = peopleList(title);
+  const feedback = status();
+  let cursor;
+  const more = button(t("Load more", "Mehr laden"), load);
+  const node = el("section", { class: "panel people-panel", hidden: true }, el("h2", {}, title), list, feedback, more);
+
+  function row(account) {
+    function confirm(label, explanation, body) {
+      showDialog(label, form([
+        el("p", {}, account.displayName + " · @" + account.username),
+        el("p", { class: "muted" }, explanation),
+        button(t("Cancel", "Abbrechen"), closeDialog, { class: "ghost" }),
+      ], label, async () => {
+        const { account: next } = await api("admin/accounts/" + identifier(account.id), { method: "PATCH", body, signal });
+        if (signal.aborted) return;
+        closeDialog();
+        entry.replaceWith(row(next));
+        notify(t("Account updated.", "Konto aktualisiert."));
+      }));
+    }
+    const disable = t("Suspend account", "Konto sperren");
+    const enable = t("Reactivate", "Wieder freigeben");
+    const revoke = t("End sessions", "Sitzungen beenden");
+    const controls = account.admin ? [] : [
+      button(account.disabled ? enable : disable, () => account.disabled
+        ? confirm(enable, t("This lets the person sign in again.", "Die Person kann sich wieder anmelden."), { disabled: false })
+        : confirm(disable, t("This blocks sign-in and ends all sessions and live broadcasts for this account.",
+          "Das sperrt die Anmeldung und beendet alle Sitzungen und Übertragungen dieses Kontos."), { disabled: true }),
+      { class: account.disabled ? "" : "danger" }),
+      !account.disabled && button(revoke, () => confirm(revoke, t("This signs this person out everywhere and ends their broadcasts.",
+        "Die Person wird überall abgemeldet, und ihre Übertragungen werden beendet."), { revokeSessions: true })),
+    ];
+    const detail = account.admin ? t("Site operator", "Betreiber") : account.disabled ? t("Suspended", "Gesperrt") : "";
+    const entry = personRow(account, controls.filter(Boolean), detail);
+    return entry;
+  }
+
+  async function load() {
+    if (more.disabled || cursor === null) return;
+    more.disabled = true;
+    tell(feedback, "");
+    try {
+      const { accounts, next } = await api("admin/accounts" + (cursor ? "?after=" + encodeURIComponent(cursor) : ""), { signal });
+      signal.throwIfAborted();
+      list.append(...accounts.map(row));
+      cursor = next ?? null;
+      more.hidden = cursor === null;
+    } catch (error) {
+      if (!signal.aborted) tell(feedback, error.message, "error");
+    } finally {
+      more.disabled = false;
+    }
+  }
+
+  return { node, initialize: () => { if (cursor === undefined) void load(); } };
+}
+
 export async function renderAdmin({ signal }) {
   const initial = await api("admin/invites", { signal });
   const invites = peopleList(t("Created invites", "Erstellte Einladungen"));
@@ -168,9 +227,8 @@ export async function renderAdmin({ signal }) {
   }
 
   populate(initial.invites ?? []);
-  return el("div", { class: "secondary-page invitations-page" },
-    el("div", { class: "page-heading" }, el("h1", {}, t("Invites", "Einladungen"))),
-    el("div", { class: "secondary-panels invite-panels" },
+  const accounts = accountPanel(signal);
+  const invitationView = el("div", { class: "secondary-panels invite-panels" },
       el("section", { class: "panel people-panel invite-create" },
         el("h2", {}, t("New invite link", "Neuer Einladungslink")),
         el("p", { class: "muted" }, t("Each link creates one account and expires automatically.", "Jeder Link erlaubt genau eine Kontoerstellung und läuft automatisch ab.")),
@@ -190,5 +248,19 @@ export async function renderAdmin({ signal }) {
           await updateList();
         }),
         invitationPanel),
-      el("section", { class: "panel people-panel invite-list" }, el("h2", {}, t("Created invites", "Erstellte Einladungen")), invites)));
+      el("section", { class: "panel people-panel invite-list" }, el("h2", {}, t("Created invites", "Erstellte Einladungen")), invites));
+  const title = el("h1", {}, t("Invites", "Einladungen"));
+  const inviteButton = button(t("Invites", "Einladungen"), () => switchView(false), { "aria-pressed": "true" });
+  const accountButton = button(t("Accounts", "Konten"), () => switchView(true), { "aria-pressed": "false" });
+  function switchView(showAccounts) {
+    title.textContent = showAccounts ? accountButton.textContent : inviteButton.textContent;
+    invitationView.hidden = showAccounts;
+    accounts.node.hidden = !showAccounts;
+    inviteButton.setAttribute("aria-pressed", String(!showAccounts));
+    accountButton.setAttribute("aria-pressed", String(showAccounts));
+    if (showAccounts) accounts.initialize();
+  }
+  return el("div", { class: "secondary-page invitations-page" },
+    el("div", { class: "page-heading" }, title, el("div", { class: "inline", role: "group", "aria-label": t("Site administration", "Website-Verwaltung") }, inviteButton, accountButton)),
+    invitationView, accounts.node);
 }

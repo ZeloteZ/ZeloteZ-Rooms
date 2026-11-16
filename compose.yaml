@@ -19,6 +19,14 @@ services:
       start_period: 5s
       start_interval: 1s
     read_only: true
+    cpus: "1.0"
+    mem_limit: 256m
+    pids_limit: 128
+    logging: &bounded-logs
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "3"
     tmpfs:
       - /tmp:mode=1777
     cap_drop: [ALL]
@@ -32,11 +40,15 @@ services:
       APP_DATA_DIR: /data
       MEDIAMTX_API_URL: http://mediamtx:9997
       MEDIAMTX_WEBRTC_URL: http://mediamtx:8889
+      AUTH_HOST: rooms-media-auth
       STREAM_INGEST_BASE: ${STREAM_INGEST_BASE:-}
       TRUST_PROXY_IP: '1'
     volumes:
       - community:/data
-    networks: [web, control]
+    networks:
+      web: {}
+      control:
+        aliases: [rooms-media-auth]
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -45,12 +57,16 @@ services:
       start_period: 5s
       start_interval: 1s
     read_only: true
+    cpus: "2.0"
+    mem_limit: 1024m
+    pids_limit: 128
+    logging: *bounded-logs
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
 
   mediamtx:
-    image: bluenviron/mediamtx:1.21.4-ffmpeg
+    image: bluenviron/mediamtx:1.21.4-ffmpeg@sha256:1fa0abbefb6f181bf0da075c65a75505ee43bb9996e4a4b5fd30a4ab7dea01e6
     depends_on:
       server:
         condition: service_healthy
@@ -77,6 +93,10 @@ services:
           create_host_path: false
     networks: [playback, control]
     read_only: true
+    cpus: "4.0"
+    mem_limit: 2048m
+    pids_limit: 256
+    logging: *bounded-logs
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped

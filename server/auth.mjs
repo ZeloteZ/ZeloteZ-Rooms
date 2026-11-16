@@ -7,6 +7,8 @@ const secondsPerHour = 3600
 const sessionLifetime = 7 * 24 * secondsPerHour
 const defaultInviteHours = 48
 const maxInviteHours = 168
+const accountsPerPage = 100
+const accountsRestricted = 'Nur der Betreiber kann Konten verwalten.'
 const hashVersion = 'scrypt-v1'
 const scryptOptions = { N: 2 ** 16, r: 8, p: 2, maxmem: 96 * 1024 ** 2 }
 const scryptAsync = promisify(scrypt)
@@ -38,6 +40,11 @@ export function initializeAuthSchema(db) {
     ) STRICT;
 
     CREATE UNIQUE INDEX IF NOT EXISTS users_single_site_admin ON users (admin) WHERE admin = 1;
+
+    CREATE TABLE IF NOT EXISTS disabled_accounts (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      disabled_at INTEGER NOT NULL
+    ) STRICT;
 
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash BLOB PRIMARY KEY,
@@ -150,6 +157,18 @@ function toUser(row) {
   }
 }
 
+function accountSummary(row) {
+  return { id: row.id, username: row.username, displayName: row.display_name, disabled: row.disabled === 1, admin: row.admin === 1 }
+}
+
+function assertExpectedAccount(req, user) {
+  const expected = req.headers['x-rooms-account']
+  if (expected === undefined || !user || expected === user.id) return
+  const error = new RequestError(409, 'Das angemeldete Konto hat sich geändert.')
+  error.code = 'ROOMS_ACCOUNT_CHANGED'
+  throw error
+}
+
 function requestAddress(req, trustProxyIp) {
   const forwarded = req.headers['x-real-ip']
   const address = trustProxyIp && isIP(forwarded) ? forwarded : req.socket.remoteAddress
@@ -170,6 +189,7 @@ function requestAddress(req, trustProxyIp) {
 
 function attemptLimit(maxAttempts, windowSeconds) {
   const attempts = new Map()
+  const maxTrackedClients = 4096
   let cleanupAt = 0
   return key => {
     const now = unixTime()
@@ -181,6 +201,7 @@ function attemptLimit(maxAttempts, windowSeconds) {
     }
     let entry = attempts.get(key)
     if (!entry || entry.expires <= now) {
+      if (!entry && attempts.size >= maxTrackedClients) return windowSeconds
       entry = { count: 0, expires: now + windowSeconds }
       attempts.set(key, entry)
     }
@@ -190,7 +211,7 @@ function attemptLimit(maxAttempts, windowSeconds) {
   }
 }
 
-export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor = () => ({}) }) {
+export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor = () => ({}), revokeBroadcasts = () => {} }) {
   initializeAuthSchema(db)
   const present = user => user && { ...user, ...profileFor(user.id) }
   const secure = new URL(publicOrigin).protocol === 'https:'
@@ -199,14 +220,23 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
   const selectSession = db.prepare(`
     SELECT u.id, u.username, u.display_name, u.admin, u.public_key, u.identity
     FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token_hash = ? AND s.expires_at > ?
+    WHERE s.token_hash = ? AND s.expires_at > ? AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = u.id)
   `)
-  const activeSession = db.prepare('SELECT 1 FROM sessions WHERE token_hash = ? AND user_id = ? AND expires_at > ?')
+  const activeSession = db.prepare(`SELECT 1 FROM sessions s WHERE token_hash = ? AND user_id = ? AND expires_at > ?
+    AND NOT EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = s.user_id)`)
   const selectLogin = db.prepare(`
     SELECT id, username, display_name, password_hash, admin, public_key, identity
     FROM users WHERE username = ?
   `)
   const deleteSession = db.prepare('DELETE FROM sessions WHERE token_hash = ?')
+  const deleteAccountSessions = db.prepare('DELETE FROM sessions WHERE user_id = ?')
+  const accountDisabled = db.prepare('SELECT 1 FROM disabled_accounts WHERE user_id = ?')
+  const disableAccount = db.prepare('INSERT OR IGNORE INTO disabled_accounts (user_id, disabled_at) VALUES (?, ?)')
+  const enableAccount = db.prepare('DELETE FROM disabled_accounts WHERE user_id = ?')
+  const accountStatus = `SELECT u.id, u.username, u.display_name, u.admin,
+    EXISTS (SELECT 1 FROM disabled_accounts d WHERE d.user_id = u.id) AS disabled FROM users u`
+  const listAccounts = db.prepare(`${accountStatus} WHERE u.username > ? ORDER BY u.username LIMIT ?`)
+  const findAccount = db.prepare(`${accountStatus} WHERE u.id = ?`)
   const pruneSessions = db.prepare('DELETE FROM sessions WHERE expires_at <= ?')
   const limitSessions = db.prepare(`
     DELETE FROM sessions WHERE token_hash IN (
@@ -224,12 +254,13 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const usernameExists = db.prepare('SELECT 1 FROM users WHERE username = ?')
-  const authAttempts = attemptLimit(80, 60)
   const loginAttempts = attemptLimit(16, 60)
+  const loginWork = attemptLimit(80, 60)
   const nameAttempts = attemptLimit(8, 120)
   const inviteAttempts = attemptLimit(10, 60)
+  const registrationWork = attemptLimit(24, 60)
   const adminAttempts = attemptLimit(24, 60)
-  let activeHashes = 0
+  const hashingClients = new Set()
 
   function sessionToken(req) {
     const cookies = req.headers.cookie?.split(';') ?? []
@@ -261,16 +292,18 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
   function requireSession(req) {
     const user = session(req)
     if (!user) throw new RequestError(401, 'Bitte melde dich an.')
+    assertExpectedAccount(req, user)
     return user
   }
 
-  function requireAdmin(req) {
+  function requireAdmin(req, message = 'Nur der Betreiber kann Einladungen verwalten.') {
     const user = requireSession(req)
-    if (!user.admin) throw new RequestError(403, 'Nur der Betreiber kann Einladungen verwalten.')
+    if (!user.admin) throw new RequestError(403, message)
     return user
   }
 
   function startSession(req, userId) {
+    if (accountDisabled.get(userId)) throw invalidLogin()
     const previousToken = sessionToken(req)
     const token = randomToken()
     const now = unixTime()
@@ -281,13 +314,16 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     return `${cookieName}=${token}; ${cookieFlags}; Max-Age=${sessionLifetime}`
   }
 
-  async function passwordKey(credential, salt) {
-    if (activeHashes >= 2) throw new RequestError(503, 'Die Anmeldung ist gerade ausgelastet. Versuche es gleich erneut.')
-    activeHashes++
+  async function passwordKey(credential, salt, ip, workBudget, res) {
+    if (hashingClients.size >= 2 || hashingClients.has(ip)) {
+      throw new RequestError(503, 'Die Anmeldung ist gerade ausgelastet. Versuche es gleich erneut.')
+    }
+    if (rejectLimited(res, workBudget('global'))) return null
+    hashingClients.add(ip)
     try {
       return await scryptAsync(Buffer.from(credential, 'base64url'), salt, 32, scryptOptions)
     } finally {
-      activeHashes--
+      hashingClients.delete(ip)
     }
   }
 
@@ -297,12 +333,16 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     return true
   }
 
+  function invalidLogin() {
+    return new RequestError(401, 'Benutzername oder Passwort stimmt nicht.')
+  }
+
   async function login(req, res) {
     const ip = requestAddress(req, trustProxyIp)
-    if (rejectLimited(res, authAttempts('global') || loginAttempts(ip))) return
+    if (rejectLimited(res, loginAttempts(ip))) return
     const body = await readJson(req, 4096)
     const username = normalizeUsername(body?.username)
-    if (!username || !base64url(body?.password, 43)) throw new RequestError(401, 'Benutzername oder Passwort stimmt nicht.')
+    if (!username || !base64url(body?.password, 43)) throw invalidLogin()
     if (rejectLimited(res, nameAttempts(`${ip}/${username}`))) return
 
     const row = selectLogin.get(username)
@@ -312,8 +352,9 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     }
     const salt = Buffer.from(encodedSalt, 'base64url')
     const expected = Buffer.from(encodedExpected, 'base64url')
-    const actual = await passwordKey(body.password, salt)
-    if (!timingSafeEqual(actual, expected) || !row) throw new RequestError(401, 'Benutzername oder Passwort stimmt nicht.')
+    const actual = await passwordKey(body.password, salt, ip, loginWork, res)
+    if (!actual) return
+    if (!timingSafeEqual(actual, expected) || !row) throw invalidLogin()
 
     const cookie = transaction(db, () => startSession(req, row.id))
     json(res, 200, { user: present(toUser(row)) }, { 'Set-Cookie': cookie })
@@ -321,7 +362,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
 
   async function register(req, res) {
     const ip = requestAddress(req, trustProxyIp)
-    if (rejectLimited(res, authAttempts('global') || inviteAttempts(ip))) return
+    if (rejectLimited(res, inviteAttempts(ip))) return
     const body = await readJson(req, 4096)
     const username = normalizeUsername(body?.username)
     const name = displayName(body?.displayName)
@@ -338,7 +379,8 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     if (!publicKey || !identity) throw new RequestError(400, 'Der Schlüssel für den verschlüsselten Chat ist ungültig.')
 
     const salt = randomBytes(16)
-    const key = await passwordKey(body.password, salt)
+    const key = await passwordKey(body.password, salt, ip, registrationWork, res)
+    if (!key) return
     const passwordHash = [hashVersion, salt.toString('base64url'), key.toString('base64url')].join('$')
     const result = transaction(db, () => {
       const invite = redeemableInvite.get(inviteHash, unixTime())
@@ -357,7 +399,9 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
 
   async function handle(req, res, pathname) {
     if (pathname === '/api/auth/session' && req.method === 'GET') {
-      json(res, 200, { user: present(session(req)) })
+      const user = session(req)
+      assertExpectedAccount(req, user)
+      json(res, 200, { user: present(user) })
       return true
     }
     if (pathname === '/api/auth/login' && req.method === 'POST') {
@@ -372,9 +416,53 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     }
     if (pathname === '/api/auth/logout' && req.method === 'POST') {
       assertOrigin(req, publicOrigin)
+      const user = session(req)
+      assertExpectedAccount(req, user)
+      if (!user && req.headers['x-rooms-account'] !== undefined) {
+        // A stale tab must not erase a new cookie set by a different sign-in.
+        json(res, 200, { ok: true })
+        return true
+      }
       const token = sessionToken(req)
       if (token) deleteSession.run(digest(token))
       json(res, 200, { ok: true }, { 'Set-Cookie': `${cookieName}=; ${cookieFlags}; Max-Age=0` })
+      return true
+    }
+    if (pathname === '/api/admin/accounts' && req.method === 'GET') {
+      requireAdmin(req, accountsRestricted)
+      const cursor = new URL(req.url, publicOrigin).searchParams.get('after')
+      const after = cursor === null ? '' : normalizeUsername(cursor)
+      if (after === null) throw new RequestError(400, 'Ungültige Auswahl.')
+      const rows = listAccounts.all(after, accountsPerPage + 1)
+      const accounts = rows.slice(0, accountsPerPage).map(accountSummary)
+      const next = rows.length > accountsPerPage ? accounts.at(-1).username : null
+      json(res, 200, { accounts, next })
+      return true
+    }
+    const accountPath = /^\/api\/admin\/accounts\/([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/u.exec(pathname)
+    if (accountPath && req.method === 'PATCH') {
+      assertOrigin(req, publicOrigin)
+      const admin = requireAdmin(req, accountsRestricted)
+      if (rejectLimited(res, adminAttempts(admin.id))) return true
+      const body = await readJson(req, 1024)
+      if (Object.keys(body).length !== 1 || (typeof body.disabled !== 'boolean' && body.revokeSessions !== true)) {
+        throw new RequestError(400, 'Ungültige Auswahl.')
+      }
+      const id = accountPath[1]
+      const account = transaction(db, () => {
+        requireAdmin(req, accountsRestricted)
+        const row = findAccount.get(id)
+        if (!row) throw new RequestError(404, 'Nicht gefunden.')
+        if (row.admin) throw new RequestError(403, 'Das Betreiberkonto ist geschützt.')
+        if (body.disabled === true) disableAccount.run(id, unixTime())
+        if (body.disabled === false) enableAccount.run(id)
+        if (body.disabled === true || body.revokeSessions === true) {
+          deleteAccountSessions.run(id)
+          revokeBroadcasts(id)
+        }
+        return accountSummary(findAccount.get(id))
+      })
+      json(res, 200, { account })
       return true
     }
     if (pathname === '/api/admin/invites' && req.method === 'GET') {
@@ -395,7 +483,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       if (!Number.isInteger(hours) || hours < 1 || hours > maxInviteHours) {
         throw new RequestError(400, `Eine Einladung kann zwischen 1 und ${maxInviteHours} Stunden gültig sein.`)
       }
-      json(res, 201, { invite: issueInvite(db, publicOrigin, hours, admin.id, false) })
+      json(res, 201, { invite: issueInvite(db, publicOrigin, hours, requireAdmin(req).id, false) })
       return true
     }
     const invitePath = /^\/api\/admin\/invites\/([a-f0-9-]{36})$/.exec(pathname)

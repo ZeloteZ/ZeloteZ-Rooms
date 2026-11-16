@@ -1,4 +1,4 @@
-import { api, button, el, field, identifier, notify, personMark, personName, sameId, select, status, tell, topicHref } from "./ui.js";
+import { api, button, checkAccountResponse, el, field, identifier, notify, personMark, personName, sameId, select, status, tell, topicHref } from "./ui.js";
 import { language, t } from "./i18n.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
@@ -167,11 +167,11 @@ export function createLivePlayer(context, dock) {
     fetch("/api/streams/" + identifier(streamId) + "/viewers", {
       method, credentials: "same-origin", cache: "no-store", redirect: "error",
       referrer: location.origin + "/", referrerPolicy: "same-origin",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Rooms-Account": user.id },
       body: JSON.stringify({ userId: user.id, playerId: viewerPlayerId, revision: ++viewerRevision }),
       keepalive: leaving,
       signal: leaving ? undefined : AbortSignal.timeout(6000),
-    }).catch(() => { /* A lost heartbeat expires automatically. */ });
+    }).then(checkAccountResponse).catch(() => { /* A lost heartbeat expires automatically. */ });
   }
 
   function releaseViewer() {

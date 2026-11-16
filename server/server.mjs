@@ -29,7 +29,8 @@ const db = new DatabaseSync(join(dataDir, 'community.sqlite'), { timeout: 5000 }
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 67108864')
 const appearance = createAppearance(db)
 const profileFor = appearance.profile
-const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile })
+const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile,
+  revokeBroadcasts: userId => streams.revokeUser(userId) })
 const { requireSession } = auth
 const recordMentions = input => notifications.recordMentions(input)
 const community = createCommunity(db, { requireSession, appearance, recordMentions })
@@ -62,7 +63,8 @@ function service(handler) {
         if (response.headersSent) return response.destroy()
         if (error instanceof RequestError) {
           const headers = request.complete ? {} : { Connection: 'close' }
-          json(response, error.status, { error: error.message }, headers)
+          if (error.code === 'ROOMS_ACCOUNT_CHANGED') headers['X-Rooms-Error'] = 'account-changed'
+          json(response, error.status, { error: error.message, ...(headers['X-Rooms-Error'] && { code: error.code }) }, headers)
         } else {
           console.error('Request failed', error.code ?? error.name)
           json(response, 500, { error: 'Die Anfrage konnte nicht verarbeitet werden.' })
@@ -111,7 +113,7 @@ const host = process.env.HOST ?? '0.0.0.0'
 const apiPort = Number(process.env.PORT ?? 8080)
 const mediaPort = Number(process.env.AUTH_PORT ?? 8081)
 publicApi.listen(apiPort, host)
-privateApi.listen(mediaPort, host)
+privateApi.listen(mediaPort, process.env.AUTH_HOST ?? host)
 
 let stopping = false
 function shutdown() {

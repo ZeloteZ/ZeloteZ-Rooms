@@ -1,3 +1,5 @@
+import { accountHeaders, checkAccountResponse } from "./ui.js";
+
 const idPattern = /^[a-f0-9]{32}$/u;
 const leasePattern = /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/u;
 
@@ -5,10 +7,10 @@ function request(path, method, body, timeout = 6000) {
   return fetch(path, {
     method, body, credentials: "same-origin", cache: "no-store", redirect: "error",
     referrer: location.origin + "/", referrerPolicy: "same-origin",
-    headers: body === undefined ? undefined : { "Content-Type": "application/sdp", Accept: "application/sdp" },
+    headers: { ...accountHeaders(), ...(body === undefined ? {} : { "Content-Type": "application/sdp", Accept: "application/sdp" }) },
     signal: AbortSignal.timeout(timeout),
     keepalive: method === "DELETE",
-  });
+  }).then(checkAccountResponse);
 }
 
 function iceComplete(peer, signal) {

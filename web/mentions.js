@@ -30,7 +30,6 @@ export function createMentionDirectory({ signal, channelId, streamId, scope }) {
   let entries = new Map();
   let pending;
   let completedAt = 0;
-  let timer;
 
   function paint(token) {
     const { mentionKey: key, mentionKind: kind, mentionFallback: fallback } = token.dataset;
@@ -54,31 +53,38 @@ export function createMentionDirectory({ signal, channelId, streamId, scope }) {
     events.dispatchEvent(new Event("change"));
   }
 
-  function refresh(force = false) {
-    if (signal?.aborted) return Promise.resolve();
-    if (pending) return pending;
-    if (!force && Date.now() - completedAt < refreshInterval) return Promise.resolve();
-    clearTimeout(timer);
-    pending = api(endpoint, { signal }).then(({ suggestions }) => {
+  async function readDirectory() {
+    const collected = new Map();
+    const loadedCursors = new Set();
+    let cursor;
+    do {
+      const { suggestions, next } = await api(endpoint + (cursor ? "&after=" + encodeURIComponent(cursor) : ""), { signal });
       if (signal?.aborted) return;
-      entries = new Map();
       for (const suggestion of Array.isArray(suggestions) ? suggestions : []) {
         if (!suggestion || typeof suggestion !== "object") continue;
         const { kind, id, label, roomId, detail } = suggestion;
         if (!kinds.has(kind) || !validId(id) || typeof label !== "string" || !label.trim()) continue;
         if (kind === "channel" && !validId(roomId)) continue;
-        const roomRoute = kind === "room" ? topicHref(id) : kind === "channel" ? topicHref(roomId, id) : null;
-        const href = roomRoute;
-        entries.set(mentionKey(kind, id), { kind, id, label, detail: typeof detail === "string" ? detail : "", href });
+        const href = kind === "room" ? topicHref(id) : kind === "channel" ? topicHref(roomId, id) : null;
+        collected.set(mentionKey(kind, id), { kind, id, label, detail: typeof detail === "string" ? detail : "", href });
       }
-    }).catch(() => {
+      cursor = typeof next === "string" && !loadedCursors.has(next) ? next : null;
+      if (cursor) loadedCursors.add(cursor);
+    } while (cursor);
+    entries = collected;
+  }
+
+  function refresh(force = false) {
+    if (signal?.aborted) return Promise.resolve();
+    if (pending) return pending;
+    if (!force && Date.now() - completedAt < refreshInterval) return Promise.resolve();
+    pending = readDirectory().catch(() => {
       if (!signal?.aborted) entries = new Map();
     }).finally(() => {
       pending = undefined;
       completedAt = Date.now();
       if (signal?.aborted) return;
       update();
-      timer = setTimeout(() => refresh(true), refreshInterval);
     });
     return pending;
   }
@@ -108,7 +114,6 @@ export function createMentionDirectory({ signal, channelId, streamId, scope }) {
     return token;
   }
 
-  signal?.addEventListener("abort", () => clearTimeout(timer), { once: true });
   return {
     refresh,
     tokenFor,

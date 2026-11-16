@@ -224,6 +224,7 @@ function installNativeCapture(web, program, origin, media, allowed) {
   web.on("did-start-navigation", details => {
     if (details.isMainFrame && !details.isSameDocument) close(state);
   });
+  web.on("render-process-gone", () => close(state));
   web.once("destroyed", () => {
     close(state);
     sessions.delete(id);

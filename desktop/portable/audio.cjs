@@ -139,12 +139,14 @@ function installAudio(web, allowed, choose) {
   const id = web.id;
   const session = { allowed, choose, approvedUntil: 0, recording: null };
   if (process.platform === "linux") sessions.set(id, session);
+  function revoke() {
+    session.approvedUntil = 0;
+    dispose(session);
+  }
   web.on("did-start-navigation", details => {
-    if (details.isMainFrame && !details.isSameDocument) {
-      session.approvedUntil = 0;
-      dispose(session);
-    }
+    if (details.isMainFrame && !details.isSameDocument) revoke();
   });
+  web.on("render-process-gone", revoke);
   web.once("destroyed", () => {
     dispose(session);
     sessions.delete(id);

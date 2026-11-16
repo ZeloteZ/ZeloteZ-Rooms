@@ -10,6 +10,7 @@ window.ClubCrypto = (() => {
   const cacheName = `${suite}/vault`;
   const pinnedKeys = new Map();
   const reactionKeys = new WeakMap();
+  const failedHistoryKeys = new EventTarget();
   let active = null;
 
   function base64(bytes) {
@@ -154,22 +155,49 @@ window.ClubCrypto = (() => {
     const identity = active;
     if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
     const pub = publicPoint(recipient.publicKey);
-    pin(recipient.id, pub);
-    const pair = await subtle.generateKey(curve, true, ["deriveBits"]);
-    const ephemeral = publicPoint(await subtle.exportKey("jwk", pair.publicKey));
     const link = aad("history recipient", channelId, entry.id, recipient.id, identity.id);
-    const wrap = await recipientKey(pair.privateKey, pub, link);
     const source = entry.grantorId ? aad("history recipient", channelId, entry.id, identity.id, entry.grantorId)
       : aad("recipient", channelId, entry.id, identity.id);
-    const rawKey = await unwrapMessageKey(identity.key, entry.ephemeral, source, entry);
+    let rawKey;
     try {
+      try {
+        rawKey = await unwrapMessageKey(identity.key, entry.ephemeral, source, entry);
+        await verifyHistoryKey(channelId, entry, rawKey);
+      } catch (error) {
+        reportHistoryFailure(identity, channelId, entry.id, entry.grantRevision, error);
+        throw error;
+      }
+      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+      pin(recipient.id, pub);
+      const pair = await subtle.generateKey(curve, true, ["deriveBits"]);
+      const ephemeral = publicPoint(await subtle.exportKey("jwk", pair.publicKey));
+      const wrap = await recipientKey(pair.privateKey, pub, link);
       const iv = nonce();
       const blob = await subtle.encrypt(aead(iv, link), wrap, rawKey);
       if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
       return { v: 1, ephemeral, nonce: base64(iv), blob: base64(blob) };
     } finally {
-      rawKey.fill(0);
+      rawKey?.fill(0);
     }
+  }
+
+  async function verifyHistoryKey(scope, entry, rawKey) {
+    const plain = new Uint8Array(await subtle.decrypt(aead(binary(entry.messageNonce), aad("message", scope, entry.id)),
+      await aesKey(rawKey), binary(entry.messageBody)));
+    plain.fill(0);
+  }
+
+  function onHistoryKeyFailure(listener, signal) {
+    failedHistoryKeys.addEventListener("failure", event => listener(event.detail), { signal });
+  }
+
+  function reportHistoryFailure(identity, scope, messageId, revision, error) {
+    if (active !== identity || !Number.isSafeInteger(revision) || revision < 1 ||
+        (error.name !== "OperationError" && error.name !== "DataError")) return;
+    const channelId = scope.endsWith("/deletion") ? scope.slice(0, -"/deletion".length) : scope;
+    failedHistoryKeys.dispatchEvent(new CustomEvent("failure", {
+      detail: { channelId, messageId, revision, recipientId: identity.id },
+    }));
   }
 
   async function openMessage(channelId, messageId, envelope) {
@@ -181,8 +209,9 @@ window.ClubCrypto = (() => {
     if (envelope.v !== 1 || (!original && grant.v !== 1)) throw new Error(errorText("Unknown message format.", "Unbekanntes Nachrichtenformat."));
     const link = original ? aad("recipient", channelId, messageId, identity.id)
       : aad("history recipient", channelId, messageId, identity.id, grant.grantorId);
-    const rawKey = await unwrapMessageKey(identity.key, original ? envelope.ephemeral : grant.ephemeral, link, original ?? grant);
+    let rawKey;
     try {
+      rawKey = await unwrapMessageKey(identity.key, original ? envelope.ephemeral : grant.ephemeral, link, original ?? grant);
       const [key, reactionKey] = await Promise.all([
         aesKey(rawKey), subtle.importKey("raw", rawKey, "HKDF", false, ["deriveKey"]),
       ]);
@@ -190,8 +219,11 @@ window.ClubCrypto = (() => {
       if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
       reactionKeys.set(key, reactionKey);
       return { content: JSON.parse(decoder.decode(content)), key };
+    } catch (error) {
+      if (!original) reportHistoryFailure(identity, channelId, messageId, grant.revision, error);
+      throw error;
     } finally {
-      rawKey.fill(0);
+      rawKey?.fill(0);
     }
   }
 
@@ -235,5 +267,5 @@ window.ClubCrypto = (() => {
   }
 
   return { prepareRegistration, credential, unlock, lock, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
-    sealReaction, openReaction, deletionScope };
+    sealReaction, openReaction, deletionScope, onHistoryKeyFailure };
 })();

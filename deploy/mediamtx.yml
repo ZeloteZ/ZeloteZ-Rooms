@@ -2,7 +2,7 @@ logLevel: info
 logDestinations: [stdout]
 
 authMethod: http
-authHTTPAddress: http://server:8081/internal/media-auth
+authHTTPAddress: http://rooms-media-auth:8081/internal/media-auth
 authHTTPExclude: []
 
 api: true
@@ -44,6 +44,7 @@ paths:
   '~^browser/([a-f0-9]{32})$':
     source: publisher
     overridePublisher: false
+    maxReaders: 24
     record: false
     # Preserve the H.264 video and convert an optional Opus track for Apple HLS players.
     runOnOnline: >-
@@ -55,10 +56,12 @@ paths:
   '~^live/[a-f0-9]{32}$':
     source: publisher
     overridePublisher: false
+    maxReaders: 24
     record: false
   '~^rtc/([a-f0-9]{32})$':
     source: publisher
     overridePublisher: false
+    maxReaders: 24
     record: false
     # The native RTMPS feed uses AAC. Convert audio only when a WebRTC player requests it.
     runOnDemand: >-
