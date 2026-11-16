@@ -68,6 +68,7 @@ button:disabled { opacity: .55; cursor: default; }
 .origin { overflow-wrap: anywhere; }
 .address-card { padding: 14px; }
 .tray-note { color: var(--muted); padding: 14px; }
+.tray-option { display: flex; align-items: center; gap: 9px; margin-top: 13px; cursor: pointer; }
 .status { margin: 9px 0 0; color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
 .success { color: var(--success); }
 .error { color: var(--danger); margin: 9px 0 0; }

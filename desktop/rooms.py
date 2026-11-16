@@ -24,6 +24,7 @@ from i18n import t
 from instance import InstanceVerificationError, has_rooms_page_headers, verify_instance
 from model import STREAM_ID, capture_reservation, reservation_id, server_origin
 from notifications import DesktopNotifications
+from playback import CONTAINERS, LocalPlayback
 
 
 CHANNEL_ID = re.compile(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
@@ -37,6 +38,7 @@ THEMES = ("dark", "system", "light")
 THEME_LABELS = ("Dark", "System", "Light")
 COLOR_SCHEMES = (Adw.ColorScheme.FORCE_DARK, Adw.ColorScheme.DEFAULT, Adw.ColorScheme.FORCE_LIGHT)
 LANGUAGES = ("system", *(key for key, _label in i18n.LANGUAGES))
+SOFTWARE_VIDEO_SETTING = "software-video-output"
 NOTIFICATION_KINDS = ("mention", "friend-request", "direct-message", "live")
 NOTIFICATION_ID = re.compile(r"[a-zA-Z0-9:_-]{1,128}")
 NOTIFICATION_PATH = re.compile(rf"#/(?:direct/{CHANNEL_ID.pattern}|rooms/{CHANNEL_ID.pattern}/{CHANNEL_ID.pattern})")
@@ -267,12 +269,14 @@ class RoomsWindow(Adw.ApplicationWindow):
         self.verifying = False
         self.preferences = None
         self.permission_dialog = None
+        self.local_playback = LocalPlayback(self._alert)
+        self.software_video_output = app.software_video_output
         self.notification_targets = {}
         self.notification_times = deque()
         self.notification_presenter = DesktopNotifications(app, self._open_notification)
         self.desktop_notifications = i18n.read_setting("desktop-notifications", "true") != "false"
         self.minimize_on_close = i18n.read_setting("minimize-on-close", "true") != "false"
-        self.minimize_hint_seen = i18n.read_setting("minimize-hint", "") == "seen"
+        self.skip_minimize_confirmation = i18n.read_setting("skip-minimize-confirmation", "false") == "true"
         self.minimize_hint = None
         self.theme = i18n.read_setting("appearance", "dark")
         if self.theme not in THEMES:
@@ -357,6 +361,8 @@ class RoomsWindow(Adw.ApplicationWindow):
         desktop.add(language)
         notifications = Adw.SwitchRow(active=self.desktop_notifications)
         desktop.add(notifications)
+        video_output = Adw.SwitchRow(active=self.software_video_output)
+        desktop.add(video_output)
         close_behavior = Adw.SwitchRow(active=self.minimize_on_close)
         desktop.add(close_behavior)
         quit_row = Adw.ActionRow(activatable=True, action_name="app.quit")
@@ -390,6 +396,8 @@ class RoomsWindow(Adw.ApplicationWindow):
                 language.set_selected(LANGUAGES.index(self.language_choice))
                 notifications.set_title(t("Desktop notifications"))
                 notifications.set_subtitle(t("Show system notifications for activity in Rooms."))
+                video_output.set_title(t("Software video output"))
+                video_output.set_subtitle(t("Use software video output for chat videos and streams. Applies after restarting ZeloteZ Rooms."))
                 server.set_title(t("Your Rooms instance"))
                 close_behavior.set_title(t("Minimize when closing"))
                 close_behavior.set_subtitle(t("Keep ZeloteZ Rooms running in the taskbar when you close the window."))
@@ -440,6 +448,13 @@ class RoomsWindow(Adw.ApplicationWindow):
             except OSError:
                 controls.show_status("The desktop settings couldn’t be saved.")
 
+        def changed_video_output(row, _property):
+            self.software_video_output = row.get_active()
+            try:
+                i18n.save_setting(SOFTWARE_VIDEO_SETTING, "true" if self.software_video_output else "false")
+            except OSError:
+                controls.show_status("The desktop settings couldn’t be saved.")
+
         def closed(_window):
             controls.active = False
             self.preferences = None
@@ -448,6 +463,7 @@ class RoomsWindow(Adw.ApplicationWindow):
         appearance.connect("notify::selected", changed_theme)
         language.connect("notify::selected", changed_language)
         notifications.connect("notify::active", changed_notifications)
+        video_output.connect("notify::active", changed_video_output)
         close_behavior.connect("notify::active", changed_close_behavior)
         window.connect("close-request", closed)
         translate()
@@ -489,6 +505,7 @@ class RoomsWindow(Adw.ApplicationWindow):
                 self._remember_server()
             return
         self._close_capture()
+        self.local_playback.stop()
         self._clear_notifications()
         self.pending_remember = remember
         self.web_ready = False
@@ -511,7 +528,9 @@ class RoomsWindow(Adw.ApplicationWindow):
         time = WebKit.UserScriptInjectionTime.START
         # A same-document relay preserves the web API without exposing the native handler to page frames.
         guard = "if (location.origin !== " + json.dumps(self.origin) + ") return;"
-        public = f"(() => {{ {guard} {BRIDGE_PUBLIC} }})();"
+        capability = ("Object.defineProperty(window, 'roomsNativeMedia', { value: true });"
+                      if self.local_playback.ffplay else "")
+        public = f"(() => {{ {guard} {BRIDGE_PUBLIC} {capability} }})();"
         private = f"(() => {{ {guard} {BRIDGE_PRIVATE} }})();"
         manager.add_script(WebKit.UserScript.new_for_world(private, frames, time, BRIDGE_WORLD))
         manager.add_script(WebKit.UserScript.new(public, frames, time))
@@ -559,13 +578,18 @@ class RoomsWindow(Adw.ApplicationWindow):
             if kind == WebKit.PolicyDecisionType.NAVIGATION_ACTION and self.is_app_page(uri):
                 return False
             if self.web_ready and action.is_user_gesture():
-                blob_id = uri.removeprefix("blob:" + self.origin + "/")
+                blob, play_marker, format = uri.partition("#rooms-play-")
+                blob_id = blob.removeprefix("blob:" + self.origin + "/")
                 if (kind == WebKit.PolicyDecisionType.NAVIGATION_ACTION
                         and action.get_navigation_type() == WebKit.NavigationType.LINK_CLICKED
                         and self.is_app_page(view.get_uri())
-                        and blob_id != uri and CHANNEL_ID.fullmatch(blob_id)):
-                    # Chat attachments are decrypted to same-origin blobs and downloaded explicitly.
-                    decision.download()
+                        and blob_id != blob and CHANNEL_ID.fullmatch(blob_id)):
+                    if play_marker:
+                        decision.ignore()
+                        if format in CONTAINERS:
+                            self.local_playback.play(view, blob, format)
+                    else:
+                        decision.download()
                     return True
                 try:
                     url = urlsplit(uri)
@@ -581,6 +605,7 @@ class RoomsWindow(Adw.ApplicationWindow):
         if view != self.web:
             return
         if event == WebKit.LoadEvent.STARTED:
+            self.local_playback.stop()
             self.web_ready = False
             self.page_approved = False
             self.page_rejected = False
@@ -616,6 +641,9 @@ class RoomsWindow(Adw.ApplicationWindow):
         return True
 
     def _download_started(self, _network, download):
+        if self.local_playback.handle_download(download):
+            return
+
         def choose(current, filename):
             dialog = Gtk.FileChooserNative.new(t("Save attachment"), self, Gtk.FileChooserAction.SAVE, t("Save"), t("Cancel"))
             dialog.set_current_name(Path(filename).name)
@@ -647,6 +675,7 @@ class RoomsWindow(Adw.ApplicationWindow):
         self.page_rejected = True
         self.pending_remember = False
         self._close_capture()
+        self.local_playback.stop()
         if self.setup.address.get_text() != self.origin:
             self.setup.address.set_text(self.origin)
         self.setup.show_status(message)
@@ -671,6 +700,7 @@ class RoomsWindow(Adw.ApplicationWindow):
         action = data.get("action")
         if action == "session-ended":
             self._close_capture()
+            self.local_playback.stop()
             self._clear_notifications()
             return
         if action == "notification":
@@ -769,34 +799,43 @@ class RoomsWindow(Adw.ApplicationWindow):
     def prepare_quit(self):
         self.closing = True
         self._close_capture()
+        self.local_playback.stop()
         self._clear_notifications()
 
     def _move_to_background(self):
         if self.minimize_hint is not None:
             self.minimize_hint.present()
             return
-        if self.minimize_hint_seen:
+        if self.skip_minimize_confirmation:
             self.minimize()
             return
-        self.minimize_hint_seen = True
-        try:
-            i18n.save_setting("minimize-hint", "seen")
-        except OSError:
-            pass
         hint = Adw.MessageDialog.new(
-            self, t("Keep ZeloteZ Rooms running?"),
-            t("Open it from the taskbar. To quit, use Desktop settings or Ctrl+Q."),
+            self, t("ZeloteZ Rooms will keep running"),
+            t("Choose OK to minimize the app. You can reopen it from the taskbar."),
         )
         self.minimize_hint = hint
-        hint.add_response("cancel", t("Cancel"))
-        hint.add_response("minimize", t("Minimize"))
+        skip_again = Gtk.CheckButton(label=t("Don’t show this again"))
+        hint.set_extra_child(skip_again)
+        hint.add_response("quit", t("Quit completely"))
+        hint.add_response("minimize", "OK")
         hint.set_default_response("minimize")
-        hint.set_close_response("cancel")
+        hint.set_close_response("dismiss")
+        hint.set_response_appearance("quit", Adw.ResponseAppearance.DESTRUCTIVE)
         hint.set_response_appearance("minimize", Adw.ResponseAppearance.SUGGESTED)
 
         def answered(_dialog, action):
             self.minimize_hint = None
-            if action == "minimize" and not self.closing:
+            if self.closing or action not in ("minimize", "quit"):
+                return
+            if skip_again.get_active():
+                self.skip_minimize_confirmation = True
+                try:
+                    i18n.save_setting("skip-minimize-confirmation", "true")
+                except OSError:
+                    pass
+            if action == "quit":
+                self.get_application().activate_action("quit", None)
+            else:
                 self.minimize()
 
         hint.connect("response", answered)
@@ -812,7 +851,11 @@ class RoomsWindow(Adw.ApplicationWindow):
 
 class RoomsApp(Adw.Application):
     def __init__(self):
+        software_video_output = i18n.read_setting(SOFTWARE_VIDEO_SETTING, "false") == "true"
+        if software_video_output:
+            os.environ["WEBKIT_GST_DISABLE_GL_SINK"] = "1"
         super().__init__(application_id="de.zelotez.Rooms")
+        self.software_video_output = software_video_output
         self.window = None
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", self._quit_requested)

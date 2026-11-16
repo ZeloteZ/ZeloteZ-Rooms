@@ -24,9 +24,8 @@ let connection = 0;
 let connecting = false;
 let backgrounding = false;
 let quitting = false;
-let trayHintShown = false;
 let currentOrigin = "";
-let desktopSettings = { language: "system", appearance: "dark", notifications: true, keepRunning: true, trayHintSeen: false, origin: "" };
+let desktopSettings = { language: "system", appearance: "dark", notifications: true, keepRunning: true, suppressCloseHint: false, origin: "" };
 let settingsWrites = Promise.resolve();
 let german = false;
 let captureProgram;
@@ -69,7 +68,7 @@ async function loadSettings() {
     for (const [name, values] of Object.entries(preferenceOptions)) {
       if (values.includes(saved?.[name])) desktopSettings[name] = saved[name];
     }
-    desktopSettings.trayHintSeen = saved?.trayHintSeen === true;
+    desktopSettings.suppressCloseHint = saved?.suppressCloseHint === true;
     desktopSettings.origin = serverOrigin(saved?.origin) ?? "";
   } catch { /* First launch or unreadable settings. */ }
 }
@@ -105,7 +104,7 @@ function localWindow(mode, state, parent) {
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#15151b" : "#f6f5fb",
     title,
     width: settings ? 570 : mode === "tray-hint" ? 450 : 745,
-    height: settings ? (state.currentOrigin ? 560 : 395) : mode === "tray-hint" ? 340 : 590,
+    height: settings ? (state.currentOrigin ? 560 : 395) : mode === "tray-hint" ? 365 : 590,
     minWidth: 340, minHeight: 310,
     webPreferences: {
       preload: path.join(__dirname, "local-preload.cjs"), sandbox: true, contextIsolation: true,
@@ -137,8 +136,16 @@ ipcMain.handle("rooms:local-state", event => localSender(event)?.state ?? null);
 ipcMain.handle("rooms:local-cancel", event => localSender(event)?.window.close());
 ipcMain.handle("rooms:local-submit", (event, input) => {
   const local = localSender(event);
-  if (!local || local.state.mode === "settings" || !Number.isInteger(input) || input < 0 || input >= local.state.sources.length) return false;
+  if (!local?.state.sources || !Number.isInteger(input) || input < 0 || input >= local.state.sources.length) return false;
   local.selection = input;
+  local.window.close();
+  return true;
+});
+
+ipcMain.handle("rooms:local-close-action", (event, action, suppress) => {
+  const local = localSender(event);
+  if (local?.state.mode !== "tray-hint" || (action !== "minimize" && action !== "quit") || typeof suppress !== "boolean") return false;
+  local.closeChoice = { action, suppress };
   local.window.close();
   return true;
 });
@@ -286,21 +293,31 @@ function configureTray() {
   }
 }
 
+function confirmClose(window, hasTray) {
+  const local = localWindow("tray-hint", { hasTray }, window);
+  return new Promise(resolve => {
+    local.window.once("closed", () => resolve(local.closeChoice));
+  });
+}
+
 async function moveToBackground(window) {
   if (backgrounding) return;
   backgrounding = true;
   try {
     if (!tray) updateTray();
-    await trayInitializing;
-    const hasTray = await trayUsable(tray);
+    await trayInitializing?.catch(() => {});
+    const hasTray = await trayUsable(tray).catch(() => false);
     if (quitting || window !== roomsWindow || !desktopSettings.keepRunning) return;
-    if (!desktopSettings.trayHintSeen && !trayHintShown) {
-      trayHintShown = true;
-      const { result } = choose(window, "tray-hint", [true], { sources: [true], hasTray });
-      saveSettings({ trayHintSeen: true }).catch(() => {});
-      if (!await result) return;
+    if (!desktopSettings.suppressCloseHint) {
+      const choice = await confirmClose(window, hasTray);
+      if (!choice || quitting || window !== roomsWindow) return;
+      if (choice.suppress) await saveSettings({ suppressCloseHint: true }).catch(() => {});
+      if (choice.action === "quit") {
+        app.quit();
+        return;
+      }
     }
-    const canHide = hasTray && await trayUsable(tray);
+    const canHide = hasTray && await trayUsable(tray).catch(() => false);
     if (quitting || window !== roomsWindow || !desktopSettings.keepRunning) return;
     if (canHide) {
       settingsWindow?.close();
@@ -412,6 +429,7 @@ function prepareRoomsWindow(origin) {
   });
   const contents = window.webContents;
   let documentVerified = false;
+  let closing = false;
   const isActive = () => roomsWindow === window && documentVerified && !window.isDestroyed() && !contents.isDestroyed();
   const navigation = { urls: ["<all_urls>"], types: ["mainFrame", "subFrame"] };
   const allowed = details => details.resourceType === "mainFrame" && details.webContentsId === contents.id
@@ -437,12 +455,16 @@ function prepareRoomsWindow(origin) {
     if (external && isActive() && isRoomsPage(contents.getURL(), origin)) shell.openExternal(external.href).catch(() => {});
     return { action: "deny" };
   });
+  contents.on("will-prevent-unload", event => {
+    if (quitting || closing) event.preventDefault();
+  });
   window.on("close", event => {
-    if (window !== roomsWindow || quitting || !desktopSettings.keepRunning) return;
+    if (window !== roomsWindow || quitting || !desktopSettings.keepRunning) {
+      closing = true;
+      return;
+    }
     event.preventDefault();
-    moveToBackground(window).catch(() => {
-      if (window === roomsWindow && !window.isDestroyed() && !quitting) window.minimize();
-    });
+    moveToBackground(window).catch(() => {});
   });
   window.on("closed", () => {
     if (roomsWindow === window) {

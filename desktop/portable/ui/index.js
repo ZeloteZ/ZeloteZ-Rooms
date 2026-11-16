@@ -180,16 +180,21 @@ async function setup() {
   const t = (en, de) => state.language === "de" ? de : en;
   document.documentElement.lang = state.language;
   if (state.mode === "tray-hint") {
-    control("heading").textContent = t("Rooms stays open in the background", "Rooms bleibt im Hintergrund geöffnet");
-    control("description").textContent = t("Closing the window keeps your calls and streams running.", "Beim Schließen des Fensters laufen deine Anrufe und Streams weiter.");
+    control("heading").textContent = t("Minimize ZeloteZ Rooms?", "ZeloteZ Rooms minimieren?");
+    control("description").textContent = t("Rooms stays open in the background so calls and streams can continue.", "Rooms bleibt im Hintergrund geöffnet. Anrufe und Streams laufen weiter.");
     control("tray-note").textContent = state.hasTray
-      ? t("Use the Rooms icon in the system tray to reopen the window or quit. You can change this in Desktop settings.", "Über das Rooms-Symbol im Infobereich kannst du das Fenster wieder öffnen oder die App beenden. Das Verhalten kannst du in den Desktop-Einstellungen ändern.")
-      : t("Rooms will minimize to the taskbar. To quit, use the ZeloteZ Rooms menu. You can change this in Desktop settings.", "Rooms wird in die Taskleiste minimiert. Zum Beenden nutze das Menü ZeloteZ Rooms. Das Verhalten kannst du in den Desktop-Einstellungen ändern.");
-    control("tray-cancel").textContent = t("Cancel", "Abbrechen");
-    control("tray-cancel").addEventListener("click", () => bridge.cancel());
+      ? t("Use the Rooms icon in the system tray to reopen the window.", "Über das Rooms-Symbol im Infobereich öffnest du das Fenster wieder.")
+      : t("Use the taskbar to reopen the window.", "Über die Taskleiste öffnest du das Fenster wieder.");
+    control("tray-suppress-label").textContent = t("Don’t show again", "Nicht wieder anzeigen");
+    const quit = control("tray-quit");
     const confirm = control("tray-confirm");
-    confirm.textContent = t("Keep running", "Weiterlaufen lassen");
-    confirm.addEventListener("click", () => bridge.submit(0));
+    quit.textContent = t("Quit completely", "Ganz schließen");
+    confirm.textContent = "OK";
+    function selectAction(action) {
+      bridge.closeAction(action, control("tray-suppress").checked);
+    }
+    quit.addEventListener("click", () => selectAction("quit"));
+    confirm.addEventListener("click", () => selectAction("minimize"));
     document.addEventListener("keydown", event => { if (event.key === "Escape") bridge.cancel(); });
     control("tray-hint").hidden = false;
     confirm.focus();

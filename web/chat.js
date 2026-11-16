@@ -114,6 +114,9 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
       if (signal.aborted) return;
       const preview = isImage && (!automatic || canPreviewChatImage(file.type, bytes));
       url = URL.createObjectURL(new Blob([bytes], { type: isImage || isVideo || isAudio ? file.type : "application/octet-stream" }));
+      const localPlayback = isVideo && window.roomsNativeMedia === true && el("a", {
+        href: url + "#rooms-play-" + file.type.slice("video/".length), class: "button", hidden: true,
+      }, t("Play video locally", "Video lokal abspielen"));
       const open = event => {
         closePreview = openChatImage(url, name, event.currentTarget);
       };
@@ -123,8 +126,16 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
         const player = media;
         player.addEventListener("error", () => {
           if (media !== player || signal.aborted) return;
-          tell(feedback, t("Playback failed on this device. You can download the file and open it in a media player.",
-            "Die Wiedergabe auf diesem Gerät ist fehlgeschlagen. Du kannst die Datei herunterladen und in einem Mediaplayer öffnen."), "error");
+          const error = localPlayback
+            ? t("The built-in video player reported an error.", "Beim eingebauten Videoplayer ist ein Fehler aufgetreten.")
+            : t("Playback failed on this device. You can download the file and open it in a media player.",
+              "Die Wiedergabe auf diesem Gerät ist fehlgeschlagen. Du kannst die Datei herunterladen und in einem Mediaplayer öffnen.");
+          const code = player.error?.code;
+          tell(feedback, Number.isInteger(code) ? error + " " + t("(Media error {code})", "(Medienfehler {code})", { code }) : error, "error");
+          if (localPlayback) {
+            player.hidden = true;
+            localPlayback.hidden = false;
+          }
         }, { once: true, signal });
         player.src = url;
       }
@@ -133,6 +144,7 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
         "aria-label": t("Enlarge {name}", "{name} vergrößern", { name }) });
       tell(feedback, "");
       view.replaceChildren(image || media || el("p", { class: "subtle" }, t("File decrypted", "Datei entschlüsselt")), feedback,
+        ...(localPlayback ? [localPlayback] : []),
         el("a", { class: "attachment", href: url, download: name }, t("Download file · {name}", "Datei herunterladen · {name}", { name })));
       retain(attachment, bytes.byteLength);
     } catch (error) {
