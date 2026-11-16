@@ -72,13 +72,70 @@ function favoriteControl(topic, context, card = false) {
 
 function topicCard(topic, context) {
   const tone = Array.from(String(topic.id)).reduce((sum, char) => sum + char.codePointAt(0), 0) % 5;
-  const nav = el("a", { class: "topic-link", href: topicHref(topic.id), title: topic.title },
+  const nav = el("a", { class: "topic-link", href: topicHref(topic.id), title: topic.title, draggable: "false" },
     el("strong", {}, topic.title),
     el("span", {}, topic.invited && !topic.joined ? t("Invited", "Einladung erhalten") : topic.joined ? roleNames[topic.role] || t("Member", "Mitglied") : t("Join", "Beitreten")));
   const card = el("article", { class: "topic-card", "data-tone": tone },
     nav, tag(topic), topic.joined && favoriteControl(topic, context, true));
   applyTopicCover(card, topic.appearance);
   return card;
+}
+
+function enableShelfScrolling(shelf, grid, signal) {
+  let pointer;
+  let dragged = false;
+
+  shelf.addEventListener("wheel", event => {
+    if (event.ctrlKey || event.metaKey || !event.cancelable || event.defaultPrevented) return;
+    const unit = event.deltaMode;
+    const vertical = Math.abs(event.deltaY) > Math.abs(event.deltaX);
+    // Let browsers handle horizontal trackpad gestures inside the scrollport.
+    if (!vertical && grid.contains(event.target)) return;
+    const delta = (vertical ? event.deltaY : event.deltaX) *
+      (unit === 1 ? 16 : unit === 2 ? grid.clientWidth : 1);
+    const left = grid.scrollLeft;
+    const next = Math.max(0, Math.min(grid.scrollWidth - grid.clientWidth, left + delta));
+    if (!delta || (delta > 0 ? next <= left : next >= left)) return;
+    event.preventDefault();
+    grid.scrollLeft = next;
+  }, { passive: false, signal });
+
+  shelf.addEventListener("pointerdown", event => {
+    dragged = false;
+    if (event.pointerType !== "mouse" || event.button !== 0 || !event.isPrimary ||
+        event.ctrlKey || event.metaKey || event.shiftKey || event.altKey ||
+        !shelf.hasAttribute("data-scrollable")) return;
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, left: grid.scrollLeft };
+  }, { signal });
+
+  function finishDrag(event) {
+    if (!pointer || (event.pointerId !== undefined && event.pointerId !== pointer.id)) return;
+    pointer = undefined;
+    shelf.removeAttribute("data-dragging");
+  }
+
+  window.addEventListener("pointermove", event => {
+    if (pointer?.id !== event.pointerId) return;
+    if (!(event.buttons & 1)) return finishDrag(event);
+    const distance = event.clientX - pointer.x;
+    if (!dragged) {
+      if (Math.hypot(distance, event.clientY - pointer.y) < 6) return;
+      dragged = true;
+      shelf.setPointerCapture(event.pointerId);
+      shelf.setAttribute("data-dragging", "");
+    }
+    grid.scrollLeft = pointer.left - distance;
+  }, { signal });
+  window.addEventListener("pointerup", finishDrag, { signal });
+  window.addEventListener("pointercancel", finishDrag, { signal });
+  window.addEventListener("blur", finishDrag, { signal });
+  shelf.addEventListener("lostpointercapture", finishDrag, { signal });
+  shelf.addEventListener("click", event => {
+    if (!dragged || event.detail === 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    dragged = false;
+  }, { capture: true, signal });
 }
 
 function collection(title, topics, empty, context, nextPage = null) {
@@ -91,42 +148,50 @@ function collection(title, topics, empty, context, nextPage = null) {
   function atEnd() {
     return grid.scrollWidth - grid.clientWidth - grid.scrollLeft < 2;
   }
-  async function turn(direction) {
-    if (loading) return;
-    if (direction > 0 && atEnd() && nextPage) {
-      loading = true;
+  async function loadNextPage() {
+    if (loading || !nextPage) return false;
+    loading = true;
+    updateControls();
+    try {
+      const page = await api("topics?before=" + encodeURIComponent(nextPage), { signal: context.signal });
+      if (context.signal.aborted) return false;
+      nextPage = page.next ?? null;
+      grid.append(...page.topics.map(topic => topicCard(topic, context)));
+      return true;
+    } catch (error) {
+      if (!context.signal.aborted) notify(error.message);
+      return false;
+    } finally {
+      loading = false;
       updateControls();
-      try {
-        const page = await api("topics?before=" + encodeURIComponent(nextPage), { signal: context.signal });
-        if (context.signal.aborted) return;
-        nextPage = page.next ?? null;
-        grid.append(...page.topics.map(topic => topicCard(topic, context)));
-      } catch (error) {
-        if (!context.signal.aborted) notify(error.message);
-        return;
-      } finally {
-        loading = false;
-        updateControls();
-      }
     }
+  }
+  async function turn(direction) {
+    if (loading || (direction > 0 && atEnd() && nextPage && !await loadNextPage())) return;
     grid.scrollBy({ left: direction * grid.clientWidth,
       behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   }
   const back = button("‹", () => turn(-1), { "aria-label": t("Previous in “{title}”", "In „{title}“ zurückblättern", { title }), class: "icon-button" });
   const forward = button("›", () => turn(1), { "aria-label": t("Next in “{title}”", "In „{title}“ weiterblättern", { title }), class: "icon-button" });
   const controls = el("div", { class: "shelf-controls", hidden: true }, back, forward);
+  const shelf = el("section", { class: "home-shelf" },
+    el("div", { class: "shelf-heading" }, heading, controls), grid);
   function updateControls() {
-    const extent = grid.scrollWidth - grid.clientWidth;
-    controls.hidden = extent < 2 && !nextPage;
+    const scrollable = grid.scrollWidth - grid.clientWidth >= 2;
+    shelf.toggleAttribute("data-scrollable", scrollable);
+    controls.hidden = !scrollable && !nextPage;
     back.disabled = grid.scrollLeft < 2;
     forward.disabled = loading || (atEnd() && !nextPage);
   }
   const resize = new ResizeObserver(updateControls);
   resize.observe(grid);
-  grid.addEventListener("scroll", updateControls, { passive: true, signal: context.signal });
+  grid.addEventListener("scroll", () => {
+    updateControls();
+    if (grid.scrollLeft > 0 && atEnd()) void loadNextPage();
+  }, { passive: true, signal: context.signal });
   context.signal.addEventListener("abort", () => resize.disconnect(), { once: true });
-  return el("section", { class: "home-shelf" },
-    el("div", { class: "shelf-heading" }, heading, controls), grid);
+  enableShelfScrolling(shelf, grid, context.signal);
+  return shelf;
 }
 
 function greeting(name) {
