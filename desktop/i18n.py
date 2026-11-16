@@ -1,0 +1,181 @@
+import os
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+APP_NAME = "ZeloteZ Rooms"
+LANGUAGES = (("en", "English"), ("de", "Deutsch"))
+DEFAULT_LANGUAGE = "en"
+
+# English strings are the message IDs. Add a catalog and a language entry when a translation is ready.
+CATALOGS = {
+    "de": {
+        "Server settings": "Servereinstellungen",
+        "Connect to your server": "Mit deinem Server verbinden",
+        "Connect": "Verbinden",
+        "Back": "Zurück",
+        "Enter an HTTPS server address or a local test URL.": "Gib eine HTTPS-Serveradresse oder eine lokale Testadresse ein.",
+        "The server address couldn’t be saved.": "Die Serveradresse konnte nicht gespeichert werden.",
+        "The server redirected to a different address.": "Der Server hat zu einer anderen Adresse weitergeleitet.",
+        "Sign in to ZeloteZ Rooms again.": "Melde dich erneut bei ZeloteZ Rooms an.",
+        "The live channel couldn’t prepare the stream.": "Der Live-Kanal konnte den Stream nicht vorbereiten.",
+        "The live channel returned an invalid stream destination.": "Der Live-Kanal hat ein ungültiges Stream-Ziel geliefert.",
+        "The live channel didn’t respond. Try again.": "Der Live-Kanal antwortet nicht. Versuch es erneut.",
+        "End your stream in the other live channel before sharing here.": "Beende deinen Stream im anderen Live-Kanal, bevor du hier teilst.",
+        "Allow microphone access?": "Mikrofonzugriff erlauben?",
+        "The microphone is used for voice chat.": "Das Mikrofon wird für den Sprachchat verwendet.",
+        "Allow": "Erlauben",
+        "Save attachment": "Anhang speichern",
+        "Save": "Speichern",
+        "The link couldn’t open in your browser.": "Der Link konnte nicht im Browser geöffnet werden.",
+        "Couldn’t connect to the server. Check the address and try again.": "Keine Verbindung zum Server. Prüfe die Adresse und versuch es erneut.",
+        "Monitor": "Monitor",
+        "Live": "Live",
+        "Offline": "Offline",
+        "Upload": "Upload",
+        "{rate} FPS": "{rate} FPS",
+        "Choose a monitor": "Monitor auswählen",
+        "Preview your capture here before going live.": "Hier siehst du deine Aufnahme vor dem Start.",
+        "Preview hidden. Your stream is still running.": "Vorschau ausgeblendet. Die Übertragung läuft weiter.",
+        "Capture source": "Bildschirmquelle",
+        "Region": "Bereich",
+        "App window": "Anwendung",
+        "Video quality": "Videoqualität",
+        "_Resolution": "_Auflösung",
+        "_Frame rate": "_Bildrate",
+        "Start stream": "Stream starten",
+        "Close preview": "Vorschau schließen",
+        "Include this app’s audio": "Ton dieser Anwendung übertragen",
+        "Choose an audio source": "Tonquelle auswählen",
+        "Audio source for the window you’re sharing": "Tonquelle der gezeigten Anwendung",
+        "Refresh audio sources": "Tonquellen aktualisieren",
+        "Looking for active audio sources …": "Laufende Tonausgaben werden gesucht …",
+        "Select the audio output of the app whose window you’re sharing.": "Wähle die Tonausgabe der Anwendung, deren Fenster du teilst.",
+        "Play some audio in the app and refresh the list.": "Starte die Tonwiedergabe in der Anwendung und aktualisiere die Liste.",
+        "Hide preview": "Vorschau ausblenden",
+        "End stream": "Stream beenden",
+        "Time live": "Sendedauer",
+        "Resolution": "Auflösung",
+        "Frame rate": "Bildrate",
+        "Manual connection": "Manuelle Verbindung",
+        "RTMPS address": "RTMPS-Adresse",
+        "_Server address": "_Serveradresse",
+        "Stream _key": "Stream-_Schlüssel",
+        "Show preview": "Vorschau einblenden",
+        "Choose another window": "Anderes Fenster wählen",
+        "Choose a window": "Fenster auswählen",
+        "Choose another monitor": "Anderen Monitor wählen",
+        "Viewers and chat": "Zuschauer und Chat",
+        "Live room": "Live-Raum",
+        "Live preview": "Live-Vorschau",
+        "Capture preview": "Bildschirmvorschau",
+        "Cancel": "Abbrechen",
+        "Selecting source": "Auswahl",
+        "Loading preview": "Vorschau wird geladen",
+        "Preview": "Vorschau",
+        "Connecting": "Verbinden",
+        "Screen sharing": "Bildschirmfreigabe",
+        "Drag a rectangle in the preview.": "Ziehe ein Rechteck in der Vorschau.",
+        "The screen sharing portal is unavailable.": "Das Bildschirmfreigabe-Portal ist nicht erreichbar.",
+        "Screen sharing was canceled.": "Die Bildschirmfreigabe wurde abgebrochen.",
+        "PipeWire couldn’t open a capture connection.": "PipeWire hat keine Verbindung für die Aufnahme geöffnet.",
+        "Screen sharing couldn’t start.": "Die Bildschirmfreigabe konnte nicht geöffnet werden.",
+        "Screen sharing ended.": "Die Bildschirmfreigabe wurde beendet.",
+        "Checking the selected audio source.": "Die ausgewählte Tonquelle wird geprüft.",
+        "The selected app isn’t playing audio right now.": "Die ausgewählte Anwendung liefert gerade keinen Ton.",
+        "Preparing the stream in the live room.": "Der Stream wird im Live-Raum vorbereitet.",
+        "Choose a live room in Studio.": "Wähle einen Live-Raum in Studio.",
+        "The live room didn’t provide a stream.": "Der Live-Raum hat keinen Stream bereitgestellt.",
+        "The capture source changed size. Check your selection.": "Die Größe der Aufnahme hat sich geändert. Prüfe deine Auswahl.",
+        "Connecting to the streaming server.": "Verbindung zum Streamingserver wird aufgebaut.",
+        "Video output couldn’t start.": "Der Videoausgang konnte nicht gestartet werden.",
+        "The selected audio source is unavailable. Choose it again or stream without audio.": "Die ausgewählte Tonquelle ist nicht mehr verfügbar. Wähle sie erneut oder streame ohne Ton.",
+        "Connection failed. Check the server address, TLS certificate and stream key.": "Verbindung fehlgeschlagen. Prüfe Serveradresse, TLS-Zertifikat und Stream-Schlüssel.",
+        "Capture was interrupted. Choose the source again.": "Die Bildschirmaufnahme wurde unterbrochen. Wähle die Quelle erneut.",
+        "Capture ended.": "Die Bildschirmaufnahme wurde beendet.",
+        "The selected source didn’t provide a preview. Choose it again.": "Die gewählte Quelle liefert keine Vorschau. Wähle sie erneut.",
+        "The live room didn’t respond. Try again.": "Der Live-Raum antwortet gerade nicht. Versuche es erneut.",
+        "The streaming server didn’t confirm the connection in time.": "Der Streamingserver hat die Verbindung nicht rechtzeitig bestätigt.",
+        "Stream ended.": "Stream beendet.",
+        "ZeloteZ Rooms Studio needs a graphical desktop session.": "ZeloteZ Rooms Studio benötigt eine laufende grafische Sitzung.",
+        "Install WebKitGTK 6 to sign in to Studio.": "Installiere WebKitGTK 6, um dich in Studio anzumelden.",
+        "ZELOTEZ_STUDIO_ORIGIN is invalid.": "ZELOTEZ_STUDIO_ORIGIN ist ungültig.",
+        "ZELOTEZ_STUDIO_ORIGIN needs an HTTPS or local test URL.": "ZELOTEZ_STUDIO_ORIGIN braucht eine HTTPS- oder lokale Testadresse.",
+        "Reload ZeloteZ Rooms": "ZeloteZ Rooms erneut laden",
+        "ZeloteZ Rooms couldn’t load in Studio.": "ZeloteZ Rooms konnte in Studio nicht geladen werden.",
+        "ZeloteZ Rooms is disconnected in Studio.": "ZeloteZ Rooms ist in Studio nicht verbunden.",
+        "ZeloteZ Rooms didn’t respond in Studio.": "ZeloteZ Rooms hat in Studio nicht geantwortet.",
+        "Couldn’t open the Room in your browser.": "Der Raum konnte nicht im Browser geöffnet werden.",
+        "Choose a live channel in Studio.": "Wähle einen Live-Channel in Studio.",
+        "ZeloteZ Rooms couldn’t prepare the stream.": "ZeloteZ Rooms konnte den Stream nicht vorbereiten.",
+        "ZeloteZ Rooms returned an invalid stream destination.": "ZeloteZ Rooms hat ein ungültiges Stream-Ziel geliefert.",
+        "Audio apps couldn’t be loaded. Check that PipeWire is running.": "Die Audio-Anwendungen konnten nicht geladen werden. Prüfe, ob PipeWire läuft.",
+        "The selected audio source is unavailable. Choose the app again.": "Die gewählte Tonquelle ist nicht mehr verfügbar. Wähle die Anwendung erneut.",
+        "The capture preview couldn’t start.": "Die Bildschirmvorschau konnte nicht gestartet werden.",
+        "A stream is already active.": "Ein Stream ist bereits aktiv.",
+        "The capture source hasn’t provided a frame yet.": "Die Freigabe liefert noch kein Bild.",
+        "The selected region is outside the shared area.": "Der gewählte Bereich liegt außerhalb der freigegebenen Fläche.",
+        "This PipeWire version can’t isolate audio from an app.": "Diese PipeWire-Version kann Anwendungston nicht gezielt aufnehmen.",
+        "Video output couldn’t be added.": "Der Videoausgang konnte nicht hinzugefügt werden.",
+        "Video output couldn’t be connected.": "Der Videoausgang konnte nicht verbunden werden.",
+        "Choose an app that is playing audio.": "Wähle eine laufende Anwendung für den Ton aus.",
+        "App audio needs a GStreamer AAC encoder.": "Für Anwendungston fehlt ein GStreamer-AAC-Encoder.",
+        "Enter the server address without extra parameters.": "Gib die Serveradresse ohne Zusätze ein.",
+        "The server address is invalid.": "Die Serveradresse ist ungültig.",
+        "Copy the RTMPS address from your live channel.": "Kopiere die RTMPS-Adresse aus deinem Live-Channel.",
+        "The server name is invalid.": "Der Servername ist ungültig.",
+        "RTMP without TLS is available only for local tests on 127.0.0.1 or [::1].": "RTMP ohne TLS ist nur für lokale Tests über 127.0.0.1 oder [::1] verfügbar.",
+        "The stream key must contain 64 hexadecimal characters.": "Der Stream-Schlüssel muss aus 64 hexadezimalen Zeichen bestehen.",
+        "Language": "Sprache",
+        "Restart Studio to apply the language change.": "Starte Studio neu, um die Sprache zu ändern.",
+        "The language preference couldn’t be saved.": "Die Spracheinstellung konnte nicht gespeichert werden.",
+        "Select an app window in the system dialog.": "Wähle das Fenster der Anwendung im Dialog deines Systems.",
+        "Select a monitor in the system dialog.": "Wähle einen Monitor im Dialog deines Systems.",
+        "Choose exactly one window to capture.": "Wähle genau ein Fenster für die Aufnahme.",
+        "Choose exactly one monitor to capture.": "Wähle genau einen Monitor für die Aufnahme.",
+        "Selected region · {width} × {height} px": "Ausgewählter Bereich · {width} × {height} px",
+        "{speed} Mbps": "{speed} Mbit/s",
+        "Missing desktop dependency. {error}. See desktop/README.md.": "Desktop-Abhängigkeit fehlt. {error}. Siehe desktop/README.md.",
+        "Missing GStreamer elements. {elements}. See desktop/README.md.": "GStreamer-Elemente fehlen. {elements}. Siehe desktop/README.md.",
+        "Loading": "Vorschau lädt",
+    },
+}
+
+
+def language_path():
+    configuration = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(configuration) / "zelotez-rooms" / "language"
+
+
+def configured_language():
+    try:
+        requested = language_path().read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return DEFAULT_LANGUAGE
+    return requested if requested in dict(LANGUAGES) else DEFAULT_LANGUAGE
+
+
+def save_language(language):
+    if language not in dict(LANGUAGES):
+        raise ValueError("Unsupported language")
+    destination = language_path()
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent, delete=False) as temporary:
+        try:
+            temporary.write(language + "\n")
+            temporary.close()
+            os.replace(temporary.name, destination)
+        finally:
+            Path(temporary.name).unlink(missing_ok=True)
+
+
+LANGUAGE = configured_language()
+
+
+def t(message, **values):
+    translated = CATALOGS.get(LANGUAGE, {}).get(message, message)
+    return translated.format(**values) if values else translated
+
+
+def decimal(value, places):
+    formatted = f"{value:.{places}f}"
+    return formatted.replace(".", ",") if LANGUAGE == "de" else formatted

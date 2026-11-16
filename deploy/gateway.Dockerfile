@@ -1,0 +1,23 @@
+FROM node:24-alpine AS player
+WORKDIR /build
+COPY deploy/player.package.json package.json
+COPY deploy/player.package-lock.json package-lock.json
+RUN npm ci --ignore-scripts --no-audit --no-fund
+
+FROM nginx:1.30.6-alpine
+COPY deploy/nginx.conf /etc/nginx/nginx.conf
+COPY web/ /srv/www/
+COPY --from=player /build/node_modules/hls.js/dist/hls.min.js /srv/www/vendor/hls.min.js
+COPY --from=player /build/node_modules/hls.js/LICENSE /srv/www/vendor/hls.LICENSE
+# Move the whole module graph together so relative imports share one version.
+RUN set -eu; cd /srv/www; \
+    set -- ./*.js ./*.css ./vendor/hls.min.js; \
+    version=$(sha256sum "$@" | sha256sum | cut -c 1-32); \
+    mkdir -p "assets/$version"; \
+    mv "$@" "assets/$version/"; \
+    sed -i -E \
+      -e "s#(src|href)=\"/([A-Za-z][A-Za-z0-9_.-]*\.(css|js))\"#\1=\"/assets/$version/\2\"#g" \
+      -e "s#src=\"/vendor/hls\.min\.js\"#src=\"/assets/$version/hls.min.js\"#g" index.html
+USER 101:101
+EXPOSE 8080
+ENTRYPOINT ["nginx", "-g", "daemon off;"]

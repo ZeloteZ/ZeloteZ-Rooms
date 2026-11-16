@@ -1,0 +1,23 @@
+services:
+  gateway:
+    restart: 'no'
+  server:
+    environment:
+      PUBLIC_ORIGIN: http://127.0.0.1:${WEB_PORT:-8080}
+      STREAM_INGEST_BASE: rtmp://127.0.0.1:${DEV_INGEST_PORT:-1935}
+      TRUST_PROXY_IP: '0'
+    restart: 'no'
+  mediamtx:
+    environment:
+      MTX_RTMPENCRYPTION: 'no'
+      MTX_WEBRTCADDITIONALHOSTS: ${DEV_VOICE_ICE_HOST:-127.0.0.1}
+      MTX_WEBRTCIPSFROMINTERFACES: 'true'
+      MTX_WEBRTCLOCALUDPADDRESS: ":${DEV_VOICE_ICE_PORT:-8189}"
+      MTX_WEBRTCLOCALTCPADDRESS: ":${DEV_VOICE_ICE_PORT:-8189}"
+    ports: !override
+      - "127.0.0.1:${DEV_INGEST_PORT:-1935}:1935/tcp"
+      - "${DEV_VOICE_ICE_IP:-127.0.0.1}:${DEV_VOICE_ICE_PORT:-8189}:${DEV_VOICE_ICE_PORT:-8189}/udp"
+      - "${DEV_VOICE_ICE_IP:-127.0.0.1}:${DEV_VOICE_ICE_PORT:-8189}:${DEV_VOICE_ICE_PORT:-8189}/tcp"
+    volumes: !override
+      - ./deploy/mediamtx.yml:/mediamtx.yml:ro
+    restart: 'no'

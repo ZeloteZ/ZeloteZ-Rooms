@@ -1,0 +1,121 @@
+.topic-activity {
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.topic-activity h2 {
+  font-size: 1.06rem;
+}
+
+.activity-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(58vh, 510px);
+  overflow: auto;
+  padding: 2px;
+  margin: -2px;
+  list-style: none;
+}
+
+.activity-row {
+  min-width: 0;
+}
+
+.activity-link {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--raised);
+}
+
+.activity-link:hover {
+  border-color: var(--line-strong);
+  background: #242632;
+}
+
+.activity-link:focus-visible {
+  outline-offset: -2px;
+}
+
+.activity-channel {
+  color: var(--accent);
+  font-size: .79rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.activity-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: .85rem;
+  line-height: 1.4;
+}
+
+.activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 6px;
+  color: var(--faint);
+  font-size: .71rem;
+}
+
+.activity-author {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.home-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  margin-bottom: 24px;
+  align-items: start;
+}
+.home-activity-panel { display: grid; min-width: 0; gap: 8px; padding: 13px; border-radius: 14px; }
+.home-activity-panel h2 { padding-inline: 3px; font-size: 1.04rem; }
+.home-activity-panel .status { padding-inline: 3px; }
+.home-activity-list { display: grid; gap: 5px; max-height: 244px; overflow: auto; padding: 2px; margin: -2px; list-style: none; }
+.home-activity-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  border-radius: 10px;
+}
+.home-activity-card:hover { background: #242632; border-color: var(--line-strong); }
+.home-activity-card:focus-visible { outline-offset: -2px; }
+.home-activity-card .avatar { width: 29px; height: 29px; border-radius: 8px; }
+.home-activity-copy { display: grid; gap: 2px; min-width: 0; }
+.home-activity-location { color: var(--accent); font-size: .74rem; overflow-wrap: anywhere; }
+.home-activity-meta { color: var(--faint); font-size: .68rem; }
+.home-live-person { font-size: .85rem; font-weight: 700; overflow-wrap: anywhere; }
+.home-activity-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: .81rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 650px) {
+  .activity-list {
+    max-height: 280px;
+  }
+  .home-activity-grid { grid-template-columns: 1fr; gap: 9px; }
+}

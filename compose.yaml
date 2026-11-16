@@ -1,0 +1,91 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/gateway.Dockerfile
+    depends_on:
+      server:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080/tcp"
+    networks: [web, playback]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/health']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+      start_interval: 1s
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  server:
+    build: ./server
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://127.0.0.1:8080}
+      APP_DATA_DIR: /data
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      MEDIAMTX_WEBRTC_URL: http://mediamtx:8889
+      STREAM_INGEST_BASE: ${STREAM_INGEST_BASE:-}
+      TRUST_PROXY_IP: '1'
+    volumes:
+      - community:/data
+    networks: [web, control]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+      start_interval: 1s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.4
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "${INGEST_IP:-0.0.0.0}:${INGEST_PORT:-1936}:1936/tcp"
+      - "${VOICE_ICE_IP:-0.0.0.0}:${VOICE_ICE_PORT:-8189}:${VOICE_ICE_PORT:-8189}/udp"
+      - "${VOICE_ICE_IP:-0.0.0.0}:${VOICE_ICE_PORT:-8189}:${VOICE_ICE_PORT:-8189}/tcp"
+    environment:
+      MTX_WEBRTCADDITIONALHOSTS: ${VOICE_ICE_HOST:-127.0.0.1}
+      MTX_WEBRTCLOCALUDPADDRESS: ":${VOICE_ICE_PORT:-8189}"
+      MTX_WEBRTCLOCALTCPADDRESS: ":${VOICE_ICE_PORT:-8189}"
+    volumes:
+      - type: bind
+        source: ./deploy/mediamtx.yml
+        target: /mediamtx.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RTMPS_CERT_DIR:-./deploy/tls}
+        target: /tls
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [playback, control]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+volumes:
+  community:
+
+networks:
+  web:
+  playback:
+  control:
+    internal: true

@@ -1,0 +1,246 @@
+.avatar {
+  overflow: hidden;
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  object-fit: cover;
+}
+
+.person-name {
+  color: var(--profile-name-color, inherit);
+}
+
+.profile-name.person-name {
+  color: var(--profile-name-color, #d8daea);
+}
+
+.activity-author.person-name {
+  color: var(--profile-name-color, var(--muted));
+  font-weight: 600;
+}
+
+.activity-meta {
+  align-items: center;
+}
+
+.activity-meta .avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: .58rem;
+}
+
+.stream-heading,
+.stream-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.stream-heading > span:last-child,
+.stream-identity .person-name {
+  min-width: 0;
+}
+
+.stream-identity .avatar,
+.live-player[data-mode="mini"] .stream-heading .avatar {
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+  font-size: .68rem;
+}
+
+.message-list {
+  gap: 4px;
+}
+
+.message-row {
+  --message-avatar: 34px;
+  grid-template-columns: var(--message-avatar) minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 8px;
+  border-radius: 12px;
+}
+
+.message-row:hover {
+  background-color: #1c2030aa;
+}
+
+.message-row > .avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.message-meta .person-name {
+  font-size: .9rem;
+}
+
+.message-meta time {
+  font-variant-numeric: tabular-nums;
+}
+
+.message-row:has(> .message-delete) {
+  grid-template-columns: var(--message-avatar) minmax(0, 1fr) auto;
+}
+
+.message-delete {
+  grid-column: 3;
+  align-self: start;
+  min-height: 28px;
+  padding: 3px 6px;
+  font-size: .76rem;
+}
+
+.message-delete:hover:not(:disabled) { color: var(--danger); }
+.message-removed { color: var(--muted); overflow-wrap: anywhere; }
+
+.message-continuation {
+  padding-block: 2px;
+}
+
+.message-continuation > .avatar,
+.message-continuation .message-meta {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.message-continuation .message-body {
+  grid-column: 2;
+}
+
+.attached-file,
+.link-preview {
+  max-width: 100%;
+  padding: 10px;
+  border-radius: 11px;
+}
+
+.attached-file {
+  margin-top: 3px;
+  background: var(--raised);
+}
+
+.attached-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.attachment-details strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-preview,
+.attached-file audio {
+  max-width: 100%;
+}
+
+.message-form {
+  gap: 8px;
+}
+
+.write-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: #101116;
+}
+
+.write-row:focus-within {
+  border-color: var(--focus);
+}
+
+.write-row textarea {
+  min-height: 40px;
+  height: var(--composer-input-height, 40px);
+  max-height: 156px;
+  padding: 9px 5px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  line-height: 1.35;
+  resize: none;
+}
+
+.write-row .button {
+  min-height: 40px;
+  border-radius: 9px;
+}
+
+.composer-attach {
+  width: 40px;
+  color: var(--accent);
+}
+
+.composer-clip {
+  display: block;
+  width: 9px;
+  height: 16px;
+  border: 1.5px solid currentColor;
+  border-radius: 5px;
+  transform: rotate(36deg);
+}
+
+.composer-clip::after {
+  display: block;
+  width: 4px;
+  height: 9px;
+  margin: 1px auto;
+  border: 1px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+  content: "";
+}
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment-chip {
+  min-width: 0;
+  max-width: min(100%, 250px);
+}
+
+.attachment-chip .button {
+  flex: none;
+}
+
+.composer-shortcuts {
+  padding-inline: 2px;
+  color: var(--muted);
+  font-size: .74rem;
+}
+
+@media (max-width: 650px) {
+  .message-row {
+    --message-avatar: 29px;
+    gap: 8px;
+    padding-inline: 4px;
+  }
+
+  .message-row > .avatar {
+    width: 29px;
+    height: 29px;
+    border-radius: 8px;
+  }
+}

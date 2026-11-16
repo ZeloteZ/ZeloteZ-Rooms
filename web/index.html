@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0b0b0e">
+  <meta name="referrer" content="no-referrer">
+  <title>ZeloteZ Rooms</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/activity.css">
+  <link rel="stylesheet" href="/identity.css">
+  <link rel="stylesheet" href="/appearance.css">
+  <link rel="stylesheet" href="/voice.css">
+  <link rel="stylesheet" href="/how-it-works.css">
+  <link rel="stylesheet" href="/viewport.css">
+  <link rel="stylesheet" href="/room-layout.css">
+  <link rel="stylesheet" href="/secondary-viewport.css">
+  <link rel="stylesheet" href="/stream-chat.css">
+  <link rel="stylesheet" href="/mentions.css">
+  <link rel="stylesheet" href="/notifications.css">
+  <script src="/vendor/hls.min.js" defer></script>
+  <script src="/crypto.js" defer></script>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="site-header">
+    <div class="page-width bar">
+      <a class="wordmark" href="#/rooms" aria-label="ZeloteZ Rooms – Home">
+        <span class="brand-icon" aria-hidden="true"></span><span>ZeloteZ <span class="wordmark-detail">Rooms</span></span>
+      </a>
+      <nav id="navigation" class="navigation" aria-label="Main navigation" hidden>
+        <a href="#/rooms" data-nav="rooms">Rooms</a>
+        <a href="#/friends" data-nav="friends">Friends</a>
+        <a href="#/invites" data-nav="invites" id="admin-link" hidden>Invites</a>
+        <a href="#/help" data-nav="help">How it works</a>
+      </nav>
+      <div class="header-media">
+        <div id="player-dock" hidden></div>
+        <div id="voice-dock" hidden></div>
+        <div id="broadcast-dock" hidden></div>
+      </div>
+      <div class="profile" id="profile" hidden>
+        <button type="button" class="button profile-edit" id="profile-edit" aria-label="Edit profile" aria-haspopup="dialog" title="Edit profile">
+          <span class="avatar" id="avatar" aria-hidden="true"></span>
+          <span class="profile-name" id="profile-name"></span>
+        </button>
+        <div id="notification-dock" class="notification-dock" hidden></div>
+        <button class="button" type="button" id="logout">Sign out</button>
+      </div>
+    </div>
+  </header>
+  <main class="page-width" id="content" tabindex="-1">
+    <section id="boot" class="panel centered" role="status">
+      <p>Checking the connection …</p>
+    </section>
+    <section id="auth" class="auth-layout" hidden></section>
+    <div id="workspace" hidden></div>
+    <noscript><p class="panel">Enable JavaScript to sign in and use encrypted channels.</p></noscript>
+  </main>
+  <dialog class="dialog" id="dialog" aria-labelledby="dialog-heading">
+    <div class="dialog-body">
+      <div class="section-heading">
+        <h2 id="dialog-heading"></h2>
+        <button class="button icon-button" type="button" id="dialog-close" aria-label="Close">×</button>
+      </div>
+      <div id="dialog-content"></div>
+    </div>
+  </dialog>
+  <output id="toast" class="toast" role="status" hidden></output>
+</body>
+</html>

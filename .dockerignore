@@ -1,0 +1,8 @@
+**
+!web/
+!web/**
+!deploy/
+!deploy/gateway.Dockerfile
+!deploy/nginx.conf
+!deploy/player.package.json
+!deploy/player.package-lock.json

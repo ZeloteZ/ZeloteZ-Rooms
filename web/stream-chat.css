@@ -1,0 +1,45 @@
+.stream-audience { padding: 10px 12px; }
+.stream-audience .status { margin-block-start: 7px; }
+.stream-viewers {
+  display: grid;
+  gap: 3px;
+  max-block-size: min(14vh, 112px);
+  overflow: auto;
+  list-style: none;
+  padding: 0;
+  font-size: .86rem;
+}
+.stream-viewers li { padding: 5px 0; overflow-wrap: anywhere; border-block-end: 1px solid var(--line); }
+.stream-viewers li:last-child { border-block-end: 0; }
+
+.stream-chat {
+  display: grid;
+  grid-template-rows: auto minmax(110px, 1fr) auto auto;
+  gap: 8px;
+  min-inline-size: 0;
+  padding: 12px;
+  border-radius: 13px;
+}
+.stream-chat h2 { font-size: 1.05rem; }
+.stream-chat-scroll {
+  max-block-size: 270px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.stream-chat-log { list-style: none; padding: 0; }
+.stream-chat-log li { padding: 6px 1px; border-block-end: 1px solid var(--line); overflow-wrap: anywhere; }
+.stream-chat-log li:last-child { border-block-end: 0; }
+.stream-chat-log li p { color: #e8e8f2; font-size: .89rem; white-space: pre-wrap; }
+.stream-chat-byline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; font-size: .82rem; }
+.stream-chat-byline time { color: var(--faint); font-size: .68rem; }
+.stream-chat-byline .stream-chat-delete {
+  min-block-size: 25px;
+  margin-inline-start: auto;
+  padding: 2px 5px;
+  font-size: .72rem;
+}
+.stream-chat-log .stream-chat-tombstone p { color: var(--muted); font-size: .82rem; }
+.stream-chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.stream-chat-form input { min-block-size: 36px; font-size: .85rem; }
+.stream-chat-form .button { padding-inline: 8px; }

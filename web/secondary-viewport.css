@@ -1,0 +1,123 @@
+.secondary-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  min-block-size: 0;
+  block-size: 100%;
+  min-inline-size: 0;
+  gap: clamp(9px, 1.8dvh, 17px);
+}
+
+.secondary-page .page-heading { margin: 0; }
+.secondary-page h1 { font-size: clamp(1.65rem, min(4.25vw, 5.8dvh), 3.18rem); }
+
+.secondary-panels {
+  display: grid;
+  min-block-size: 0;
+  min-inline-size: 0;
+  gap: clamp(9px, 1.8dvh, 17px);
+}
+
+.people-panel,
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.45dvh, 14px);
+  min-inline-size: 0;
+}
+
+.people-panel {
+  min-block-size: 0;
+  padding: clamp(12px, 2.1dvh, 21px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.people-panel > :not(.people-list, .search-results) { flex: none; }
+.people-panel h2 { margin: 0; }
+.people-panel > form {
+  grid-template: "field action" auto "feedback feedback" auto / minmax(0, 1fr) auto;
+  align-items: end;
+  column-gap: 8px;
+  row-gap: 0;
+}
+.people-panel > form > .field { grid-area: field; }
+.people-panel > form > .status { grid-area: feedback; margin-top: 6px; }
+.people-panel > form > .button { grid-area: action; min-block-size: 42px; }
+
+.people-list {
+  flex: 1 1 auto;
+  align-content: start;
+  min-block-size: 52px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 5px;
+}
+
+.people-list:focus-visible { outline-offset: -3px; }
+.search-results { flex: 1 1 auto; min-block-size: 83px; }
+.search-results > h3 { flex: none; }
+
+.friend-views { display: none; }
+.friend-panels {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-areas: "search friends" "search requests";
+}
+.friend-search { grid-area: search; }
+.friend-list { grid-area: friends; }
+.friend-requests { grid-area: requests; }
+.invite-panels { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); }
+
+@media (min-width: 70rem) {
+  .friend-panels {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "search friends requests";
+  }
+}
+
+@media (max-width: 46rem) {
+  .friends-page { grid-template-rows: auto auto minmax(0, 1fr); }
+  .friend-views {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .friend-views label { display: block; cursor: pointer; }
+  .friend-views input { min-block-size: 0; padding: 0; border: 0; }
+  .friend-views span {
+    display: grid;
+    place-items: center;
+    padding: 8px 10px;
+    min-block-size: 38px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    color: var(--muted);
+    font-size: .86rem;
+    font-weight: 650;
+  }
+  .friend-views input:checked + span {
+    background: #242947;
+    border-color: #4c5694;
+    color: #f7f7fd;
+  }
+  .friend-views input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .friend-panels {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: none;
+  }
+  .friend-panels > .people-panel { grid-area: auto; display: none; }
+  .friends-page:has(input[value="friends"]:checked) .friend-list,
+  .friends-page:has(input[value="requests"]:checked) .friend-requests,
+  .friends-page:has(input[value="search"]:checked) .friend-search { display: flex; }
+  .invite-panels {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, max-content) minmax(90px, 1fr);
+  }
+}

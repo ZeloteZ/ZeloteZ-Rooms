@@ -1,0 +1,101 @@
+.mention-field {
+  position: relative;
+  min-width: 0;
+}
+
+.write-row .mention-field {
+  flex: 1;
+}
+
+.mention-field textarea,
+.mention-field input {
+  width: 100%;
+}
+
+.mention-choices {
+  position: absolute;
+  z-index: 5;
+  inset-inline: 0;
+  bottom: calc(100% + 8px);
+  max-height: min(220px, 37dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: 0 6px 22px #0008;
+}
+
+.mention-choices ul {
+  display: grid;
+  gap: 1px;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+
+.mention-choices li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  align-items: baseline;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.mention-choices li[aria-selected="true"],
+.mention-choices li:hover {
+  background: var(--line);
+}
+
+.mention-choice-name,
+.mention-choice-detail {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mention-choice-name {
+  font-size: .88rem;
+  font-weight: 650;
+}
+
+.mention-choice-kind,
+.mention-choice-detail,
+.mention-choices-hint {
+  color: var(--muted);
+  font-size: .76rem;
+}
+
+.mention-choices-hint {
+  margin: 0;
+  padding: 8px 11px 1px;
+}
+
+.message-mention {
+  padding: 0 .24em;
+  border-radius: .3em;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+a.message-mention[href]:hover,
+a.message-mention[href]:focus-visible {
+  text-decoration: underline;
+}
+
+a.message-mention:not([href]) {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.message-row[data-mention-focus],
+.stream-chat-log li[data-mention-focus] {
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}

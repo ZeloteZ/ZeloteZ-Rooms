@@ -1,0 +1,94 @@
+.help-page {
+  max-inline-size: 1220px;
+  inline-size: 100%;
+  margin-inline: auto;
+}
+
+.help-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.help-header .field { inline-size: min(100%, 21rem); }
+
+.help-content {
+  min-block-size: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius);
+}
+
+.help-content:focus-visible { outline-offset: -3px; }
+
+.help-section p {
+  max-width: 72ch;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.help-section {
+  display: grid;
+  padding: clamp(12px, 2.25dvh, 24px);
+  gap: 10px;
+}
+
+.help-section h2 {
+  font-size: clamp(1.17rem, 2.1vw, 1.48rem);
+}
+
+.help-cards,
+.help-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+}
+
+.help-card,
+.help-steps li {
+  padding: clamp(9px, 1.65dvh, 14px);
+  border-radius: 12px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+}
+
+.help-card h3,
+.help-steps h3 {
+  margin: 0 0 6px;
+  font-size: .96rem;
+}
+
+.help-steps {
+  margin: 0;
+  padding: 0;
+  list-style-position: inside;
+}
+
+.help-steps li::marker {
+  font-weight: 700;
+}
+
+.help-steps h3 {
+  display: inline;
+}
+
+.help-steps p {
+  margin-top: 6px;
+}
+
+.help-section .help-note {
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--line-strong);
+}
+
+@media (max-width: 660px) {
+  .help-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 32rem) {
+  .help-header { flex-direction: column; align-items: stretch; gap: 7px; }
+  .help-header .field { inline-size: 100%; }
+}
