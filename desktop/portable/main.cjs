@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, session, shell } = require("electron");
 const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -8,6 +8,7 @@ const { installAudio } = require("./audio.cjs");
 const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
+const { createRememberedLogin } = require("./remembered-login.cjs");
 const { trayHostAvailable, trayUsable } = require("./tray.cjs");
 
 const localPage = path.join(__dirname, "ui", "index.html");
@@ -19,6 +20,7 @@ const closePage = path.join(__dirname, "ui", "close.html");
 const closeUrl = pathToFileURL(closePage).href;
 const appIcon = path.join(__dirname, "ui", "icon.png");
 const localWindows = new Map();
+const roomLogins = new WeakMap();
 const notifications = desktopNotifications(appIcon);
 let roomsWindow;
 let roomsContents;
@@ -63,6 +65,11 @@ function serverOrigin(value) {
 function isRoomsPage(value, origin) {
   const url = webUrl(value);
   return url?.origin === origin && url.pathname === "/";
+}
+
+function isYoutubeEmbed(url, origin) {
+  return url?.origin === "https://www.youtube-nocookie.com" && /^\/embed\/[A-Za-z0-9_-]{11}$/u.test(url.pathname)
+    && url.searchParams.get("origin") === origin && url.searchParams.get("enablejsapi") === "1";
 }
 
 function settingsPath() {
@@ -316,6 +323,7 @@ function restoreWindow(window) {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+  if (window === roomsWindow && !roomsContents?.isDestroyed()) roomsContents?.send("rooms:visibility", true);
 }
 
 function wantsTray() {
@@ -418,6 +426,7 @@ async function moveToBackground(window) {
       settingsWindow?.close();
       window.hide();
     } else window.minimize();
+    if (window === roomsWindow && !roomsContents?.isDestroyed()) roomsContents?.send("rooms:visibility", false);
     if (suppress) await saveSettings({ suppressCloseHint: true }).catch(() => {});
   } finally {
     backgrounding = false;
@@ -429,6 +438,18 @@ function isRoomsSender(event) {
     event.senderFrame && !event.senderFrame.detached && event.senderFrame === event.sender.mainFrame &&
     isRoomsPage(event.senderFrame.url, currentOrigin);
 }
+
+function roomLoginSender(event) {
+  const entry = roomLogins.get(event.sender);
+  const frame = event.senderFrame;
+  return entry?.verified() && frame && !frame.detached && frame === event.sender.mainFrame &&
+    isRoomsPage(frame.url, entry.origin) ? entry.login : null;
+}
+
+ipcMain.handle("rooms:login-load", (event, id) => roomLoginSender(event)?.load(id, () => Boolean(roomLoginSender(event))));
+ipcMain.handle("rooms:login-discard", event => roomLoginSender(event)?.discard());
+ipcMain.handle("rooms:login-save", (event, input) => isRoomsSender(event) && roomLoginSender(event)?.save(input, () => isRoomsSender(event)));
+ipcMain.handle("rooms:login-forget", event => isRoomsSender(event) && roomLoginSender(event)?.forget());
 
 ipcMain.handle("rooms:desktop-notify", (event, input) => {
   if (!desktopSettings.notifications || !isRoomsSender(event)) return false;
@@ -513,6 +534,7 @@ function installPermissions(window, web, origin, media, isActive) {
 
 function prepareRoomsWindow(origin) {
   const media = session.fromPartition("rooms:" + ++connection);
+  const login = createRememberedLogin(path.join(app.getPath("userData"), "remembered-logins"), safeStorage, process.platform, origin, media.cookies);
   const window = new BrowserWindow({
     title: "ZeloteZ Rooms", width: 1240, height: 790, minWidth: 360, minHeight: 360, show: false,
     icon: appIcon, backgroundColor: "#141419", autoHideMenuBar: true, titleBarStyle: "hidden",
@@ -532,13 +554,19 @@ function prepareRoomsWindow(origin) {
     webPreferences: {
       session: media, preload: path.join(__dirname, "rooms-preload.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false,
-      additionalArguments: captureProgram ? ["--rooms-native-capture",
-        ...(captureProgram.embedded ? ["--rooms-embedded-preview"] : [])] : [],
+      additionalArguments: [...(login ? ["--rooms-remember-login"] : []), ...(captureProgram ? ["--rooms-native-capture",
+        ...(captureProgram.embedded ? ["--rooms-embedded-preview"] : [])] : [])],
     },
   });
   window.contentView.addChildView(view);
   view.setBackgroundColor("#141419");
   const contents = view.webContents;
+  const windowVisibility = visible => { if (!contents.isDestroyed()) contents.send("rooms:visibility", visible); };
+  window.on("show", () => windowVisibility(true));
+  window.on("restore", () => windowVisibility(true));
+  window.on("hide", () => windowVisibility(false));
+  window.on("minimize", () => windowVisibility(false));
+  contents.on("did-finish-load", () => windowVisibility(window.isVisible() && !window.isMinimized()));
   let htmlFullScreen = false;
   const layout = () => {
     const [width, height] = window.getContentSize();
@@ -553,26 +581,45 @@ function prepareRoomsWindow(origin) {
   contents.on("leave-html-full-screen", () => { htmlFullScreen = false; layout(); });
   let documentVerified = false;
   let closing = false;
+  const verified = () => documentVerified && !window.isDestroyed() && !contents.isDestroyed() && isRoomsPage(contents.getURL(), origin);
+  if (login) roomLogins.set(contents, { origin, login, verified });
   const isActive = () => roomsWindow === window && documentVerified && !window.isDestroyed() && !contents.isDestroyed();
   const navigation = { urls: ["<all_urls>"], types: ["mainFrame", "subFrame"] };
-  const allowed = details => details.resourceType === "mainFrame" && details.webContentsId === contents.id
-    && details.method === "GET" && isRoomsPage(details.url, origin);
+  const allowedMain = details => details.method === "GET" && isRoomsPage(details.url, origin);
+  function allowedChild(value, frame) {
+    const url = webUrl(value);
+    if (!documentVerified || url?.protocol !== "https:" || url.origin === origin) return false;
+    if (isYoutubeEmbed(url, origin)) return true;
+    // Child frames used by YouTube stay below its sandboxed, cross-origin player.
+    for (let parent = frame?.parent; parent && !parent.detached; parent = parent.parent) {
+      if (isYoutubeEmbed(webUrl(parent.url), origin)) return true;
+    }
+    return false;
+  }
   media.webRequest.onBeforeRequest(navigation, (details, callback) => {
-    const accept = allowed(details);
-    if (accept) documentVerified = false;
+    if (details.webContentsId !== contents.id) return callback({ cancel: true });
+    const main = details.resourceType === "mainFrame";
+    const accept = main ? allowedMain(details) : allowedChild(details.url, details.frame);
+    if (accept && main) documentVerified = false;
     callback({ cancel: !accept });
   });
   media.webRequest.onHeadersReceived(navigation, (details, callback) => {
-    const accept = allowed(details) && hasRoomsPageHeaders(details.statusCode, details.responseHeaders);
-    if (allowed(details)) documentVerified = accept;
+    if (details.webContentsId !== contents.id) return callback({ cancel: true });
+    if (details.resourceType === "subFrame") return callback({ cancel: !allowedChild(details.url, details.frame) });
+    const acceptedAddress = allowedMain(details);
+    const accept = acceptedAddress && hasRoomsPageHeaders(details.statusCode, details.responseHeaders);
+    if (acceptedAddress) documentVerified = accept;
     callback({ cancel: !accept });
   });
   installPermissions(window, contents, origin, media, isActive);
   installNativeCapture(contents, captureProgram, origin, media, value => isActive() && isRoomsPage(value, origin));
   contents.on("will-frame-navigate", event => {
-    if (!event.isMainFrame || !isRoomsPage(event.url, origin)) event.preventDefault();
+    const allow = event.isMainFrame ? isRoomsPage(event.url, origin) : allowedChild(event.url, event.frame);
+    if (!allow) event.preventDefault();
   });
-  contents.on("will-redirect", event => event.preventDefault());
+  contents.on("will-redirect", event => {
+    if (event.isMainFrame || !allowedChild(event.url, event.frame)) event.preventDefault();
+  });
   contents.setWindowOpenHandler(({ url }) => {
     const external = webUrl(url);
     if (external && isActive() && isRoomsPage(contents.getURL(), origin)) shell.openExternal(external.href).catch(() => {});
@@ -600,8 +647,7 @@ function prepareRoomsWindow(origin) {
       updateTray();
     }
   });
-  return { window, contents, isActive, verified: () => documentVerified
-    && !window.isDestroyed() && !contents.isDestroyed() && isRoomsPage(contents.getURL(), origin) };
+  return { window, contents, login, isActive, verified };
 }
 
 async function connect(origin, { signal, local } = {}) {
@@ -618,6 +664,8 @@ async function connect(origin, { signal, local } = {}) {
     const abort = () => { if (!window.isDestroyed()) window.destroy(); };
     loading.addEventListener("abort", abort, { once: true });
     try {
+      await prepared.login?.restore();
+      loading.throwIfAborted();
       await Promise.all([window.loadFile(titlebarPage), prepared.contents.loadURL(origin + "/")]);
       loading.throwIfAborted();
       if (!prepared.verified()) return { error: "load" };

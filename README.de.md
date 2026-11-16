@@ -13,6 +13,7 @@ ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In
 - **Direkt mit Freunden schreiben.** Starte einen Ende-zu-Ende-verschlüsselten Chat über **Nachrichten** oder **Freunde**. Die Glocke zeigt Direktnachrichten, Freundschaftsanfragen und Erwähnungen. Hinweise auf Live-Starts in deinen Räumen kannst du im Profil einschalten.
 - **Moderation und Konten.** Du kannst eigene Nachrichten löschen. Raumersteller und Raum-Admins können Nachrichten anderer Mitglieder mit einer Begründung löschen oder zwischen den Textkanälen desselben Raums verschieben. Der Betreiber kann unter **Einladungen → Konten** Konten sperren und ihre Sitzungen samt Streams beenden.
 - **Sprache und Streams.** Über **Sprachchat betreten** hörst du zunächst zu. Zum Sprechen schaltest du das Mikrofon ein und erlaubst den Zugriff. Bildschirmfreigabe und Zuschauen funktionieren unabhängig vom Sprachchat. Beim Wechsel zwischen Seiten bleiben die Bedienelemente neben deinem Profil erreichbar. Der Player bietet direkte Wiedergabe per WebRTC und gepufferte Wiedergabe per HLS.
+- **Gemeinsam Videos schauen.** Über **Video teilen** kannst du im Live-Kanal YouTube einbetten oder eine MP4- oder WebM-Datei bis 256 MiB hochladen. Abspielen, Pausieren und Spulen wirken für alle. Die Lautstärke stellt jede Person selbst ein.
 - **Ein eigener Look.** Lege Profilbild und Namensfarbe fest. Berechtigte Mitglieder können Räume mit Titelbild, Banner, Chat-Hintergrund und eigenen Farben gestalten. Für Bilder stehen Vorlagen und eigene JPEG-, PNG- und WebP-Dateien bis 8 MiB zur Auswahl.
 - **Orientierung beim ersten Besuch.** Die Rundgänge erklären die wichtigsten Bedienelemente. Du kannst sie im Profil zurücksetzen. Rooms startet auf Englisch. Beim Anmelden und im Profil kannst du **Deutsch** wählen.
 
@@ -25,6 +26,8 @@ Der Betrieb des Dienstes erfordert lesbare Angaben wie Raum- und Kanalnamen, Mit
 Dein Passwort entsperrt deinen privaten Kontoschlüssel. Sobald der Schlüssel gesperrt ist, brauchst du das Passwort, um deine verschlüsselten Nachrichten wieder zu öffnen. Du vertraust dem Server dabei, dass er den richtigen App-Code, die Raummitgliedschaften und beim ersten Kontakt die öffentlichen Schlüssel liefert. Eine aktiv manipulierte Instanz könnte falsche Empfänger für die Verlaufsfreigabe melden. In der App erklärt **So funktioniert’s** diese Grenzen näher.
 
 **Sprache und Live-Video** sind auf dem Transportweg verschlüsselt. MediaMTX empfängt und verteilt die Übertragungen. Bei Bedarf wandelt FFmpeg das Audioformat für die Wiedergabe um. Die mitgelieferte Konfiguration deaktiviert Aufzeichnungen.
+
+In einer Watchparty liefert YouTube den eingebetteten Player und das Video direkt an die Zuschauer. Hochgeladene Videos speichert Rooms vorübergehend im Original und liefert sie nur an Zuschauer mit Kanalzugriff aus.
 
 ## Selbst hosten
 
@@ -39,6 +42,8 @@ Kopiere für die Erstinstallation [`.env.example`](.env.example) nach `.env` und
 
 Der Web-Port ist an Loopback gebunden. Setze davor einen HTTPS-Reverse-Proxy, der `X-Real-IP` mit der vertrauenswürdigen Client-IP überschreibt. Verwende für den RTMPS-Eingang einen eigenen TLS-Schlüssel. Gib für RTMPS standardmäßig TCP 1936 frei. WebRTC nutzt standardmäßig UDP 8189 und TCP 8189 als Ausweichweg. Die Compose-Konfiguration enthält Ressourcenlimits und Logrotation.
 
+Wenn dein Reverse-Proxy Anfragen nach Größe begrenzt, erlaube 4 MiB je Teilstück für die Watchparty-Upload-Route `/api/channels/<id>/watch/<id>/upload`.
+
 Starte die Dienste und erstelle den Einmal-Link für das Betreiberkonto.
 
 Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
@@ -49,3 +54,5 @@ Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 ## Desktop-App
 
 Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer und Linux-AppImage.
+
+Wenn du **Auf diesem Gerät angemeldet bleiben** auswählst, schützt der sichere Systemspeicher deine Sitzung und den Chat-Entsperrschlüssel bis zur Abmeldung oder bis die Sitzung abläuft.

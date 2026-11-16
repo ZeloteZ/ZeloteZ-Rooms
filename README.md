@@ -14,6 +14,7 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 - **Message a friend.** Open an end-to-end encrypted direct chat from **Messages** or **Friends**. Share links and files with a confirmed friend. The notification bell shows friend requests, direct messages and mentions. Turn on live alerts in your profile for rooms you’ve joined.
 - **Talk and watch together.** A live channel brings voice, streams, and stream chat into one view. Choose **Join voice chat** to listen, then enable your microphone when you want to speak. Voice and playback controls stay in the header as you browse. Viewers can choose direct WebRTC playback or buffered HLS.
 - **Share a screen.** Choose **Share screen** in a live channel. Supported browsers can share a screen, window, or tab. The desktop app also supports region capture. On Linux you can share audio from one application or a whole playback device using PipeWire.
+- **Start a watch party.** Use **Share video** in a live channel to share a YouTube embed or upload an original MP4 or WebM up to 256 MiB. Viewers share play, pause, and seek controls and adjust volume individually.
 - **Change the look.** Choose a profile picture and name color. Give a room its own cover, banner, colors, and chat background. Built-in image presets are available for profile pictures and room images. You can also upload JPEG, PNG, or WebP images up to 8 MiB.
 - **Find your way around.** First-visit guides introduce the main views and can be reset in your profile. The interface is available in English and German.
 
@@ -28,6 +29,8 @@ The site owner manages invitations and can suspend accounts or end their session
 
 The default stack sets resource limits and rotates container logs. See the [Compose file](compose.yaml) for the values.
 
+If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the watch-party upload route `/api/channels/<id>/watch/<id>/upload`.
+
 > [!IMPORTANT]
 > Keep a separate, restorable backup of the `community` Docker volume and your instance configuration. The volume holds accounts, memberships, and encrypted data. An ordinary `docker compose down` preserves it.
 
@@ -40,3 +43,5 @@ Room and direct chat messages, shared links, attachment names and files, reactio
 The server handles room and channel names, membership, senders, timestamps, file sizes, profile and room images, and the account references needed for mentions and reactions. It also supplies the app code, membership lists, and first-seen public keys. A compromised server can change the app or misrepresent membership, so chat privacy depends on a trusted instance. **How it works** in the app explains these boundaries in plain language.
 
 Voice and live video are encrypted in transit. MediaMTX relays live media and FFmpeg adapts audio for playback where needed. Server-side recording is disabled.
+
+For watch parties, YouTube serves its own embedded player and video directly to each viewer. Rooms stores uploaded watch-party videos temporarily in their original form and restricts playback to viewers with access to the channel.

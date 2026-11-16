@@ -7,6 +7,31 @@ if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktopNotificati
   notify: input => ipcRenderer.invoke("rooms:desktop-notify", input),
 });
 
+if (process.isMainFrame) {
+  let visible = false;
+  const observers = new Set();
+  ipcRenderer.on("rooms:visibility", (_event, value) => {
+    visible = value === true;
+    for (const observer of observers) observer(visible);
+  });
+  contextBridge.exposeInMainWorld("roomsWindowVisibility", {
+    observe(callback) {
+      observers.add(callback);
+      callback(visible);
+      return () => { observers.delete(callback); };
+    },
+  });
+}
+
+if (process.isMainFrame && process.argv.includes("--rooms-remember-login")) {
+  contextBridge.exposeInMainWorld("roomsDesktopLogin", {
+    load: id => ipcRenderer.invoke("rooms:login-load", id),
+    save: (id, vault) => ipcRenderer.invoke("rooms:login-save", { id, vault }),
+    forget: () => ipcRenderer.invoke("rooms:login-forget"),
+    discard: () => ipcRenderer.invoke("rooms:login-discard"),
+  });
+}
+
 if (process.isMainFrame && process.argv.includes("--rooms-native-capture")) {
   const capture = {
     open: (channel, language, embedded) => navigator.userActivation.isActive

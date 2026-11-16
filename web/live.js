@@ -3,6 +3,7 @@ import { language, t } from "./i18n.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
 import { desktopShareControls } from "./desktop-share.js";
+import { createWatchParty } from "./watch-party.js";
 import { canPlayDirectly, startWhep } from "./whep.js";
 
 const viewerHeartbeat = 8000;
@@ -454,7 +455,7 @@ export function createLivePlayer(context, dock) {
 export function renderLive(context, channel, edit, player, voiceMount, playerMount = el("div", { class: "live-channel-player" })) {
   const { signal, user, room, screenShare, nativeBroadcast } = context;
   const endpoint = streamsPath(channel);
-  const cards = el("div", { class: "stream-list" });
+  const cards = el("div", { class: "screen-stream-cards" });
   const living = el("span", { class: "tag live live-channel-count", role: "status", hidden: true });
   const empty = el("p", { class: "muted", role: "status" }, t("Loading streams…", "Streams werden geladen …"));
   const watchHint = el("div", { class: "live-channel-placeholder", "aria-label": t("Stream player", "Stream-Player") }, empty);
@@ -501,9 +502,17 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const chatButton = button(t("Chat", "Chat"), () => setPanel("chat"), {
     "aria-controls": "live-channel-chat", "aria-pressed": "false",
   });
+  const watchParty = createWatchParty(context, channel, {
+    onSelect() {
+      if (streams.some(stream => sameId(stream.id, player.activeId()))) player.stop();
+      setPanel("people");
+    },
+    onChange: renderControls,
+  });
   const streamsSection = el("section", {
     class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
-  }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")), cards);
+  }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
+  el("div", { class: "stream-list" }, watchParty.card, cards));
   let streams = [];
   let streamsReady = false;
   let canStream = false;
@@ -538,6 +547,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   }
 
   function chooseStream(stream) {
+    watchParty.leave();
     if (stream.live) setPanel("chat");
     if (showsLocally(stream)) {
       if (streams.some(item => sameId(item.id, player.activeId()))) player.stop();
@@ -565,7 +575,8 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     const nativeHere = localNative();
     const selection = player.activeId();
     const selectedHere = streams.find(stream => sameId(stream.id, selection));
-    const previewMedia = sharingHere && sharing.phase === "live" && !selectedHere ? sharing.media : null;
+    const watchingParty = watchParty.selected();
+    const previewMedia = sharingHere && sharing.phase === "live" && !selectedHere && !watchingParty ? sharing.media : null;
     reserve.hidden = !canStream || Boolean(own || sharing || nativeBroadcast?.active());
     audioOption.hidden = Boolean(desktop || nativeCapture || portableShare) || reserve.hidden;
     if (portableShare) portableShare.element.hidden = reserve.hidden;
@@ -574,15 +585,17 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     finish.hidden = (!own && !sharingHere) || Boolean(nativeHere && !selectedHere);
     finish.textContent = sharingHere && sharing.phase !== "live"
       ? t("Cancel screen sharing", "Bildschirmfreigabe abbrechen") : t("End my stream", "Meinen Stream beenden");
-    const liveCount = streams.filter(stream => stream.live).length;
+    const liveCount = streams.filter(stream => stream.live).length + Number(watchParty.active());
     const nextStatus = liveCount ? t("{count} live", "{count} live", { count: liveCount }) : "";
     living.hidden = !liveCount;
     if (living.textContent !== nextStatus) living.textContent = nextStatus;
-    const watchNote = liveCount ? t("Choose a stream to watch.", "Wähle einen Stream zum Zuschauen.")
+    const watchNote = watchParty.active() && !streams.length
+      ? t("Select the watch party to watch together.", "Öffne die Watchparty, um gemeinsam zuzuschauen.")
+      : liveCount ? t("Choose a stream to watch.", "Wähle einen Stream zum Zuschauen.")
       : streams.length ? t("Waiting for the first stream to go live.", "Der erste Stream wird vorbereitet.")
         : t("Nobody is live here right now.", "Hier ist gerade niemand live.");
-    if (streamsReady && empty.textContent !== watchNote) empty.textContent = watchNote;
-    streamsSection.hidden = !streams.length;
+    if ((streamsReady || watchParty.active()) && empty.textContent !== watchNote) empty.textContent = watchNote;
+    streamsSection.hidden = !streams.length && !watchParty.active();
     preview.hidden = !previewMedia;
     if (previewVideo.srcObject !== previewMedia) {
       previewVideo.srcObject = previewMedia;
@@ -717,6 +730,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     const localStream = localNative()?.streamId ?? (sameId(sharing?.channel.id, channel.id) && sharing.phase === "live" ? sharing.id : null);
     if (localStream && !sameId(localStream, lastLocalStream)) {
       lastLocalStream = localStream;
+      watchParty.leave();
       setPanel("chat");
       if (streams.some(stream => sameId(stream.id, player.activeId()))) player.stop();
     } else if (!localStream) {
@@ -757,10 +771,10 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     class: "panel live-channel", "aria-labelledby": "live-channel-heading", "data-panel": "people",
   }, el("header", { class: "live-channel-toolbar" },
     el("div", { class: "inline live-channel-title" }, el("h2", { id: "live-channel-heading", title: channel.title }, channel.title), living),
-    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, finish, edit), feedback),
+    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish, edit), feedback),
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
-      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchHint),
+      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchParty.player, watchHint),
     el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
     el("section", {
       class: "panel live-channel-people", id: "live-channel-people", "data-tutorial": "live-people",

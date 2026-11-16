@@ -12,7 +12,7 @@ import { createNativeBroadcast } from "./native-broadcast.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
 import { createTutorials } from "./tutorial.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
-import { api, button, closeDialog, el, field, form, paintPersonMark, paintPersonName, requireLoginOnExpiry, select, setExpectedAccount } from "./ui.js";
+import { api, button, closeDialog, el, field, form, notify, paintPersonMark, paintPersonName, requireLoginOnExpiry, select, setExpectedAccount } from "./ui.js";
 
 const navigation = document.querySelector("#navigation");
 const profile = document.querySelector("#profile");
@@ -31,6 +31,7 @@ const nativeBroadcastDock = document.querySelector("#native-broadcast-dock");
 const notificationDock = document.querySelector("#notification-dock");
 const profileUpdates = new EventTarget();
 const sessionChanges = typeof BroadcastChannel === "function" ? new BroadcastChannel("zelotez-rooms-session") : null;
+const desktopLogin = window.roomsDesktopLogin;
 
 let user = null;
 let view;
@@ -198,15 +199,19 @@ function showAuth(note = "", preset = "", showInvite = false) {
     type: "password", name: "password", autocomplete: startRegister ? "new-password" : "current-password",
     required: true, minlength: startRegister ? "12" : undefined,
   });
+  const remember = desktopLogin && !startRegister && el("input", { type: "checkbox", name: "remember" });
   const authForm = form([
     startRegister && field(t("Display name", "Anzeigename"), name),
     field(t("Username", "Benutzername"), username),
     field(t("Password", "Passwort"), password),
+    remember && el("label", { class: "inline" }, remember,
+      t("Keep me signed in on this device", "Auf diesem Gerät angemeldet bleiben")),
     note && el("p", { class: "status" }, note),
   ], authAction, async () => {
     if (!globalThis.ClubCrypto) throw new Error(t("Encryption could not be loaded. Reload the page.", "Die Verschlüsselung konnte nicht geladen werden. Lade die Seite erneut."));
     const loginName = username.value.trim().toLowerCase();
     const plainPassword = password.value;
+    const keepSignedIn = remember?.checked === true;
     const result = startRegister
       ? await api("auth/register", { method: "POST", body: {
         ...(await ClubCrypto.prepareRegistration(loginName, plainPassword)),
@@ -218,9 +223,19 @@ function showAuth(note = "", preset = "", showInvite = false) {
     password.value = "";
     sessionChanges?.postMessage("changed");
     if (!await ClubCrypto.unlock(result.user, plainPassword)) {
+      await desktopLogin?.forget().catch(() => {});
       throw new Error(t("Your keys could not be unlocked.", "Deine Schlüssel konnten nicht entsperrt werden."));
     }
+    let remembered;
+    if (desktopLogin) {
+      remembered = await (keepSignedIn
+        ? desktopLogin.save(result.user.id, ClubCrypto.deviceUnlockKey(result.user.id))
+        : desktopLogin.forget()).catch(() => false);
+    }
     await showWorkspace(result.user);
+    if (keepSignedIn && !remembered) notify(t(
+      "Rooms couldn’t save this sign-in in your system’s secure storage. Sign in again the next time you open the app.",
+      "Rooms konnte die Anmeldung nicht sicher auf diesem Gerät speichern. Melde dich beim nächsten Start erneut an."));
   });
   auth.replaceChildren(
     el("div", { class: "auth-banner" }, el("h1", {}, "ZeloteZ Rooms"),
@@ -290,7 +305,9 @@ async function render(force = false) {
 }
 
 function lockOnAccountChange() {
-  if (user) showAuth(t("The signed-in account has changed. Sign in again.", "Das angemeldete Konto hat sich geändert. Melde dich erneut an."));
+  if (!user) return;
+  void desktopLogin?.discard().catch(() => {});
+  showAuth(t("The signed-in account has changed. Sign in again.", "Das angemeldete Konto hat sich geändert. Melde dich erneut an."));
 }
 
 let checkingAccount = false;
@@ -311,7 +328,10 @@ sessionChanges?.addEventListener("message", checkTabAccount);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void checkTabAccount(); });
 requireLoginOnExpiry(reason => {
   if (reason === "changed") lockOnAccountChange();
-  else if (user) showAuth(t("Your session expired. Please sign in again.", "Deine Sitzung ist abgelaufen. Melde dich erneut an."));
+  else if (user) {
+    void desktopLogin?.discard().catch(() => {});
+    showAuth(t("Your session expired. Please sign in again.", "Deine Sitzung ist abgelaufen. Melde dich erneut an."));
+  }
 });
 document.querySelector(".skip-link").addEventListener("click", event => {
   event.preventDefault();
@@ -331,6 +351,7 @@ window.addEventListener("hashchange", () => {
 logout.addEventListener("click", async () => {
   logout.disabled = true;
   try {
+    await desktopLogin?.forget().catch(() => {});
     screenShare?.stop();
     window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
     await window.roomsNativeCapture?.close().catch(() => {});
@@ -353,9 +374,13 @@ logout.addEventListener("click", async () => {
 async function start() {
   try {
     const session = await api("auth/session");
+    if (!session.user) await desktopLogin?.discard().catch(() => {});
     if (pendingInvite !== null) return showAuth("", "", true);
     if (!session.user) return showAuth();
     if (await globalThis.ClubCrypto?.unlock(session.user)) return showWorkspace(session.user);
+    const savedVault = await desktopLogin?.load(session.user.id).catch(() => null);
+    if (savedVault && await globalThis.ClubCrypto?.unlock(session.user, undefined, savedVault)) return showWorkspace(session.user);
+    await desktopLogin?.discard().catch(() => {});
     showAuth(t("Sign in to unlock your chats in this tab.", "Melde dich an, um deine Chats in diesem Tab zu entsperren."), session.user.username);
   } catch {
     bootstrap.replaceChildren(

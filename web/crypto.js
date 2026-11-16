@@ -91,7 +91,7 @@ window.ClubCrypto = (() => {
     try { sessionStorage.removeItem(cacheName); } catch { /* Storage may be disabled. */ }
   }
 
-  async function unlock(user, passphrase) {
+  async function unlock(user, passphrase, savedVault) {
     try {
       const pub = publicPoint(user.publicKey);
       if (user.identity?.v !== 1) throw new Error(errorText("Unknown key.", "Unbekannter Schlüssel."));
@@ -99,6 +99,8 @@ window.ClubCrypto = (() => {
       if (typeof passphrase === "string") {
         const { material, salt } = await accountMaterial(user.username, passphrase);
         vault = await expand(material, salt, "identity");
+      } else if (typeof savedVault === "string") {
+        vault = binary(savedVault);
       } else {
         const cached = JSON.parse(sessionStorage.getItem(cacheName));
         if (cached?.id !== user.id) return false;
@@ -110,13 +112,18 @@ window.ClubCrypto = (() => {
       if (jwk.x !== pub.x || jwk.y !== pub.y) throw new Error(errorText("Wrong key.", "Falscher Schlüssel."));
       const key = await subtle.importKey("jwk", jwk, curve, false, ["deriveBits"]);
       pin(user.id, pub);
-      active = { id: user.id, key };
-      try { sessionStorage.setItem(cacheName, JSON.stringify({ id: user.id, vault: base64(vault) })); } catch { /* Optional cache. */ }
+      const encodedVault = base64(vault);
+      active = { id: user.id, key, vault: encodedVault };
+      try { sessionStorage.setItem(cacheName, JSON.stringify({ id: user.id, vault: encodedVault })); } catch { /* Optional cache. */ }
       return true;
     } catch {
       lock();
       return false;
     }
+  }
+
+  function deviceUnlockKey(userId) {
+    return active?.id === userId ? active?.vault : null;
   }
 
   async function recipientKey(privateKey, publicKey, link) {
@@ -266,6 +273,6 @@ window.ClubCrypto = (() => {
     return id + "/deletion";
   }
 
-  return { prepareRegistration, credential, unlock, lock, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
+  return { prepareRegistration, credential, unlock, lock, deviceUnlockKey, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
     sealReaction, openReaction, deletionScope, onHistoryKeyFailure };
 })();

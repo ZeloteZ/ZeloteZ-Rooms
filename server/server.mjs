@@ -16,6 +16,7 @@ import { createStreams } from './streams.mjs'
 import { createStreamChat } from './stream-chat.mjs'
 import { createTutorials } from './tutorials.mjs'
 import { createVoice } from './voice.mjs'
+import { createWatchParties } from './watch-parties.mjs'
 
 const origin = new URL(process.env.PUBLIC_ORIGIN ?? 'http://127.0.0.1:8080')
 const localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
@@ -45,6 +46,7 @@ const community = createCommunity(db, { requireSession, appearance, recordMentio
 })
 const channelManagement = createChannelManagement(db, { requireSession })
 const presence = createPresence(db, auth)
+const watchParties = createWatchParties({ ...auth, dataDir: process.env.WATCH_MEDIA_DIR || dataDir, channelAccess: community.channelAccess })
 const history = createHistory(db, { requireSession })
 const streams = createStreams(db, {
   publicOrigin: origin.origin, ingestBase: process.env.STREAM_INGEST_BASE, mediaApiUrl: process.env.MEDIAMTX_API_URL,
@@ -110,6 +112,7 @@ const publicApi = service(async (request, response) => {
     if (await notifications.handle(request, response, url)) return
     if (await reactions.handle(request, response, url)) return
     if (await voice.handle(request, response, path)) return
+    if (await watchParties.handle(request, response, url)) return
     if (await streamChat.handle(request, response, url)) return
     if (await streams.handle(request, response, path)) return
     if (await history.handle(request, response, url)) return
@@ -140,6 +143,7 @@ function shutdown() {
   community.close()
   presence.close()
   voice.close()
+  watchParties.close()
   let servers = 2
   const closed = () => {
     if (--servers === 0) db.close()
