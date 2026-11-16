@@ -96,9 +96,11 @@ function getRoute() {
     const params = new URLSearchParams(query);
     const message = params.get("message");
     const stream = params.get("stream");
+    const watch = params.get("watch");
     const target = {
       messageId: /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(message ?? "") ? message : undefined,
       streamId: /^[a-f0-9]{32}$/u.test(stream ?? "") ? stream : undefined,
+      watchId: /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(watch ?? "") ? watch : undefined,
     };
     return { page: Object.hasOwn(routes, page) ? routes[page] : page, topicId, channelId, target };
   } catch {

@@ -4,7 +4,7 @@ const connectionInterval = 250;
 const connectionTimeout = 18_000;
 const numeric = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBlocked } = {}) {
+export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onTitle } = {}) {
   if (typeof videoId !== "string" || !videoIdPattern.test(videoId)) throw new Error("Invalid YouTube video ID");
 
   const element = document.createElement("iframe");
@@ -30,6 +30,9 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   let duration = 0;
   let pendingSeek;
   let volume;
+  let expectedTransport;
+  let ignoreSeekUntil = 0;
+  let reportedTitle = false;
 
   // Keep the provider's JavaScript in its own origin, outside the Rooms renderer.
   function send(message) {
@@ -38,6 +41,14 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
 
   function command(func, ...args) {
     send({ event: "command", func, args });
+  }
+
+  function transport(playing) {
+    const target = playing ? 1 : 2;
+    const now = performance.now();
+    const superseding = expectedTransport && now <= expectedTransport.expiresAt && expectedTransport.target !== target;
+    expectedTransport = state === target && !superseding ? null : { target, expiresAt: now + 1750 };
+    command(playing ? "playVideo" : "pauseVideo");
   }
 
   function applyVolume() {
@@ -50,6 +61,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
     if (!ready || pendingSeek === undefined || (wantsPlayback && !visible)) return;
     const target = pendingSeek;
     pendingSeek = undefined;
+    ignoreSeekUntil = performance.now() + 400;
     // Seeking from the unstarted or ended state can begin playback. Queue the same video at the target instead.
     if (state === -1 || state === 0 || state === 5) command("cueVideoById", videoId, target);
     else command("seekTo", target, true);
@@ -58,7 +70,8 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   function applyPlayback() {
     if (!ready || !visible || !nativeVisible || document.hidden || !wantsPlayback) return;
     applySeek();
-    if (state !== 1 && state !== 3) command("playVideo");
+    const pausing = expectedTransport?.target === 2 && performance.now() <= expectedTransport.expiresAt;
+    if (pausing || (state !== 1 && state !== 3)) transport(true);
   }
 
   const observer = new IntersectionObserver(([entry]) => {
@@ -69,16 +82,31 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   observer.observe(element);
 
   function updateVisibility() {
-    if (ready && (!intersecting || !nativeVisible || document.hidden) && (state === 1 || state === 3)) command("pauseVideo");
+    if (ready && (!intersecting || !nativeVisible || document.hidden) && (state === 1 || state === 3)) transport(false);
     else applyPlayback();
   }
   document.addEventListener("visibilitychange", updateVisibility);
   const unobserveWindow = window.roomsWindowVisibility?.observe(value => { nativeVisible = value; updateVisibility(); });
 
-  function updateState(value) {
-    if (![0, 1, 2, 3, 5, -1].includes(value) || value === state) return;
+  function updateState(value, stateEvent = false) {
+    if (![0, 1, 2, 3, 5, -1].includes(value)) return;
+    const changed = state !== value;
     state = value;
-    if (state === 0) onEnded?.();
+    if (!ready) return;
+    if (changed && value === 0) onEnded?.();
+    if (changed && value === 1) onPlaying?.();
+    if (value !== 1 && value !== 2) return;
+
+    const now = performance.now();
+    const confirming = expectedTransport && now <= expectedTransport.expiresAt;
+    if (expectedTransport && (!confirming || (value === expectedTransport.target && (changed || stateEvent)))) expectedTransport = null;
+    const playing = value === 1;
+    // Player state can also change because of buffering, browser policy, or our own commands.
+    if (!stateEvent || confirming || now < ignoreSeekUntil || playing === wantsPlayback ||
+        !intersecting || !nativeVisible || document.hidden || !document.hasFocus() ||
+        document.activeElement !== element || navigator.userActivation?.isActive !== true) return;
+    wantsPlayback = playing;
+    onPlaybackChange?.(playing);
   }
 
   function receive(event) {
@@ -103,15 +131,21 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
       case "infoDelivery":
         if (numeric(message.info?.currentTime)) position = message.info.currentTime;
         if (numeric(message.info?.duration)) duration = message.info.duration;
+        if (!reportedTitle && message.info?.videoData?.video_id === videoId &&
+            typeof message.info.videoData.title === "string" && message.info.videoData.title.trim()) {
+          reportedTitle = true;
+          onTitle?.(message.info.videoData.title);
+        }
         updateState(message.info?.playerState);
         break;
       case "onStateChange":
-        updateState(message.info);
+        updateState(message.info, true);
         break;
       case "onError":
         onError?.(Number.isInteger(message.info) ? message.info : null);
         break;
       case "onAutoplayBlocked":
+        if (expectedTransport?.target === 1) expectedTransport = null;
         onBlocked?.();
         break;
     }
@@ -137,7 +171,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
       const wasPlaying = wantsPlayback || state === 1 || state === 3;
       wantsPlayback = false;
       applySeek();
-      if (ready && wasPlaying) command("pauseVideo");
+      if (ready && wasPlaying) transport(false);
     },
     seek(seconds) {
       if (destroyed || !numeric(seconds)) return;

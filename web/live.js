@@ -473,6 +473,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const nativePreview = nativeBroadcast?.mount(room, channel, signal);
   const reconnectNote = t("Reconnecting the stream list.", "Die Stream-Liste wird neu verbunden.");
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
+  const unavailableWatch = t("The watch party has ended.", "Die Watchparty ist beendet.");
   const desktop = window.webkit?.messageHandlers?.roomsCapture;
   const nativeCapture = window.roomsNativeCapture;
   const portableShare = window.roomsDesktop === true && !desktop && !nativeCapture ? desktopShareControls() : null;
@@ -505,9 +506,11 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const watchParty = createWatchParty(context, channel, {
     onSelect() {
       if (streams.some(stream => sameId(stream.id, player.activeId()))) player.stop();
+      if (feedback.textContent === unavailableWatch) tell(feedback, "");
       setPanel("people");
     },
     onChange: renderControls,
+    onUnavailable: () => tell(feedback, unavailableWatch),
   });
   const streamsSection = el("section", {
     class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
@@ -525,7 +528,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   let chatScope;
   let chatStreamId;
   let chatNode;
-  let destination = context.streamId ? { streamId: context.streamId, messageId: context.messageId } : null;
+  let destination = !context.watchId && context.streamId ? { streamId: context.streamId, messageId: context.messageId } : null;
 
   function mine() {
     return streams.find(stream => sameId(stream.userId, user.id));
@@ -784,6 +787,11 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat", "aria-label": t("Stream chat", "Streamchat"),
     }, chat, chatEmpty)));
   node.addEventListener("open-message", event => {
+    if (event.detail?.watchId) {
+      destination = null;
+      watchParty.open(event.detail.watchId);
+      return;
+    }
     destination = event.detail?.streamId ? event.detail : null;
     selectDestination();
     renderControls();

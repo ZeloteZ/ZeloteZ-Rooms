@@ -675,7 +675,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
     const message = channel && sameId(channel.id, requestedId) ? destination : undefined;
     showActivity(false);
     if (channelView && (selected === channel || sameId(selected?.id, channel?.id))) {
-      if (message?.messageId || message?.streamId) channelNode?.dispatchEvent(new CustomEvent("open-message", { detail: message }));
+      if (message?.messageId || message?.streamId || message?.watchId) channelNode?.dispatchEvent(new CustomEvent("open-message", { detail: message }));
       return;
     }
     channelView?.abort();
@@ -694,7 +694,8 @@ export async function renderTopic(context, topicId, selectedId, target) {
         el("p", { class: "muted" }, manager ? t("Create a chat or a live channel.", "Erstelle einen Chat oder einen Live-Channel.") : t("This room has no channels yet.", "In diesem Raum wurden noch keine Channels erstellt."))));
       return;
     }
-    const childContext = { ...context, room: topic, signal: channelView.signal, messageId: message?.messageId, streamId: message?.streamId };
+    const childContext = { ...context, room: topic, signal: channelView.signal,
+      messageId: message?.messageId, streamId: message?.streamId, watchId: message?.watchId };
     const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
     if (channel.type === "live") {
       const voiceMount = el("div", { class: "voice-inline" });

@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import { json, readBytes, readJson, RequestError } from './http.mjs'
 
 const uuid = '[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}'
-const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media))?)?$`, 'u')
+const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media|metadata))?)?$`, 'u')
 const storedName = new RegExp(`^${uuid}\\.video$`, 'u')
 const youtubeId = /^[\w-]{11}$/u
 const videoTypes = new Map([['video/mp4', 'video.mp4'], ['video/webm', 'video.webm']])
@@ -29,9 +29,10 @@ const unsupported = () => new RequestError(415, 'Wähle ein Video im MP4- oder W
 const positionAt = (party, time) => Math.min(maxPosition, party.position + (party.playing ? (time - party.updatedAt) / 1000 : 0))
 const validPosition = position => Number.isFinite(position) && position >= 0 && position <= maxPosition
 
-function fileTitle(value) {
-  return typeof value === 'string'
-    ? [...value.replace(/[\p{Cc}\p{Cf}\\/]/gu, ' ').trim()].slice(0, 120).join('') : ''
+function watchTitle(value, source) {
+  if (typeof value !== 'string') return ''
+  const title = value.replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, ' ')
+  return [...(source === 'local' ? title.replace(/[\\/]/gu, ' ') : title).trim()].slice(0, 120).join('')
 }
 
 function isVideo(bytes, mime) {
@@ -137,12 +138,26 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const canStop = Boolean(party && (party.hostId === actor.id || access.canManage))
     const visible = party && (party.state === 'ready' || canStop)
     return { party: visible ? {
-      id: party.id, source: party.source, hostId: party.hostId, state: party.state,
+      id: party.id, source: party.source, hostId: party.hostId, state: party.state, title: party.title,
       position: party.position, playing: party.playing, updatedAt: party.updatedAt, revision: party.revision,
-      ...(party.source === 'youtube' ? { videoId: party.videoId } : { title: party.title, mime: party.mime,
+      ...(party.source === 'youtube' ? { videoId: party.videoId } : { mime: party.mime,
         ...(party.state === 'uploading' ? { offset: party.offset, size: party.size } :
           { mediaUrl: `${watchPath(party.channelId, party.id)}/media` }) }),
     } : null, serverTime: time, canShare: Boolean(access.canStream), canStop }
+  }
+
+  function homeActivity(userId) {
+    const entries = []
+    const time = now()
+    for (const channelId of parties.keys()) {
+      const party = activeParty(channelId, time)
+      if (party?.state !== 'ready') continue
+      const access = channelAccess(userId, channelId)
+      if (!access?.canView) continue
+      const { topicId, topicTitle, channelTitle } = access
+      entries.push({ id: party.id, source: party.source, title: party.title, topicId, topicTitle, channelId, channelTitle })
+    }
+    return entries
   }
 
   function specificParty(channelId, id, time) {
@@ -188,10 +203,11 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     chargeStart(current.id, time)
     const id = randomUUID()
     const party = { id, channelId, hostId: current.id, hostSession: sessionKey(request), source,
+      title: source === 'local' ? watchTitle(title, source) : '',
       playing: false, position: 0, updatedAt: time, revision: 1,
       commandWindowUntil: time, commandCount: 0,
       ...(source === 'youtube' ? { videoId, state: 'ready', expiresAt: time + partyLifetime } : {
-        mime, size, title: fileTitle(title), state: 'uploading', expiresAt: time + uploadLifetime,
+        mime, size, state: 'uploading', expiresAt: time + uploadLifetime,
         uploadUntil: time + uploadIdleTime, file: join(folder, `${id}.video`), offset: 0,
       }),
     }
@@ -202,6 +218,22 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
 
   function assertUploader(request, actor, party) {
     if (party.state !== 'uploading' || party.hostId !== actor.id || party.hostSession !== sessionKey(request)) throw missing()
+  }
+
+  async function addMetadata(request, response, actor, party) {
+    const allowed = user => party.source === 'youtube' && party.hostId === user.id && party.hostSession === sessionKey(request)
+    if (!allowed(actor)) throw missing()
+    const { title } = await readJson(request, 1024)
+    const cleaned = watchTitle(title, party.source)
+    if (!cleaned) throw new RequestError(400, 'Ungültiger Videotitel.')
+    const current = requireSession(request)
+    if (!allowed(current)) throw missing()
+    const access = accessTo(current, party.channelId)
+    const time = now()
+    specificParty(party.channelId, party.id, time)
+    if (party.title && party.title !== cleaned) throw conflict()
+    party.title = cleaned
+    return json(response, 200, snapshot(current, access, party, time))
   }
 
   async function upload(request, response, url, actor, party) {
@@ -338,6 +370,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       const party = specificParty(channelId, partyId, time)
       if (resource === 'media' && (method === 'GET' || method === 'HEAD')) await serve(request, response, actor, party)
       else if (resource === 'upload' && method === 'PUT') await upload(request, response, url, actor, party)
+      else if (resource === 'metadata' && method === 'PATCH') await addMetadata(request, response, actor, party)
       else if (!resource && method === 'PATCH') await control(request, response, actor, party)
       else if (!resource && method === 'DELETE') {
         if (party.hostId !== actor.id && !access.canManage) throw missing()
@@ -354,5 +387,5 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     for (const party of parties.values()) retire(party)
   }
 
-  return { handle, close }
+  return { handle, homeActivity, close }
 }

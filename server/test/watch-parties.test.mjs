@@ -88,8 +88,40 @@ async function fixture(t) {
     assert.fail('Watch party files were left behind')
   }
 
-  return { request, session, users, waitForCleanup, tick: milliseconds => { now += milliseconds } }
+  return { request, session, users, room, channel, homeActivity: watch.homeActivity,
+    waitForCleanup, tick: milliseconds => { now += milliseconds } }
 }
+
+test('Live Now shows visible ready watch parties and the original host can supply YouTube title metadata once', async t => {
+  const { request, session, users, room, channel, homeActivity } = await fixture(t)
+  const host = session(users.host)
+  const otherDevice = session(users.host)
+  const viewer = session(users.viewer)
+  const moderator = session(users.moderator)
+  const location = { topicId: room, topicTitle: 'Watch test', channelId: channel, channelTitle: 'Live' }
+  const { party } = (await request(host, 'POST', '', { source: 'youtube', videoId: 'K5ABskPJN1Q' })).data
+  const listEntry = { id: party.id, source: 'youtube', title: '', ...location }
+  assert.deepEqual(homeActivity(viewer.userId), [listEntry])
+  assert.deepEqual(homeActivity(users.stranger), [])
+  const metadata = `/${party.id}/metadata`
+  const title = 'Player / title'
+  for (const unauthorized of [otherDevice, viewer, moderator]) {
+    await assert.rejects(request(unauthorized, 'PATCH', metadata, { title }), { status: 404 })
+  }
+  await assert.rejects(request(host, 'PATCH', metadata, { title: '\u202e' }), { status: 400 })
+  await assert.rejects(request(host, 'PATCH', metadata, { title: 'x'.repeat(1024) }), { status: 413 })
+  const updated = await request(host, 'PATCH', metadata, { title: `\u202e${title}\u0000` })
+  assert.equal(updated.data.party.revision, party.revision)
+  assert.equal(updated.data.party.title, title)
+  assert.equal((await request(host, 'PATCH', metadata, { title })).status, 200)
+  await assert.rejects(request(host, 'PATCH', metadata, { title: 'Another title' }), { status: 409 })
+  assert.equal((await request(viewer)).data.party.title, title)
+  assert.deepEqual(homeActivity(viewer.userId), [{ ...listEntry, title }])
+  viewer.leave()
+  assert.deepEqual(homeActivity(viewer.userId), [])
+  host.revoke()
+  assert.deepEqual(homeActivity(moderator.userId), [])
+})
 
 test('a watch party follows Live channel permissions and synchronizes play, seek and pause', async t => {
   const { request, session, users, tick } = await fixture(t)
@@ -134,7 +166,7 @@ test('a watch party follows Live channel permissions and synchronizes play, seek
 })
 
 test('the server stores original video chunks and serves authenticated byte ranges until the watch party ends', async t => {
-  const { request, session, users, waitForCleanup } = await fixture(t)
+  const { request, session, users, homeActivity, waitForCleanup } = await fixture(t)
   const host = session(users.host)
   const otherDevice = session(users.host)
   const viewer = session(users.viewer)
@@ -150,6 +182,7 @@ test('the server stores original video chunks and serves authenticated byte rang
   const draft = (await request(host, 'POST', '', source)).data.party
   assert.equal(draft.state, 'uploading')
   assert.equal(draft.title, 'Clip .mp4')
+  assert.deepEqual(homeActivity(host.userId), [])
   assert.equal((await request(viewer)).data.party, null)
   const path = `/${draft.id}`
   await assert.rejects(request(viewer, 'GET', `${path}/media`), { status: 404 })
@@ -162,6 +195,8 @@ test('the server stores original video chunks and serves authenticated byte rang
   const ready = (await request(host, 'PUT', `${path}/upload?offset=${chunk}`, tail, fileHeader)).data
   assert.equal(ready.complete, true)
   assert.equal(ready.party.state, 'ready')
+  assert.equal(homeActivity(viewer.userId)[0]?.title, 'Clip .mp4')
+  assert.deepEqual(homeActivity(stranger.userId), [])
   const posted = (await request(viewer)).data.party
   assert.equal(posted.mediaUrl, ready.party.mediaUrl)
   const headers = (await request(viewer, 'HEAD', `${path}/media`)).headers

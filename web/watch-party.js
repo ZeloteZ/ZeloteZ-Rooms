@@ -1,4 +1,4 @@
-import { language, t } from "./i18n.js";
+import { t } from "./i18n.js";
 import { api, button, closeDialog, el, field, form, identifier, showDialog, status, tell } from "./ui.js";
 import { createYoutubePlayer } from "./youtube-player.js";
 
@@ -52,7 +52,7 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
   };
 }
 
-export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
+export function createWatchParty({ signal, user, watchId }, channel, { onSelect, onChange, onUnavailable }) {
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
   const share = button(t("Share video", "Video teilen"), chooseSource, { hidden: true });
@@ -72,11 +72,10 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
       void change("pause");
       return;
     }
-    const duration = surface.getDuration();
-    const restart = Number.isFinite(duration) && duration > 0 && desiredPosition() >= duration - 0.15;
-    if (restart) surface.seek(0);
+    const start = restartPosition();
+    if (start === 0) surface.seek(0);
     surface.play();
-    void change("play", restart ? 0 : undefined);
+    void change("play", start);
   }, { class: "primary" });
   const progress = el("input", { type: "range", min: 0, max: 0, step: 0.1, disabled: true,
     "aria-label": t("Playback position for everyone", "Wiedergabeposition für alle") });
@@ -99,11 +98,14 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
       el("div", { class: "inline watch-party-audio" }, mute, volume, enable), statusNode));
 
   let sample;
+  let hasSnapshot = false;
+  let linkedId = watchId;
   let selectedId;
   let surface;
   let ready = false;
   let lastVolume = 100;
   let appliedRevision;
+  let nativeIntent;
   let canShare = false;
   let canStop = false;
   let scrubbing = false;
@@ -119,6 +121,11 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
     const position = party.position + (party.playing ? Math.max(0, age + now - refreshedAt) / 1000 : 0);
     const duration = surface?.getDuration();
     return Number.isFinite(duration) && duration > 0 ? Math.min(position, duration) : position;
+  }
+
+  function restartPosition() {
+    const duration = surface.getDuration();
+    if (Number.isFinite(duration) && duration > 0 && desiredPosition() >= duration - 0.15) return 0;
   }
 
   function updateVolume() {
@@ -141,11 +148,11 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
 
   function sync(force = false) {
     const party = sample?.party;
-    if (!party || selectedId !== party.id || !surface || !ready) return;
+    if (!party || selectedId !== party.id || !surface || !ready || nativeIntent) return;
     const position = desiredPosition();
     const changed = appliedRevision !== party.revision;
     const drift = Math.abs(surface.getTime() - position);
-    if (force || drift > (party.playing && !changed ? 2.25 : 0.3)) surface.seek(position);
+    if (drift > (force ? 0.075 : party.playing && !changed ? 2.25 : 0.3)) surface.seek(position);
     if (force || changed) {
       appliedRevision = party.revision;
       if (party.playing) surface.play();
@@ -189,6 +196,7 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
     ready = false;
     scrubbing = false;
     appliedRevision = undefined;
+    nativeIntent = undefined;
     clearInterval(clockTimer);
     previous?.destroy();
     media.replaceChildren();
@@ -206,6 +214,19 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
     player.hidden = false;
     resetPlayer(party);
     render();
+  }
+
+  function open(id) {
+    linkedId = id;
+    openDestination();
+  }
+
+  function openDestination() {
+    if (!linkedId || !hasSnapshot || signal.aborted) return;
+    const id = linkedId;
+    linkedId = undefined;
+    if (sample?.party.id === id && sample.party.state === "ready") join();
+    else onUnavailable();
   }
 
   function resetPlayer(party) {
@@ -237,6 +258,20 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
       onBlocked() {
         if (current() && sample?.party.playing) enable.hidden = false;
       },
+      onPlaying() {
+        if (current()) enable.hidden = true;
+      },
+      onPlaybackChange(playing) {
+        if (!current() || !ready) return;
+        nativeIntent = { id: party.id, playing };
+        sendNativeIntent();
+      },
+      onTitle(value) {
+        if (!current() || party.hostId !== user?.id || sample?.party.title) return;
+        const title = [...value.trim()].slice(0, 120).join("");
+        void api(endpoint + "/" + identifier(party.id) + "/metadata", { method: "PATCH", body: { title }, signal })
+          .then(() => schedule(0), () => {});
+      },
     };
     surface = party.source === "youtube" ? createYoutubePlayer(party.videoId, handlers)
       : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers);
@@ -255,10 +290,12 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
     const party = data.party ?? null;
     if (selectedId && selectedId !== party?.id) leaveParty();
     sample = party ? { party, refreshedAt, age: data.serverTime - party.updatedAt + (refreshedAt - requestedAt) / 2 } : null;
+    hasSnapshot = true;
     if (typeof data.canShare === "boolean") canShare = data.canShare;
     if (typeof data.canStop === "boolean") canStop = data.canStop;
     sync();
     render();
+    openDestination();
   }
 
   function schedule(delay = sample?.party ? 1200 : 4000) {
@@ -302,8 +339,22 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
       if (!signal.aborted) {
         render();
         schedule(0);
+        sendNativeIntent();
       }
     }
+  }
+
+  function sendNativeIntent() {
+    if (!nativeIntent || busy || signal.aborted) return;
+    const intent = nativeIntent;
+    nativeIntent = undefined;
+    const party = sample?.party;
+    if (selectedId !== intent.id || party?.id !== intent.id || !ready) return;
+    if (intent.playing === party.playing) {
+      sync(true);
+      return;
+    }
+    void change(intent.playing ? "play" : "pause", intent.playing ? restartPosition() : undefined);
   }
 
   function change(action, position) {
@@ -321,6 +372,10 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
           sync(true);
           throw error;
         }
+        appliedRevision = undefined;
+        const refreshedAt = performance.now();
+        const newest = await api(endpoint, { signal });
+        if (!signal.aborted) apply(newest, refreshedAt);
         tell(statusNode, t("Playback changed in the room. The player will catch up.", "Die Wiedergabe wurde im Raum geändert. Der Player gleicht sie ab."));
       }
     });
@@ -430,5 +485,5 @@ export function createWatchParty({ signal }, channel, { onSelect, onChange }) {
     leaveParty();
   }, { once: true });
   schedule(0);
-  return { share, card, player, active: () => sample?.party.state === "ready", selected: () => Boolean(selectedId), leave: leaveParty };
+  return { share, card, player, active: () => sample?.party.state === "ready", selected: () => Boolean(selectedId), leave: leaveParty, open };
 }

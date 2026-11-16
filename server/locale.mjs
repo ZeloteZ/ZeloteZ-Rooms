@@ -113,6 +113,7 @@ const catalogs = {
       'Ungültige Videosteuerung.': 'Invalid playback action.',
       'Ungültige YouTube-Video-ID.': 'Invalid YouTube video ID.',
       'Ungültiger Videoabschnitt.': 'Invalid video segment.',
+      'Ungültiger Videotitel.': 'Invalid video title.',
       'Ungültige Channel-Reihenfolge.': 'Invalid channel order.',
       'Ungültige Designeinstellung.': 'Invalid design setting.',
       'Ungültige JSON-Anfrage.': 'Invalid JSON request.',

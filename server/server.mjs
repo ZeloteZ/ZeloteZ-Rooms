@@ -28,6 +28,8 @@ if ((origin.protocol !== 'https:' && (!localHttp || trustProxyIp)) || origin.hre
 process.umask(0o077)
 const dataDir = process.env.APP_DATA_DIR ?? '/data'
 mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+// SQLite needs writable scratch space for cascading deletes on a read-only container filesystem.
+process.env.SQLITE_TMPDIR ??= dataDir
 const db = new DatabaseSync(join(dataDir, 'community.sqlite'), { timeout: 5000 })
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 67108864')
 const appearance = createAppearance(db)
@@ -104,7 +106,8 @@ const publicApi = service(async (request, response) => {
     if (request.method === 'GET' && path === '/api/home/activity') {
       const live = await streams.homeActivity(user.id)
       requireSession(request)
-      return json(response, 200, { ...live, activities: community.homeActivity(user.id), talkRooms: voice.homeActivity(user.id) })
+      return json(response, 200, { ...live, activities: community.homeActivity(user.id),
+        talkRooms: voice.homeActivity(user.id), watchParties: watchParties.homeActivity(user.id) })
     }
     if (await appearance.handle(request, response, path, requireSession)) return
     if (await tutorials.handle(request, response, path)) return

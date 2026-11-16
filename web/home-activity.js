@@ -26,6 +26,18 @@ function streamLink(stream) {
     el("span", { class: "tag live" }, "Live")));
 }
 
+function watchLink(party) {
+  const source = party.source === "youtube" ? "YouTube" : t("Local video", "Lokales Video");
+  return el("li", {}, el("a", {
+    class: "home-activity-card", href: topicHref(party.topicId, party.channelId, { watchId: party.id }),
+    "data-feed-id": "watch-" + party.id,
+  }, el("span", { class: "avatar", "aria-hidden": "true" }, "▶"),
+    el("span", { class: "home-activity-copy" },
+      el("span", { class: "home-live-person home-activity-snippet" }, party.title || t("Watch party", "Watchparty")),
+      el("span", { class: "home-activity-location" }, party.topicTitle + " · " + party.channelTitle)),
+    el("span", { class: "tag" }, source)));
+}
+
 function talkLink(room) {
   const names = room.members.slice(0, 3).map(member => personName({ ...member, id: member.userId }));
   const extra = room.members.length - names.length;
@@ -85,7 +97,7 @@ export function renderHomeActivity({ signal }) {
         const members = room.members.filter(member => !wasVoiceReleased(member.id));
         return members.length ? [{ ...room, members }] : [];
       });
-      const liveCards = [...result.streams.map(streamLink), ...talkRooms.map(talkLink)];
+      const liveCards = [...result.streams.map(streamLink), ...(result.watchParties ?? []).map(watchLink), ...talkRooms.map(talkLink)];
       setList(streams, streamNote, liveCards, result.streamsAvailable
         ? t("Nobody is streaming or talking in your rooms right now.", "In deinen Räumen streamt oder spricht gerade niemand.")
         : t("Live status is unavailable right now.", "Der Live-Status ist gerade nicht erreichbar."));

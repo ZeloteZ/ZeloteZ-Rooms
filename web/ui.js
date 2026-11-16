@@ -266,10 +266,11 @@ export function identifier(value) {
   return encodeURIComponent(String(value));
 }
 
-export function topicHref(id, channelId = null, { messageId, streamId } = {}) {
+export function topicHref(id, channelId = null, { messageId, streamId, watchId } = {}) {
   const query = new URLSearchParams();
   if (messageId) query.set("message", messageId);
   if (streamId) query.set("stream", streamId);
+  if (watchId) query.set("watch", watchId);
   const base = "#/rooms/" + identifier(id) + (channelId === null ? "" : "/" + identifier(channelId));
   return query.size ? base + "?" + query : base;
 }

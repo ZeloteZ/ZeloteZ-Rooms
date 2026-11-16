@@ -220,7 +220,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   const countOwnedRooms = db.prepare(`SELECT count(*) AS count FROM topics t WHERE owner_id = ? AND ${listedTopic}`)
   const storageFor = db.prepare('SELECT messages, bytes FROM chat_storage WHERE scope = ?')
   const findChannel = db.prepare(`SELECT c.*, CASE WHEN d.id IS NULL THEN m.role ELSE 'member' END AS role,
-    (d.id IS NOT NULL) AS is_direct, t.stream_policy AS topic_stream_policy FROM channels c
+    (d.id IS NOT NULL) AS is_direct, t.stream_policy AS topic_stream_policy, t.title AS topic_title FROM channels c
     JOIN topics t ON t.id = c.topic_id
     JOIN topic_members m ON m.topic_id = c.topic_id AND m.user_id = ? AND m.joined_at IS NOT NULL
     LEFT JOIN direct_conversations d ON d.topic_id = c.topic_id
@@ -287,7 +287,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     const canManage = channel.role === 'owner' || channel.role === 'admin'
     const canStream = channel.topic_stream_policy !== 'disabled' &&
       (canManage || (channel.topic_stream_policy === 'all' && channel.stream_policy === 'all'))
-    return { canView: true, canManage, canStream }
+    return { canView: true, canManage, canStream, topicId: channel.topic_id, topicTitle: channel.topic_title, channelTitle: channel.title }
   }
 
   function requireManager(role) {
