@@ -22,22 +22,26 @@ function settings(state) {
 
   function render() {
     document.documentElement.lang = language;
+    document.body.dataset.settingsView = editing ? state.currentOrigin ? "server" : "setup" : "preferences";
     control("heading").textContent = editing
-      ? state.currentOrigin ? t("Change server", "Server wechseln") : t("Connect to ZeloteZ Rooms", "Mit ZeloteZ Rooms verbinden")
+      ? state.currentOrigin ? t("Change server", "Server wechseln") : t("Connect to your server", "Mit deinem Server verbinden")
       : t("Desktop settings", "Desktop-Einstellungen");
     control("description").textContent = editing
       ? state.currentOrigin
         ? t("Your current room stays open until you connect to the new server.", "Dein aktueller Raum bleibt offen, bis du dich mit dem neuen Server verbindest.")
-        : t("Enter the address of your ZeloteZ Rooms server to get started.", "Gib zunächst die Adresse deines ZeloteZ-Rooms-Servers ein.")
+        : t("Enter the Rooms address your host shared with you.", "Gib die Rooms-Adresse ein, die dir der Betreiber gegeben hat.")
       : t("These preferences apply to this device.", "Diese Einstellungen gelten für dieses Gerät.");
+    control("display-heading").textContent = t("Display", "Anzeige");
     control("language-label").textContent = t("App language", "App-Sprache");
     control("language-detail").textContent = t("Menus and desktop dialogs", "Menüs und Desktop-Dialoge");
     control("appearance-label").textContent = t("Appearance", "Erscheinungsbild");
     control("appearance-detail").textContent = t("Desktop dialogs", "Desktop-Dialoge");
+    control("background-heading").textContent = t("Background activity", "Hintergrundaktivität");
     control("notifications-label").textContent = t("System notifications", "Systembenachrichtigungen");
     control("notifications-detail").textContent = t("Show new activity while the app is running", "Neue Aktivitäten anzeigen, solange die App läuft");
     control("keep-running-label").textContent = t("Keep Rooms running", "Rooms weiterlaufen lassen");
     control("keep-running-detail").textContent = t("Keep calls and streams active when you close the window", "Anrufe und Streams beim Schließen des Fensters fortsetzen");
+    control("connection-heading").textContent = t("Connection", "Verbindung");
     control("current-server-label").textContent = t("Current server", "Aktueller Server");
     control("change-server").textContent = t("Change…", "Wechseln …");
     control("done").textContent = t("Done", "Fertig");
@@ -52,7 +56,7 @@ function settings(state) {
     back.textContent = t("Back", "Zurück");
 
     const messages = {
-      hint: t("The address is checked before anything opens.", "Die Adresse wird geprüft, bevor etwas geöffnet wird."),
+      hint: t("Rooms checks the address before you connect.", "Rooms prüft die Adresse, bevor du dich verbindest."),
       invalid: t("Enter an HTTPS server address without a path.", "Gib eine HTTPS-Serveradresse ohne Pfad ein."),
       unreachable: t("The server couldn’t be reached securely. Check the address and your connection.", "Der Server konnte nicht sicher erreicht werden. Prüfe die Adresse und deine Verbindung."),
       not_rooms: t("This address didn’t identify itself as a ZeloteZ Rooms server.", "Unter dieser Adresse wurde kein ZeloteZ-Rooms-Server erkannt."),
@@ -68,8 +72,14 @@ function settings(state) {
     status.textContent = messages[statusKey] ?? messages.unavailable;
     status.className = "status" + (["hint", "current"].includes(statusKey) ? "" : statusKey === "verified" ? " success" : " error");
     const busy = phase !== "idle";
+    if (busy) {
+      status.className = "status pending";
+      status.textContent = phase === "checking"
+        ? t("Checking the server address…", "Die Serveradresse wird geprüft …")
+        : t("Opening your Rooms server…", "Dein Rooms-Server wird geöffnet …");
+    }
     address.disabled = busy;
-    form.setAttribute("aria-busy", String(busy));
+    address.setAttribute("aria-invalid", String(statusKey === "invalid"));
     check.disabled = busy;
     check.classList.toggle("primary", !verifiedOrigin);
     connect.hidden = !verifiedOrigin;
@@ -146,8 +156,11 @@ function settings(state) {
     } finally {
       phase = "idle";
       render();
-      check.focus();
+      (verifiedOrigin ? connect : address).focus();
     }
+  });
+  connect.addEventListener("keydown", event => {
+    if (event.key === "Enter" && event.repeat) event.preventDefault();
   });
   connect.addEventListener("click", async () => {
     if (!verifiedOrigin || phase !== "idle") return;
@@ -179,27 +192,6 @@ async function setup() {
   }
   const t = (en, de) => state.language === "de" ? de : en;
   document.documentElement.lang = state.language;
-  if (state.mode === "tray-hint") {
-    control("heading").textContent = t("Minimize ZeloteZ Rooms?", "ZeloteZ Rooms minimieren?");
-    control("description").textContent = t("Rooms stays open in the background so calls and streams can continue.", "Rooms bleibt im Hintergrund geöffnet. Anrufe und Streams laufen weiter.");
-    control("tray-note").textContent = state.hasTray
-      ? t("Use the Rooms icon in the system tray to reopen the window.", "Über das Rooms-Symbol im Infobereich öffnest du das Fenster wieder.")
-      : t("Use the taskbar to reopen the window.", "Über die Taskleiste öffnest du das Fenster wieder.");
-    control("tray-suppress-label").textContent = t("Don’t show again", "Nicht wieder anzeigen");
-    const quit = control("tray-quit");
-    const confirm = control("tray-confirm");
-    quit.textContent = t("Quit completely", "Ganz schließen");
-    confirm.textContent = "OK";
-    function selectAction(action) {
-      bridge.closeAction(action, control("tray-suppress").checked);
-    }
-    quit.addEventListener("click", () => selectAction("quit"));
-    confirm.addEventListener("click", () => selectAction("minimize"));
-    document.addEventListener("keydown", event => { if (event.key === "Escape") bridge.cancel(); });
-    control("tray-hint").hidden = false;
-    confirm.focus();
-    return;
-  }
   control("picker-cancel").textContent = t("Cancel", "Abbrechen");
   control("picker-cancel").addEventListener("click", () => bridge.cancel());
   document.addEventListener("keydown", event => {

@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, session, shell } = require("electron");
 const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -12,12 +12,19 @@ const { trayHostAvailable, trayUsable } = require("./tray.cjs");
 
 const localPage = path.join(__dirname, "ui", "index.html");
 const localUrl = pathToFileURL(localPage).href;
+const titlebarPage = path.join(__dirname, "ui", "titlebar.html");
+const titlebarUrl = pathToFileURL(titlebarPage).href;
+const titlebarHeight = 40;
+const closePage = path.join(__dirname, "ui", "close.html");
+const closeUrl = pathToFileURL(closePage).href;
 const appIcon = path.join(__dirname, "ui", "icon.png");
 const localWindows = new Map();
 const notifications = desktopNotifications(appIcon);
 let roomsWindow;
+let roomsContents;
 let roomsDocumentIsActive;
 let settingsWindow;
+let closeConfirmation;
 let tray;
 let trayInitializing;
 let connection = 0;
@@ -113,21 +120,47 @@ function saveSettings(changes) {
 function applyPreferences() {
   german = desktopSettings.language === "system" ? app.getLocale().toLowerCase().startsWith("de") : desktopSettings.language === "de";
   nativeTheme.themeSource = desktopSettings.appearance;
+  if (roomsWindow) updateTitlebar(roomsWindow);
   menus();
   updateTray();
   if (!desktopSettings.notifications) notifications.clear();
 }
 
+function titlebarOverlay() {
+  return {
+    height: titlebarHeight,
+    color: nativeTheme.shouldUseDarkColors ? "#0b0b0e" : "#f4f4f8",
+    symbolColor: nativeTheme.shouldUseDarkColors ? "#efeff4" : "#27272f",
+  };
+}
+
+function updateTitlebar(window) {
+  if (window.isDestroyed()) return;
+  if (process.platform !== "darwin") window.setTitleBarOverlay(titlebarOverlay());
+  window.webContents.send("rooms:titlebar-language", german ? "de" : "en");
+}
+
+ipcMain.handle("rooms:titlebar-settings", event => {
+  const frame = event.senderFrame;
+  if (!roomsWindow || roomsWindow.isDestroyed() || event.sender !== roomsWindow.webContents
+      || !frame || frame.detached || frame !== event.sender.mainFrame || frame.url !== titlebarUrl) return;
+  showSettings();
+});
+
 function localWindow(mode, state, parent) {
   const settings = mode === "settings";
-  const title = mode === "audio" ? text("Choose audio", "Tonquelle auswählen")
-    : mode === "picker" ? text("Share your screen", "Bildschirm teilen") : "ZeloteZ Rooms";
+  const titles = {
+    audio: text("Choose audio", "Tonquelle auswählen"),
+    picker: text("Share your screen", "Bildschirm teilen"),
+    settings: state.currentOrigin ? text("Desktop settings", "Desktop-Einstellungen") : "ZeloteZ Rooms",
+  };
   const window = new BrowserWindow({
     parent, modal: Boolean(parent) && !settings, show: false, icon: appIcon, autoHideMenuBar: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#15151b" : "#f6f5fb",
-    title,
-    width: settings ? 570 : mode === "tray-hint" ? 450 : 745,
-    height: settings ? (state.currentOrigin ? 560 : 395) : mode === "tray-hint" ? 365 : 590,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b0b0e" : "#f4f6fb",
+    title: titles[mode],
+    useContentSize: settings,
+    width: settings ? 610 : 745,
+    height: settings ? (state.currentOrigin ? 625 : 436) : 590,
     minWidth: 340, minHeight: 310,
     webPreferences: {
       preload: path.join(__dirname, "local-preload.cjs"), sandbox: true, contextIsolation: true,
@@ -165,11 +198,19 @@ ipcMain.handle("rooms:local-submit", (event, input) => {
   return true;
 });
 
-ipcMain.handle("rooms:local-close-action", (event, action, suppress) => {
-  const local = localSender(event);
-  if (local?.state.mode !== "tray-hint" || (action !== "minimize" && action !== "quit") || typeof suppress !== "boolean") return false;
-  local.closeChoice = { action, suppress };
-  local.window.close();
+function closeSender(event) {
+  const confirmation = closeConfirmation;
+  const frame = event.senderFrame;
+  return confirmation?.contents === event.sender && frame && !frame.detached
+    && frame === event.sender.mainFrame && frame.url === closeUrl ? confirmation : null;
+}
+
+ipcMain.handle("rooms:close-state", event => closeSender(event)?.state ?? null);
+ipcMain.handle("rooms:close-decision", (event, action, suppress) => {
+  const confirmation = closeSender(event);
+  if (!confirmation || !["dismiss", "minimize", "quit"].includes(action) || typeof suppress !== "boolean") return false;
+  if (action !== "dismiss") confirmation.choice = { action, suppress };
+  confirmation.window.close();
   return true;
 });
 
@@ -317,28 +358,59 @@ function configureTray() {
 }
 
 function confirmClose(window, hasTray) {
-  const local = localWindow("tray-hint", { hasTray }, window);
-  return new Promise(resolve => {
-    local.window.once("closed", () => resolve(local.closeChoice));
+  const hint = new BrowserWindow({
+    parent: window, modal: true, show: false, frame: false, useContentSize: true, skipTaskbar: true,
+    width: 460, height: 335, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    icon: appIcon, title: text("Minimize ZeloteZ Rooms", "ZeloteZ Rooms minimieren"),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#141419" : "#fff",
+    webPreferences: {
+      preload: path.join(__dirname, "close-preload.cjs"), sandbox: true, contextIsolation: true,
+      nodeIntegration: false, webviewTag: false,
+    },
   });
+  const contents = hint.webContents;
+  const confirmation = closeConfirmation = { window: hint, contents, state: { hasTray, language: german ? "de" : "en" } };
+  const result = new Promise(resolve => {
+    hint.once("closed", () => {
+      if (closeConfirmation === confirmation) closeConfirmation = null;
+      resolve(confirmation.choice ?? null);
+    });
+  });
+  const dismiss = () => { if (!hint.isDestroyed()) hint.destroy(); };
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-frame-navigate", event => event.preventDefault());
+  contents.on("will-redirect", event => event.preventDefault());
+  contents.once("render-process-gone", dismiss);
+  hint.once("ready-to-show", () => hint.show());
+  hint.loadFile(closePage).catch(dismiss);
+  return result;
 }
 
 async function moveToBackground(window) {
-  if (backgrounding) return;
+  if (backgrounding) {
+    const hint = closeConfirmation?.window;
+    if (hint && !hint.isDestroyed()) hint.focus();
+    return;
+  }
   backgrounding = true;
   try {
     if (!tray) updateTray();
     await trayInitializing?.catch(() => {});
     const hasTray = await trayUsable(tray).catch(() => false);
     if (quitting || window !== roomsWindow || !desktopSettings.keepRunning) return;
+    let suppress = false;
     if (!desktopSettings.suppressCloseHint) {
       const choice = await confirmClose(window, hasTray);
-      if (!choice || quitting || window !== roomsWindow) return;
-      if (choice.suppress) await saveSettings({ suppressCloseHint: true }).catch(() => {});
+      if (quitting || window !== roomsWindow) return;
+      if (!choice) {
+        if (window.isVisible() && !window.isMinimized()) window.focus();
+        return;
+      }
       if (choice.action === "quit") {
         app.quit();
         return;
       }
+      suppress = choice.suppress;
     }
     const canHide = hasTray && await trayUsable(tray).catch(() => false);
     if (quitting || window !== roomsWindow || !desktopSettings.keepRunning) return;
@@ -346,13 +418,14 @@ async function moveToBackground(window) {
       settingsWindow?.close();
       window.hide();
     } else window.minimize();
+    if (suppress) await saveSettings({ suppressCloseHint: true }).catch(() => {});
   } finally {
     backgrounding = false;
   }
 }
 
 function isRoomsSender(event) {
-  return roomsDocumentIsActive?.() && event.sender === roomsWindow.webContents &&
+  return roomsDocumentIsActive?.() && event.sender === roomsContents &&
     event.senderFrame && !event.senderFrame.detached && event.senderFrame === event.sender.mainFrame &&
     isRoomsPage(event.senderFrame.url, currentOrigin);
 }
@@ -360,15 +433,15 @@ function isRoomsSender(event) {
 ipcMain.handle("rooms:desktop-notify", (event, input) => {
   if (!desktopSettings.notifications || !isRoomsSender(event)) return false;
   const window = roomsWindow;
+  const contents = event.sender;
   return notifications.show(input, href => {
-    if (window !== roomsWindow || !roomsDocumentIsActive?.() || !isRoomsPage(window.webContents.getURL(), currentOrigin)) return;
+    if (window !== roomsWindow || !roomsDocumentIsActive?.() || !isRoomsPage(contents.getURL(), currentOrigin)) return;
     restoreWindow(window);
-    window.webContents.executeJavaScript(`location.hash = ${JSON.stringify(href)}`).catch(() => {});
+    contents.executeJavaScript(`location.hash = ${JSON.stringify(href)}`).catch(() => {});
   });
 });
 
-function installPermissions(window, origin, media, isActive) {
-  const web = window.webContents;
+function installPermissions(window, web, origin, media, isActive) {
   let microphone = false;
   let microphonePrompt;
   let picking = false;
@@ -442,7 +515,20 @@ function prepareRoomsWindow(origin) {
   const media = session.fromPartition("rooms:" + ++connection);
   const window = new BrowserWindow({
     title: "ZeloteZ Rooms", width: 1240, height: 790, minWidth: 360, minHeight: 360, show: false,
-    icon: appIcon, backgroundColor: "#15151b", autoHideMenuBar: true,
+    icon: appIcon, backgroundColor: "#141419", autoHideMenuBar: true, titleBarStyle: "hidden",
+    titleBarOverlay: process.platform === "darwin" ? true : titlebarOverlay(),
+    webPreferences: {
+      preload: path.join(__dirname, "titlebar-preload.cjs"),
+      sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false,
+    },
+  });
+  const chrome = window.webContents;
+  chrome.setWindowOpenHandler(() => ({ action: "deny" }));
+  chrome.on("will-frame-navigate", event => event.preventDefault());
+  chrome.on("will-redirect", event => event.preventDefault());
+  chrome.on("did-finish-load", () => updateTitlebar(window));
+
+  const view = new WebContentsView({
     webPreferences: {
       session: media, preload: path.join(__dirname, "rooms-preload.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false,
@@ -450,7 +536,21 @@ function prepareRoomsWindow(origin) {
         ...(captureProgram.embedded ? ["--rooms-embedded-preview"] : [])] : [],
     },
   });
-  const contents = window.webContents;
+  window.contentView.addChildView(view);
+  view.setBackgroundColor("#141419");
+  const contents = view.webContents;
+  let htmlFullScreen = false;
+  const layout = () => {
+    const [width, height] = window.getContentSize();
+    const y = htmlFullScreen || window.isFullScreen() ? 0 : titlebarHeight;
+    view.setBounds({ x: 0, y, width, height: Math.max(0, height - y) });
+  };
+  layout();
+  window.on("resize", layout);
+  window.on("enter-full-screen", layout);
+  window.on("leave-full-screen", layout);
+  contents.on("enter-html-full-screen", () => { htmlFullScreen = true; layout(); });
+  contents.on("leave-html-full-screen", () => { htmlFullScreen = false; layout(); });
   let documentVerified = false;
   let closing = false;
   const isActive = () => roomsWindow === window && documentVerified && !window.isDestroyed() && !contents.isDestroyed();
@@ -467,7 +567,7 @@ function prepareRoomsWindow(origin) {
     if (allowed(details)) documentVerified = accept;
     callback({ cancel: !accept });
   });
-  installPermissions(window, origin, media, isActive);
+  installPermissions(window, contents, origin, media, isActive);
   installNativeCapture(contents, captureProgram, origin, media, value => isActive() && isRoomsPage(value, origin));
   contents.on("will-frame-navigate", event => {
     if (!event.isMainFrame || !isRoomsPage(event.url, origin)) event.preventDefault();
@@ -490,15 +590,18 @@ function prepareRoomsWindow(origin) {
     moveToBackground(window).catch(() => {});
   });
   window.on("closed", () => {
+    if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: closing });
     if (roomsWindow === window) {
       roomsWindow = null;
+      roomsContents = null;
       roomsDocumentIsActive = null;
       currentOrigin = "";
       notifications.clear();
       updateTray();
     }
   });
-  return { window, isActive, verified: () => documentVerified && !window.isDestroyed() && isRoomsPage(contents.getURL(), origin) };
+  return { window, contents, isActive, verified: () => documentVerified
+    && !window.isDestroyed() && !contents.isDestroyed() && isRoomsPage(contents.getURL(), origin) };
 }
 
 async function connect(origin, { signal, local } = {}) {
@@ -515,7 +618,7 @@ async function connect(origin, { signal, local } = {}) {
     const abort = () => { if (!window.isDestroyed()) window.destroy(); };
     loading.addEventListener("abort", abort, { once: true });
     try {
-      await window.loadURL(origin + "/");
+      await Promise.all([window.loadFile(titlebarPage), prepared.contents.loadURL(origin + "/")]);
       loading.throwIfAborted();
       if (!prepared.verified()) return { error: "load" };
     } finally {
@@ -535,10 +638,12 @@ async function connect(origin, { signal, local } = {}) {
     if (!prepared.verified()) return { error: "load" };
     notifications.clear();
     roomsWindow = window;
+    roomsContents = prepared.contents;
     roomsDocumentIsActive = prepared.isActive;
     currentOrigin = origin;
     local?.window.close();
     window.show();
+    roomsContents.focus();
     updateTray();
     previous?.close();
     return true;
@@ -573,6 +678,7 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === "win32") app.setAppUserModelId("de.zelotez.rooms");
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    nativeTheme.on("updated", () => { if (roomsWindow) updateTitlebar(roomsWindow); });
     const legacyLinuxAddress = await loadSettings();
     applyPreferences();
     captureProgram = await nativeHelper();
