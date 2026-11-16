@@ -19,6 +19,13 @@ PREVIEW_PIPELINE = (
     "! gtk4paintablesink name=preview sync=false async=false qos=false enable-last-sample=false"
 )
 AAC_ENCODERS = ("fdkaacenc", "avenc_aac", "voaacenc", "faac")
+PREVIEW_MAX_BYTES = 128 * 1024
+JPEG_PREVIEW_PIPELINE = (
+    "published_video. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 max-size-time=0 ! "
+    "videorate drop-only=true ! video/x-raw,framerate=12/1 ! videoconvertscale ! "
+    "video/x-raw,format=I420,width=640,height=360,pixel-aspect-ratio=1/1 ! jpegenc quality=70 ! "
+    "appsink name=local_preview sync=false async=false emit-signals=true max-buffers=1 drop=true wait-on-eos=false"
+)
 
 
 @dataclass(frozen=True)
@@ -124,7 +131,8 @@ class CapturePipeline:
             return width, height
         return None
 
-    def publish(self, destination, key, quality, region=None, audio_serial=None, cancelled=None, *, audio_monitor=False):
+    def publish(self, destination, key, quality, region=None, audio_serial=None, cancelled=None, *,
+                audio_monitor=False, preview_frame=None):
         if self.publish_branch is not None:
             raise RuntimeError(t("A stream is already active."))
         size = self.source_size()
@@ -147,6 +155,11 @@ class CapturePipeline:
             "videoconvertscale add-borders=true ! "
             f"video/x-raw,format=I420,pixel-aspect-ratio=1/1,width={quality.width},height={quality.height},"
             f"framerate={quality.fps}/1 ! "
+        )
+        if preview_frame is not None:
+            # Share exactly the resized/cropped video entering the encoder, through a leaky local branch.
+            video += "tee name=published_video ! "
+        video += (
             f"x264enc speed-preset=veryfast tune=zerolatency bitrate={quality.bitrate} "
             f"key-int-max={quality.fps} bframes=0 ! "
             "h264parse ! video/x-h264,stream-format=avc,alignment=au,profile=high ! "
@@ -159,7 +172,11 @@ class CapturePipeline:
         description = f"{video} ! {output}"
         if audio_serial is not None:
             description = f"{video} ! stream_mux.video {output} {self._audio_output(audio_serial)}"
+        if preview_frame is not None:
+            description += " " + JPEG_PREVIEW_PIPELINE
         branch = Gst.parse_bin_from_description(description, True)
+        if preview_frame is not None:
+            branch.get_by_name("local_preview").connect("new-sample", self._preview_sample, preview_frame)
         audio_source = branch.get_by_name("capture_audio")
         if audio_source is not None:
             if not audio_source.find_property("target-object"):
@@ -221,6 +238,16 @@ class CapturePipeline:
             if self.publish_branch is None:
                 self._remove_publish_branch(branch, pad)
             pad.remove_probe(probe)
+
+    @staticmethod
+    def _preview_sample(sink, callback):
+        sample = sink.emit("pull-sample")
+        if sample is not None:
+            buffer = sample.get_buffer()
+            size = buffer.get_size()
+            if 0 < size <= PREVIEW_MAX_BYTES:
+                callback(buffer.extract_dup(0, size))
+        return Gst.FlowReturn.OK
 
     @staticmethod
     def _audio_output(audio_serial):

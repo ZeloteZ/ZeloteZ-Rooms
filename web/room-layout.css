@@ -40,10 +40,14 @@
   min-inline-size: 0;
 }
 
-.room-layout[data-player="full"] {
-  grid-template-areas: "channels player activity" "channels content activity";
-  grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr);
+.room-layout[data-live-channel] {
+  grid-template-columns: clamp(9rem, 15vi, 14rem) minmax(0, 1fr);
+  grid-template-areas: "channels content";
 }
+
+.room-layout[data-live-channel][data-activity-view] { grid-template-areas: "channels activity"; }
+.room-layout[data-live-channel]:not([data-activity-view]) .room-activity,
+.room-layout[data-live-channel][data-activity-view] .channel-content { display: none; }
 
 .room-layout .channel-sidebar {
   position: static;
@@ -148,16 +152,119 @@
   max-block-size: none;
 }
 
-.live-channel { container: live-channel / inline-size; gap: 12px; padding: clamp(10px, 1.5vi, 18px); }
-.live-channel-overview { display: grid; align-items: start; gap: 12px; }
-.live-channel-streams { display: grid; gap: 7px; min-inline-size: 0; padding: 2px; }
-.live-channel-streams > .inline:not(:has(> :not([hidden]))), .live-channel-streams .stream-list:empty { display: none; }
+.room-layout[data-live-channel] .room-activity-toggle { display: inline-flex; }
+.room-layout .room-activity-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--raised);
+}
+
+.live-channel {
+  container: live-channel / inline-size;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(7px, 1.35dvh, 13px);
+  block-size: 100%;
+  min-block-size: 0;
+  padding: clamp(8px, 1.4vi, 16px);
+}
+
+.live-channel-toolbar { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 9px; }
+.live-channel-title { flex: 1 1 10rem; min-inline-size: 0; }
+.live-channel-title h2 { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-channel-count { flex: none; }
+.live-channel-tools { gap: 5px; }
+.live-channel-tools .button { min-block-size: 34px; padding-block: 5px; }
+.live-channel-toolbar > .status:not([hidden]) { flex-basis: 100%; }
+
+.live-channel-share-settings summary { list-style: none; cursor: pointer; }
+.live-channel-share-settings summary::-webkit-details-marker { display: none; }
+.live-channel-share-settings[open] summary { border-color: var(--accent); }
+.live-channel-share-options {
+  position: absolute;
+  inset-block-start: calc(100% + 5px);
+  inset-inline-end: 0;
+  z-index: 3;
+  inline-size: min(17rem, 76vi);
+  padding: 10px;
+  box-shadow: 0 12px 30px #0008;
+}
+
+.live-channel-body {
+  display: grid;
+  grid-template: "watch" minmax(6.5rem, 1.15fr) "switch" auto "support" minmax(6rem, 1fr) / minmax(0, 1fr);
+  gap: clamp(6px, 1.15dvh, 12px);
+  min-block-size: 0;
+  min-inline-size: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.live-channel-watch { grid-area: watch; display: grid; min-inline-size: 0; min-block-size: 0; }
+.live-channel-watch > * { grid-area: 1 / 1; min-inline-size: 0; min-block-size: 0; }
+.live-channel-placeholder {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding: 12px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 10%, var(--panel)), var(--panel));
+}
+.live-channel-watch:has(> .live-channel-player[data-player="full"], > .screen-preview:not([hidden]), > .live-channel-native > :not([hidden])) > .live-channel-placeholder,
+.live-channel-player:not([data-player="full"]),
+.live-channel-native:not(:has(> :not([hidden]))),
+.live-channel-player[data-player="full"] ~ .live-channel-native { display: none; }
+.live-channel-player, .live-channel-native { display: grid; }
+.live-channel-native { overflow: auto; scrollbar-width: thin; }
+.live-channel-player > .live-player { grid-area: 1 / 1; }
+.live-channel-player > .live-player,
+.live-channel-watch > .screen-preview:not([hidden]) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  padding: clamp(5px, 1vi, 10px);
+  min-block-size: 0;
+  min-inline-size: 0;
+}
+.live-channel-watch > .screen-preview { padding: 0; }
+.live-channel-watch .stage { aspect-ratio: auto; min-block-size: 0; }
+.live-channel-watch .stage-overlay { align-content: safe end; overflow: auto; padding: clamp(7px, 1.4vi, 20px); }
+.live-channel-watch .stage-overlay .stack { gap: 2px; }
+.live-channel-watch .stage-overlay h3 { font-size: clamp(1rem, 2.4vi, 1.85rem); }
+
+.live-channel-switch { grid-area: switch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.live-channel-switch .button { min-block-size: 34px; padding: 4px 6px; }
+.live-channel-switch .button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.live-channel-people, .live-channel-chat { grid-area: support; min-inline-size: 0; min-block-size: 0; }
+.live-channel-people { display: grid; align-content: start; gap: 8px; padding: 2px; overflow: auto; }
+.live-channel[data-panel="chat"] .live-channel-people,
+.live-channel[data-panel="people"] .live-channel-chat { display: none; }
+.live-channel-streams:not([hidden]) { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 5px; min-block-size: 0; min-inline-size: 0; }
+.live-channel-streams .stream-list { overflow: auto; padding: 2px; scrollbar-width: thin; }
+.live-channel-streams .stream-pick { min-block-size: 39px; padding: 5px 7px; }
+.live-channel-streams .stream-identity { min-inline-size: 0; overflow-wrap: anywhere; }
 .voice-inline { min-inline-size: 0; }
 .live-channel .voice-roster { max-block-size: min(7rem, 18dvh); }
-@container live-channel (min-width: 32rem) {
-  .live-channel-overview { grid-template-columns: minmax(13rem, 4fr) minmax(0, 6fr); }
+.live-channel-chat { display: grid; }
+.live-channel-chat-content:not([hidden]) { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 5px; min-block-size: 0; }
+.live-channel-chat .stream-chat { grid-template-rows: auto minmax(0, 1fr) auto auto; min-block-size: 0; padding: 8px; }
+.live-channel-chat .stream-chat-scroll { max-block-size: none; min-block-size: 0; }
+.live-channel-chat .live-channel-chat-empty { grid-template-rows: auto auto; align-content: start; }
+.live-channel-chat .stream-viewers { max-block-size: min(9dvh, 72px); }
+
+@container live-channel (min-width: 42rem) {
+  .live-channel-body {
+    grid-template: "watch chat" minmax(8rem, 1fr) "people chat" minmax(6rem, .47fr) / minmax(0, 1fr) minmax(16rem, .53fr);
+  }
+  .live-channel-switch { display: none; }
+  .live-channel-people { grid-area: people; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: stretch; }
+  .live-channel-streams[hidden] + .voice-inline { grid-column: 1 / -1; }
+  .live-channel-chat { grid-area: chat; }
+  .live-channel[data-panel] .live-channel-people,
+  .live-channel[data-panel] .live-channel-chat { display: grid; }
 }
-.screen-preview .stage { max-block-size: clamp(8rem, 32dvh, 18rem); }
 
 .desktop-share-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .desktop-share-controls > .inline { align-self: end; min-block-size: 2.5rem; }
@@ -166,41 +273,14 @@
 .desktop-crop-stage video { display: block; width: 100%; height: min(52dvh, 32rem); object-fit: contain; pointer-events: none; }
 .desktop-crop-selection { position: absolute; border: 2px solid #93a2ff; box-shadow: 0 0 0 200vmax #08090da6; pointer-events: none; }
 
-.room-layout > .live-player[data-mode="full"] {
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
-  min-block-size: 0;
-  padding: clamp(7px, 1.3vi, 14px);
-}
-
-.room-layout > .live-player[data-mode="full"] .stage {
-  aspect-ratio: auto;
-  min-block-size: 0;
-}
-
-.room-layout > .live-player[data-mode="full"] .stage-overlay {
-  align-content: safe end;
-  overflow: auto;
-  padding: clamp(7px, 1.4vi, 20px);
-}
-
-.room-layout > .live-player[data-mode="full"] .stage-overlay .stack { gap: 2px; }
-.room-layout > .live-player[data-mode="full"] .stage-overlay h3 { font-size: clamp(1rem, 2.4vi, 1.85rem); }
-
 @media (max-width: 900px), (max-height: 500px) {
-  .room-layout {
+  .room-layout, .room-layout[data-live-channel] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "channels" "content";
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .room-layout[data-player="full"] {
-    grid-template-areas: "channels" "player" "content";
-    grid-template-rows: auto minmax(0, 1.1fr) minmax(0, 1fr);
-  }
-
-  .room-layout[data-activity-view] { grid-template-areas: "channels" "activity"; }
-  .room-layout[data-activity-view][data-player="full"] { grid-template-areas: "channels" "player" "activity"; }
+  .room-layout[data-activity-view], .room-layout[data-live-channel][data-activity-view] { grid-template-areas: "channels" "activity"; }
 
   .room-layout .channel-sidebar { padding: 6px; border-radius: 13px; }
   .room-layout .room-channel-tools {
@@ -226,11 +306,6 @@
   }
 
   .room-layout .room-activity-toggle { display: inline-flex; }
-  .room-layout .room-activity-toggle[aria-pressed="true"] {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: var(--raised);
-  }
 }
 
 @media (max-width: 520px), (max-height: 680px) {
@@ -265,21 +340,7 @@
   .room-layout .chat-controls .button { min-height: 29px; padding-block: 3px; }
   .room-layout .composer-shortcuts { display: none; }
 
-  .topic-view[data-joined]:has(.room-layout[data-player="full"]) {
-    grid-template-rows: auto minmax(22rem, 1fr);
+  @container live-channel (width < 42rem) {
+    .live-channel-body { grid-template-rows: minmax(5rem, 1fr) auto minmax(6rem, 1fr); }
   }
-}
-
-@media (min-width: 640px) and (max-height: 500px) {
-  .topic-view[data-joined]:has(.room-layout[data-player="full"]) {
-    grid-template-rows: auto minmax(15rem, 1fr);
-  }
-
-  .room-layout[data-player="full"] {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    grid-template-areas: "channels channels" "player content";
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .room-layout[data-activity-view][data-player="full"] { grid-template-areas: "channels channels" "player activity"; }
 }

@@ -34,6 +34,7 @@ const catalogs = {
       'Der Speicher für Anhänge ist voll.': 'The attachment storage is full.',
       'Der Speicher für Designbilder ist voll.': 'The design image storage is full.',
       'Der Streamingserver ist gerade nicht erreichbar.': 'The streaming server is unavailable right now.',
+      'Die Wiedergabe benötigt H.264-Video und optional Opus-Audio.': 'This playback requires H.264 video. Opus audio is optional.',
       'Der Talk unterstützt eine einzelne Opus-Tonspur.': 'Voice chat supports a single Opus audio track.',
       'Die Anfrage ist zu groß.': 'The request is too large.',
       'Die Anfrage konnte nicht verarbeitet werden.': 'The request could not be processed.',

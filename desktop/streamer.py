@@ -20,12 +20,14 @@ from model import QUALITY_PRESETS, Quality, parse_destination, picture_bounds, r
 AUDIO_MODES = ("off", "application", "system")
 
 
-def initialize_media():
+def initialize_media(embedded_preview=False):
     Gst.init(None)
     # Protocol debug output can contain RTMP authentication arguments.
     Gst.debug_set_active(False)
     required = ("pipewiresrc", "gtk4paintablesink", "videoconvertscale", "videorate", "videocrop",
                 "x264enc", "h264parse", "flvmux", "rtmp2sink")
+    if embedded_preview:
+        required += ("jpegenc", "appsink")
     missing = [name for name in required if not Gst.ElementFactory.find(name)]
     if missing:
         raise RuntimeError(t("Missing GStreamer elements. {elements}. See desktop/README.md.",
@@ -92,8 +94,8 @@ class CroppedPreview(Gtk.Widget):
 
 
 class CaptureWindow(Adw.ApplicationWindow):
-    def __init__(self, app, room_session, *, parent=None):
-        initialize_media()
+    def __init__(self, app, room_session, *, parent=None, preview_frame=None, on_metrics=None):
+        initialize_media(preview_frame is not None)
         title = t("Screen sharing")
         super().__init__(application=app, title=title, default_width=800, default_height=740)
         if parent is not None:
@@ -122,6 +124,8 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.output_quality = None
         self.metric_sample = None
         self.room_session = room_session
+        self.preview_frame = preview_frame
+        self.on_metrics = on_metrics
         self.reservation = None
         self.stream_id = None
         self.closing = False
@@ -695,7 +699,8 @@ class CaptureWindow(Adw.ApplicationWindow):
             if capture.source_size() != dimensions:
                 return False
             capture.publish(destination, key, quality, region, audio_serial=audio.serial if audio else None,
-                            cancelled=worker.closed.is_set, audio_monitor=audio is not None and audio.mode == "system")
+                            cancelled=worker.closed.is_set, audio_monitor=audio is not None and audio.mode == "system",
+                            preview_frame=self.preview_frame)
             return True
 
         def published(result, error):
@@ -808,6 +813,8 @@ class CaptureWindow(Adw.ApplicationWindow):
         mbps = max(0, stats.bytes_sent - previous_stats.bytes_sent) * 8 / seconds / 1_000_000
         self.metrics["fps"].set_label(t("{rate} FPS", rate=decimal(fps, 0)))
         self.metrics["upload"].set_label(t("{speed} Mbps", speed=decimal(mbps, 2)))
+        if self.on_metrics is not None and self.stream_id:
+            self.on_metrics(self.stream_id, self.output_quality, fps, mbps, int(now - self.since))
 
     def finish_room_stream(self):
         self.reservation = None

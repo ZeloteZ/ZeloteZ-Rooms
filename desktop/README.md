@@ -8,7 +8,9 @@ Open a live channel, choose the resolution and frame rate, then click **Share sc
 
 On Linux, set **Stream audio** to **Application audio** or **System audio** and choose the output when prompted. For application audio, start playback in the app so its output appears in the picker. System audio includes everything played through the selected device. The AppImage uses the PipeWire tools `pw-dump` and `pw-record` from your system for these modes.
 
-When the native Linux dependencies below are available, **Share screen** opens the bundled PipeWire capture window. It offers preview, monitor and window selection, a region tool, and audio controls. The AppImage uses its built-in capture path on Linux systems where the native requirements aren’t installed.
+With the native capture packages installed, **Share screen** opens the bundled PipeWire capture window for source, region, quality, and audio selection. Once the stream starts, the capture window closes from view and the live channel shows the local preview, duration, resolution, frame rate, upload rate, and stop control. The AppImage uses its built-in capture path on Linux systems without the native requirements.
+
+Viewers get direct, low-latency playback when the WebRTC connection is available. The player can switch to buffered playback. On your own desktop, the local preview shows the selected output as it is captured.
 
 Open **Server settings** with Ctrl+, to change your server address. Use Alt to show the application menu on Windows or Linux.
 

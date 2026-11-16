@@ -220,7 +220,8 @@ function connect(origin) {
     webPreferences: {
       session: media, preload: path.join(__dirname, "rooms-preload.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false,
-      additionalArguments: captureProgram ? ["--rooms-native-capture"] : [],
+      additionalArguments: captureProgram ? ["--rooms-native-capture",
+        ...(captureProgram.embedded ? ["--rooms-embedded-preview"] : [])] : [],
     },
   });
   roomsWindow = window;

@@ -6,14 +6,18 @@ const connectionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const channelStreamsPath = /^\/api\/channels\/([0-9a-f-]{36})\/streams$/
 const streamPath = /^\/api\/streams\/([0-9a-f]{32})$/
 const streamWhipPath = /^\/api\/streams\/([0-9a-f]{32})\/whip$/
+const streamWhepPath = /^\/api\/streams\/([0-9a-f]{32})\/whep(?:\/([0-9a-f]{32}))?$/
 const streamViewersPath = /^\/api\/streams\/([0-9a-f]{32})\/viewers$/
-const mediaPath = /^(live|browser)\/([0-9a-f]{32})$/
+const mediaPath = /^(live|browser|rtc)\/([0-9a-f]{32})$/
+const playbackUserPattern = /^viewer-([0-9a-f]{32})$/
 const connectLifetime = 10 * 60_000
 const publishLifetime = 12 * 60 * 60_000
 const startGrace = 15_000
 const browserStartGrace = 30_000
 const browserConnectLifetime = 45_000
 const browserLease = 105_000
+const playbackLease = 45_000
+const playbackLimit = 256
 const retention = 24 * 60 * 60_000
 const viewerLease = 32_000
 const playerLimitPerSession = 32
@@ -39,7 +43,7 @@ function ingestUrl(site, configured) {
   return destination
 }
 
-function videoOffer(bytes) {
+function mediaOffer(bytes, direction) {
   const lines = new TextDecoder('utf-8', { fatal: true }).decode(bytes).trimEnd().split(/\r?\n/)
   const media = lines.findIndex(line => line.startsWith('m='))
   if (lines[0] !== 'v=0' || media < 0) return null
@@ -51,7 +55,7 @@ function videoOffer(bytes) {
     const next = following === -1 ? lines.length : following
     const section = lines.slice(start + 1, next)
     const track = /^m=(video|audio) (0|[1-9][0-9]*) UDP\/TLS\/RTP\/SAVPF ([0-9]+(?: [0-9]+)*)$/.exec(lines[start])
-    if (!track || tracks.has(track[1]) || !section.includes('a=sendonly') ||
+    if (!track || tracks.has(track[1]) || !section.includes(`a=${direction}`) ||
         (track[2] === '0' && !section.includes('a=bundle-only'))) return null
     const [, type, port, formats] = track
     tracks.add(type)
@@ -111,6 +115,7 @@ export function createStreams(db, config, {
     CREATE UNIQUE INDEX IF NOT EXISTS one_broadcast_per_user_channel
       ON broadcasts(channel_id, user_id) WHERE ended_at IS NULL;
     CREATE INDEX IF NOT EXISTS broadcast_end ON broadcasts(ended_at);
+    CREATE TABLE IF NOT EXISTS stream_playback_relays (id TEXT PRIMARY KEY) STRICT;
   `)
   if (!db.prepare('PRAGMA table_info(broadcasts)').all().some(column => column.name === 'mode')) {
     db.exec("ALTER TABLE broadcasts ADD mode TEXT NOT NULL DEFAULT 'rtmp' CHECK (mode IN ('rtmp', 'browser'))")
@@ -142,12 +147,19 @@ export function createStreams(db, config, {
   const purge = db.prepare('DELETE FROM broadcasts WHERE ended_at < ?')
   const recent = db.prepare('SELECT count(*) AS count FROM broadcasts WHERE user_id = ? AND created_at > ?')
   const viewerName = db.prepare('SELECT id, display_name AS displayName FROM users WHERE id = ?')
+  const rememberRelay = db.prepare('INSERT INTO stream_playback_relays (id) VALUES (?)')
+  const forgetRelay = db.prepare('DELETE FROM stream_playback_relays WHERE id = ?')
+  // A restart revokes the MediaMTX sessions from the previous process.
+  const pendingRelayStops = new Set(db.prepare('SELECT id FROM stream_playback_relays').all().map(row => row.id))
+  const stoppingRelays = new Set()
   const viewerSessions = new Map()
   const browserPublishers = new Map()
+  const playbackSessions = new Map()
 
   let statusPromise
   let statusDeadline = 0
   let sweeping = false
+  let closed = false
 
   function control(path, method = 'GET') {
     return fetch(new URL(path, mediaApi), {
@@ -175,7 +187,7 @@ export function createStreams(db, config, {
         const [, kind, id] = match
         if (kind === 'browser') {
           sources.add(id)
-        } else {
+        } else if (kind === 'live') {
           const hasAudio = path.tracks2?.some(track => ['MPEG-4 Audio', 'Opus'].includes(track.codec)) ?? false
           playback.set(id, hasAudio)
         }
@@ -203,6 +215,16 @@ export function createStreams(db, config, {
   function viewingBroadcast(streamId, userId, now) {
     const row = typeof streamId === 'string' && streamIdPattern.test(streamId) && getBroadcast.get(streamId)
     return row?.publisher_id && validBroadcast(row, now) && channelAccess(userId, row.channel_id)?.canView ? row : null
+  }
+
+  function validPlayback(playback, now) {
+    return playback && playbackSessions.get(playback.id) === playback && playback.until > now &&
+      isSessionActive(playback.session, playback.userId) && viewingBroadcast(playback.streamId, playback.userId, now)
+  }
+
+  function removePlayback(playback) {
+    playbackSessions.delete(playback.id)
+    if (playback.relayId) pendingRelayStops.add(playback.relayId)
   }
 
   function chatChannel(streamId, userId) {
@@ -301,12 +323,32 @@ export function createStreams(db, config, {
     }
   }
 
+  async function flushPlaybackStops() {
+    const candidates = [...pendingRelayStops].filter(id => !stoppingRelays.has(id)).slice(0, 24)
+    await Promise.all(candidates.map(async id => {
+      stoppingRelays.add(id)
+      try {
+        const response = await control(`/v3/webrtc/sessions/kick/${id}`, 'POST')
+        await response.body?.cancel()
+        if (response.ok || response.status === 404) {
+          if (!closed) forgetRelay.run(id)
+          pendingRelayStops.delete(id)
+        }
+      } catch {
+        // Retry during the next sweep.
+      } finally {
+        stoppingRelays.delete(id)
+      }
+    }))
+  }
+
   async function sweep() {
     if (sweeping) return
     sweeping = true
     try {
       const open = getOpen.all()
       const online = open.some(row => row.publisher_id) ? await onlineStreams().catch(() => undefined) : undefined
+      if (closed) return
       // Re-read after the control request so an incoming publish can claim a pending broadcast safely.
       const now = Date.now()
       pruneViewerLeases(now)
@@ -314,8 +356,11 @@ export function createStreams(db, config, {
       for (const [id, publisher] of browserPublishers) {
         if (publisher.until <= now || getBroadcast.get(id)?.ended_at !== null) browserPublishers.delete(id)
       }
-      await Promise.all(getRevoked.all().map(kick))
-      purge.run(now - retention)
+      for (const playback of playbackSessions.values()) {
+        if (!validPlayback(playback, now)) removePlayback(playback)
+      }
+      await Promise.all([flushPlaybackStops(), ...getRevoked.all().map(kick)])
+      if (!closed) purge.run(now - retention)
     } finally {
       sweeping = false
     }
@@ -345,6 +390,7 @@ export function createStreams(db, config, {
       live,
       hasAudio,
       playlistUrl: `/hls/live/${row.id}/index.m3u8`,
+      ...(live ? { whepUrl: `/api/streams/${row.id}/whep` } : {}),
       createdAt: asTime(row.created_at),
     }
   }
@@ -373,7 +419,29 @@ export function createStreams(db, config, {
   async function stopBroadcast(row) {
     browserPublishers.delete(row.id)
     end.run(Date.now(), row.id)
-    await kick(row)
+    for (const playback of playbackSessions.values()) {
+      if (playback.streamId === row.id) removePlayback(playback)
+    }
+    await Promise.all([kick(row), flushPlaybackStops()])
+  }
+
+  async function sendOffer(path, offer, user, key) {
+    try {
+      return await fetch(new URL(path, mediaWebrtc), {
+        method: 'POST', body: offer, redirect: 'error', signal: AbortSignal.timeout(9000),
+        headers: {
+          'Content-Type': 'application/sdp',
+          Authorization: `Basic ${Buffer.from(`${user}:${key}`).toString('base64')}`,
+        },
+      })
+    } catch {
+      throw new RequestError(502, 'Der Streamingserver ist gerade nicht erreichbar.')
+    }
+  }
+
+  function mediaAccepted(result, id) {
+    return result.status === 201 && Boolean(id) && result.headers.get('ID') === id &&
+      result.headers.get('Content-Type')?.startsWith('application/sdp')
   }
 
   async function handleWhip(request, response, id) {
@@ -407,26 +475,13 @@ export function createStreams(db, config, {
     try {
       const bytes = await readBytes(request, 48 * 1024)
       let offer
-      try { offer = videoOffer(bytes) } catch { /* malformed SDP */ }
+      try { offer = mediaOffer(bytes, 'sendonly') } catch { /* malformed SDP */ }
       if (!offer) throw new RequestError(400, 'Der Browser-Stream benötigt H.264-Video und optional Opus-Audio.')
       if (response.destroyed || !validBroadcast(getBroadcast.get(id), Date.now())) {
         throw new RequestError(404, 'Stream nicht gefunden.')
       }
-      let result
-      try {
-        result = await fetch(new URL(`/browser/${id}/whip`, mediaWebrtc), {
-          method: 'POST', body: offer, redirect: 'error', signal: AbortSignal.timeout(9000),
-          headers: {
-            'Content-Type': 'application/sdp',
-            Authorization: `Basic ${Buffer.from(`browser:${publisher.key}`).toString('base64')}`,
-          },
-        })
-      } catch {
-        throw new RequestError(502, 'Der Streamingserver ist gerade nicht erreichbar.')
-      }
-      const relayId = result.headers.get('ID')
-      if (result.status !== 201 || !connectionIdPattern.test(relayId ?? '') ||
-          getBroadcast.get(id)?.publisher_id !== relayId || !result.headers.get('Content-Type')?.startsWith('application/sdp')) {
+      const result = await sendOffer(`/browser/${id}/whip`, offer, 'browser', publisher.key)
+      if (!mediaAccepted(result, getBroadcast.get(id)?.publisher_id)) {
         await result.body?.cancel()
         throw new RequestError(502, 'Der Streamingserver ist gerade nicht erreichbar.')
       }
@@ -448,11 +503,83 @@ export function createStreams(db, config, {
     }
   }
 
+  async function handleWhep(request, response, streamId, playbackId) {
+    sameOrigin(request)
+    const user = requireSession(request)
+    const session = sessionKey(request)
+    const missing = () => new RequestError(404, 'Stream nicht gefunden.')
+    if (!session) throw missing()
+
+    if (playbackId) {
+      const playback = playbackSessions.get(playbackId)
+      if (!playback || playback.session !== session || playback.userId !== user.id || playback.streamId !== streamId) throw missing()
+      if (request.method === 'DELETE' || !validPlayback(playback, Date.now())) {
+        removePlayback(playback)
+        await flushPlaybackStops()
+        if (request.method !== 'DELETE') throw missing()
+      } else if (request.method === 'PATCH' && playback.negotiated) {
+        playback.until = Date.now() + playbackLease
+      } else {
+        throw new RequestError(405, 'Diese Anfrage wird hier nicht unterstützt.')
+      }
+      response.writeHead(204).end()
+      return true
+    }
+
+    if (request.method !== 'POST') throw new RequestError(405, 'Diese Anfrage wird hier nicht unterstützt.')
+    if (!viewingBroadcast(streamId, user.id, Date.now())) throw missing()
+    if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/sdp') {
+      throw new RequestError(415, 'Eine SDP-Verbindungsanfrage wird erwartet.')
+    }
+    const bytes = await readBytes(request, 48 * 1024)
+    let offer
+    try { offer = mediaOffer(bytes, 'recvonly') } catch { /* malformed SDP */ }
+    if (!offer) throw new RequestError(400, 'Die Wiedergabe benötigt H.264-Video und optional Opus-Audio.')
+    const row = viewingBroadcast(streamId, user.id, Date.now())
+    if (response.destroyed || !row || !isSessionActive(session, user.id)) throw missing()
+    let sessionCount = 0
+    for (const playback of playbackSessions.values()) if (playback.session === session) sessionCount += 1
+    if (sessionCount >= playerLimitPerSession || playbackSessions.size + pendingRelayStops.size >= playbackLimit) {
+      throw new RequestError(429, 'Zu viele gleichzeitige Wiedergaben.')
+    }
+    const id = randomBytes(16).toString('hex')
+    const key = randomBytes(32).toString('hex')
+    const playback = {
+      id, session, userId: user.id, streamId, kind: row.mode === 'browser' ? 'browser' : 'rtc',
+      keyHash: digest(key), until: Date.now() + playbackLease,
+    }
+    playbackSessions.set(id, playback)
+    try {
+      const result = await sendOffer(`/${playback.kind}/${streamId}/whep`, offer, `viewer-${id}`, key)
+      if (!mediaAccepted(result, playback.relayId)) {
+        await result.body?.cancel()
+        throw new RequestError(502, 'Der Streamingserver ist gerade nicht erreichbar.')
+      }
+      const answer = await result.text()
+      if (response.destroyed || !validPlayback(playback, Date.now())) throw missing()
+      playback.negotiated = true
+      playback.until = Date.now() + playbackLease
+      response.writeHead(201, {
+        'Content-Type': 'application/sdp',
+        Location: `/api/streams/${streamId}/whep/${id}`,
+      }).end(answer)
+      return true
+    } finally {
+      delete playback.keyHash
+      if (!playback.negotiated) {
+        removePlayback(playback)
+        await flushPlaybackStops()
+      }
+    }
+  }
+
   async function handle(request, response, pathname) {
     const viewer = streamViewersPath.exec(pathname)
     if (viewer) return reportViewer(request, response, viewer[1])
     const whip = streamWhipPath.exec(pathname)
     if (whip) return handleWhip(request, response, whip[1])
+    const whep = streamWhepPath.exec(pathname)
+    if (whep) return handleWhep(request, response, whep[1], whep[2])
     const channel = channelStreamsPath.exec(pathname)
     const remove = streamPath.exec(pathname)
     if (!channel && !remove) return false
@@ -521,15 +648,30 @@ export function createStreams(db, config, {
     const row = match && getBroadcast.get(match[2])
     const now = Date.now()
     if (validBroadcast(row, now)) {
-      const isPlayback = match[1] === 'live'
-      const relay = row.mode === 'browser' && row.publisher_id && auth.protocol === 'rtsp' && auth.ip === '127.0.0.1'
-      if ((isPlayback && auth.action === 'read' && auth.protocol === 'hls' && row.publisher_id) ||
-          (relay && auth.action === (isPlayback ? 'publish' : 'read'))) {
+      const kind = match[1]
+      const isPlayback = kind === 'live'
+      const browser = row.mode === 'browser'
+      const relay = row.publisher_id && auth.protocol === 'rtsp' && auth.ip === '127.0.0.1' && (browser
+        ? (kind === 'browser' && auth.action === 'read') || (isPlayback && auth.action === 'publish')
+        : (isPlayback && auth.action === 'read') || (kind === 'rtc' && auth.action === 'publish'))
+      if ((isPlayback && auth.action === 'read' && auth.protocol === 'hls' && row.publisher_id) || relay) {
         response.writeHead(200).end()
         return true
       }
-      const nativePublisher = isPlayback && row.mode === 'rtmp' && auth.protocol === 'rtmp' && auth.user === 'streamer'
-      const browserPublisher = !isPlayback && row.mode === 'browser' && auth.protocol === 'webrtc' && auth.user === 'browser' &&
+      if (auth.action === 'read' && auth.protocol === 'webrtc' && typeof auth.user === 'string') {
+        const viewer = playbackUserPattern.exec(auth.user)
+        const playback = viewer && playbackSessions.get(viewer[1])
+        if (playback?.keyHash && !playback.relayId && playback.streamId === row.id && playback.kind === kind &&
+            typeof auth.id === 'string' && connectionIdPattern.test(auth.id) && matchDigest(auth.password, playback.keyHash) &&
+            validPlayback(playback, now)) {
+          rememberRelay.run(auth.id)
+          playback.relayId = auth.id
+          json(response, 200, { expireAt: asTime(row.publish_until) })
+          return true
+        }
+      }
+      const nativePublisher = isPlayback && !browser && auth.protocol === 'rtmp' && auth.user === 'streamer'
+      const browserPublisher = kind === 'browser' && browser && auth.protocol === 'webrtc' && auth.user === 'browser' &&
         browserPublishers.get(row.id)?.negotiating
       if (auth.action === 'publish' && (nativePublisher || browserPublisher) &&
           typeof auth.id === 'string' && connectionIdPattern.test(auth.id) && matchDigest(auth.password, row.key_hash) &&
@@ -548,5 +690,12 @@ export function createStreams(db, config, {
     response.writeHead(access ? 204 : 403).end()
   }
 
-  return { handle, handleMedia, checkViewer, homeActivity, viewersFor, chatChannel, close: () => clearInterval(ticker) }
+  function close() {
+    closed = true
+    clearInterval(ticker)
+    for (const playback of playbackSessions.values()) removePlayback(playback)
+    if (pendingRelayStops.size) void flushPlaybackStops()
+  }
+
+  return { handle, handleMedia, checkViewer, homeActivity, viewersFor, chatChannel, close }
 }

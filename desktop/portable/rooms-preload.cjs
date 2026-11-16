@@ -5,11 +5,25 @@ const { contextBridge, ipcRenderer } = require("electron");
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktop", true);
 
 if (process.isMainFrame && process.argv.includes("--rooms-native-capture")) {
-  contextBridge.exposeInMainWorld("roomsNativeCapture", {
-    open: (channel, language) => navigator.userActivation.isActive
-      ? ipcRenderer.invoke("rooms:native-capture-open", channel, language) : Promise.resolve("unavailable"),
+  const capture = {
+    open: (channel, language, embedded) => navigator.userActivation.isActive
+      ? ipcRenderer.invoke("rooms:native-capture-open", channel, language, embedded === true) : Promise.resolve("unavailable"),
     close: () => ipcRenderer.invoke("rooms:native-capture-close"),
-  });
+  };
+  if (process.argv.includes("--rooms-embedded-preview")) {
+    capture.status = () => ipcRenderer.invoke("rooms:native-capture-status");
+    capture.observe = (status, preview) => {
+      const changed = (_event, value) => status(value);
+      const frame = (_event, id, bytes) => preview(id, bytes);
+      ipcRenderer.on("rooms:native-capture-status", changed);
+      ipcRenderer.on("rooms:native-capture-preview", frame);
+      return () => {
+        ipcRenderer.off("rooms:native-capture-status", changed);
+        ipcRenderer.off("rooms:native-capture-preview", frame);
+      };
+    };
+  }
+  contextBridge.exposeInMainWorld("roomsNativeCapture", capture);
 }
 
 if (process.isMainFrame && process.platform === "linux") {

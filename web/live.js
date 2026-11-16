@@ -3,9 +3,11 @@ import { language, t } from "./i18n.js";
 import { renderStreamAudience } from "./stream-audience.js";
 import { renderStreamChat } from "./stream-chat.js";
 import { desktopShareControls } from "./desktop-share.js";
+import { canPlayDirectly, startWhep } from "./whep.js";
 
 const viewerHeartbeat = 8000;
 const startupTimeout = 24000;
+const directStartupTimeout = 13000;
 const progressInterval = 4000;
 const stallTimeout = 12000;
 
@@ -51,9 +53,15 @@ export function createLivePlayer(context, dock) {
     video.muted = !video.muted;
     updateSound();
   }, { hidden: true });
+  const playbackMode = button("", () => {
+    if (!selected?.stream.live || !canPlayDirectly(selected.stream)) return;
+    selected.buffered = playback?.direct === true;
+    selected.nativeOnly = false;
+    connect();
+  }, { class: "ghost", hidden: true });
   const close = button("×", () => stop(t("Playback stopped.", "Wiedergabe beendet.")), { "aria-label": t("Stop playback", "Wiedergabe beenden"), title: t("Stop playback", "Wiedergabe beenden"), class: "icon-button", hidden: true });
   const node = el("section", { class: "panel live-player stack", hidden: true, "aria-label": t("Stream player", "Stream-Player") },
-    el("div", { class: "section-heading player-heading" }, heading, el("div", { class: "inline" }, sound, returnLink, close)),
+    el("div", { class: "section-heading player-heading" }, heading, el("div", { class: "inline" }, playbackMode, sound, returnLink, close)),
     el("div", { class: "stage" }, video, overlay));
   const dockLabel = el("span", {}, "Stream");
   const summary = el("summary", { class: "button" }, dockLabel);
@@ -92,6 +100,16 @@ export function createLivePlayer(context, dock) {
     sound.title = action;
   }
 
+  function updateMode() {
+    const direct = playback?.direct === true;
+    playbackMode.hidden = !playback || !selected?.stream.live || !canPlayDirectly(selected.stream);
+    playbackMode.textContent = direct ? t("Direct", "Direkt") : t("Buffered", "Gepuffert");
+    const action = direct ? t("Use buffered playback", "Gepufferte Wiedergabe verwenden")
+      : t("Use low-latency playback", "Wiedergabe mit geringer Verzögerung verwenden");
+    playbackMode.title = action;
+    playbackMode.setAttribute("aria-label", action);
+  }
+
   function show(label, description, action = "") {
     overlay.hidden = false;
     video.controls = false;
@@ -101,6 +119,7 @@ export function createLivePlayer(context, dock) {
     start.hidden = !action;
     start.textContent = action;
     updateSound();
+    updateMode();
   }
 
   function notifySelection() {
@@ -182,10 +201,13 @@ export function createLivePlayer(context, dock) {
     clearTimeout(retryTimer);
     clearTimeout(watchdog);
     const old = hls;
+    const stopDirect = playback?.stopDirect;
     hls = null;
     playback = null;
+    stopDirect?.();
     old?.destroy();
     video.pause();
+    if (video.srcObject) video.srcObject = null;
     video.removeAttribute("src");
     video.removeAttribute("disableremoteplayback");
     video.load();
@@ -206,9 +228,15 @@ export function createLivePlayer(context, dock) {
 
   function retry(allowNative = true) {
     if (!selected || !playback || signal.aborted) return;
+    const switchToBuffered = playback.direct === true;
     const switchToNative = allowNative && playback.usingHlsJs && playback.nativeAvailable;
     disconnect();
     if (switchToNative) selected.nativeOnly = true;
+    if (switchToBuffered) {
+      selected.buffered = true;
+      connect();
+      return;
+    }
     show(t("Connection lost", "Verbindung unterbrochen"), t("Reconnecting playback.", "Die Wiedergabe wird neu verbunden."), t("Reconnect", "Erneut verbinden"));
     retryTimer = setTimeout(connect, switchToNative ? 0 : 4000);
   }
@@ -251,6 +279,24 @@ export function createLivePlayer(context, dock) {
   function connect() {
     if (!selected || !selected.stream.live || signal.aborted) return;
     disconnect();
+    if (!selected.buffered && canPlayDirectly(selected.stream)) {
+      const attempt = playback = { direct: true, started: false };
+      show(t("Connecting directly", "Direktverbindung wird aufgebaut"),
+        t("Starting low-latency playback.", "Wiedergabe mit geringer Verzögerung startet."));
+      watchdog = setTimeout(retry, directStartupTimeout);
+      try {
+        attempt.stopDirect = startWhep(selected.stream, media => {
+          if (playback !== attempt) return;
+          video.srcObject = media;
+          playVideo();
+        }, () => {
+          if (playback === attempt) retry();
+        });
+      } catch {
+        retry();
+      }
+      return;
+    }
     let url;
     try {
       url = localPlaylist(selected.stream.playlistUrl);
@@ -305,6 +351,8 @@ export function createLivePlayer(context, dock) {
         if (!next.hasAudio) video.muted = true;
         updateSound();
       }
+      updateMode();
+      if (changedAudio && !changed && playback?.direct) connect();
       if (changed) {
         if (next.live) connect();
         else {
@@ -371,9 +419,13 @@ export function createLivePlayer(context, dock) {
   document.addEventListener("visibilitychange", () => {
     if (playback?.started) monitorProgress();
   }, { signal });
-  window.addEventListener("pagehide", releaseViewer, { signal });
+  window.addEventListener("pagehide", () => {
+    if (playback?.direct) disconnect();
+    else releaseViewer();
+  }, { signal });
   window.addEventListener("pageshow", event => {
     if (!event.persisted) return;
+    if (selected?.stream.live && !playback) connect();
     reportPlaying();
     if (playback?.started) monitorProgress();
   }, { signal });
@@ -399,12 +451,17 @@ export function createLivePlayer(context, dock) {
   };
 }
 
-export function renderLive(context, channel, edit, player, voiceMount) {
-  const { signal, user, room, screenShare } = context;
+export function renderLive(context, channel, edit, player, voiceMount, playerMount = el("div", { class: "live-channel-player" })) {
+  const { signal, user, room, screenShare, nativeBroadcast } = context;
   const endpoint = streamsPath(channel);
   const cards = el("div", { class: "stream-list" });
-  const chat = el("div", { class: "stack", hidden: true });
+  const living = el("span", { class: "tag live live-channel-count", role: "status", hidden: true });
   const empty = el("p", { class: "muted", role: "status" }, t("Loading streams…", "Streams werden geladen …"));
+  const watchHint = el("div", { class: "live-channel-placeholder", "aria-label": t("Stream player", "Stream-Player") }, empty);
+  const chatEmpty = el("section", { class: "panel stream-chat live-channel-chat-empty", "aria-label": t("Stream chat", "Streamchat") },
+    el("h2", {}, t("Stream chat", "Streamchat")), el("p", { class: "muted" },
+      t("Choose a live stream to join its chat.", "Wähle einen laufenden Stream für seinen Chat.")));
+  const chat = el("div", { class: "live-channel-chat-content", hidden: true });
   const feedback = status();
   const previewTitle = t("Your stream preview", "Deine Stream-Vorschau");
   const previewVideo = el("video", { autoplay: true, playsinline: true, "aria-label": previewTitle });
@@ -412,6 +469,7 @@ export function renderLive(context, channel, edit, player, voiceMount) {
   const previewStage = el("div", { class: "stage" });
   const preview = el("section", { class: "stack screen-preview", hidden: true, "aria-label": previewTitle },
     el("h3", {}, previewTitle), previewStage);
+  const nativePreview = nativeBroadcast?.mount(room, channel, signal);
   const reconnectNote = t("Reconnecting the stream list.", "Die Stream-Liste wird neu verbunden.");
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
   const desktop = window.webkit?.messageHandlers?.roomsCapture;
@@ -428,6 +486,24 @@ export function renderLive(context, channel, edit, player, voiceMount) {
   const audioOption = el("label", { class: "inline subtle", hidden: true }, audio,
     t("Include tab or app audio when available", "Tab- oder Anwendungston teilen, wenn verfügbar"));
   const finish = button(t("End my stream", "Meinen Stream beenden"), endStream, { class: "danger", hidden: true });
+  const shareSummary = el("summary", { class: "button" }, t("Share options", "Freigabeoptionen"));
+  const shareSettings = el("details", { class: "live-channel-share-settings", hidden: true }, shareSummary,
+    el("div", { class: "panel stack live-channel-share-options" }, portableShare?.element, audioOption));
+  shareSettings.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !shareSettings.open) return;
+    event.stopPropagation();
+    shareSettings.open = false;
+    shareSummary.focus({ preventScroll: true });
+  });
+  const peopleButton = button(t("Voice & streams", "Sprache & Streams"), () => setPanel("people"), {
+    "aria-controls": "live-channel-people", "aria-pressed": "true",
+  });
+  const chatButton = button(t("Chat", "Chat"), () => setPanel("chat"), {
+    "aria-controls": "live-channel-chat", "aria-pressed": "false",
+  });
+  const streamsSection = el("section", {
+    class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
+  }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")), cards);
   let streams = [];
   let streamsReady = false;
   let canStream = false;
@@ -436,6 +512,7 @@ export function renderLive(context, channel, edit, player, voiceMount) {
   let polling = false;
   let lastSignature;
   let lastSelection;
+  let lastLocalStream;
   let chatScope;
   let chatStreamId;
   let chatNode;
@@ -445,10 +522,28 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     return streams.find(stream => sameId(stream.userId, user.id));
   }
 
+  function setPanel(panel) {
+    node.dataset.panel = panel;
+    peopleButton.setAttribute("aria-pressed", String(panel === "people"));
+    chatButton.setAttribute("aria-pressed", String(panel === "chat"));
+  }
+
+  function localNative() {
+    const active = nativeBroadcast?.active();
+    return sameId(active?.channelId, channel.id) ? active : null;
+  }
+
+  function showsLocally(stream) {
+    return sameId(screenShare?.active()?.id, stream.id) || sameId(localNative()?.streamId, stream.id);
+  }
+
   function chooseStream(stream) {
-    if (sameId(screenShare?.active()?.id, stream.id)) {
-      if (player.activeId()) player.stop();
-    } else player.choose(channel, stream);
+    if (stream.live) setPanel("chat");
+    if (showsLocally(stream)) {
+      if (streams.some(item => sameId(item.id, player.activeId()))) player.stop();
+    } else {
+      player.choose(channel, stream);
+    }
   }
 
   function selectDestination() {
@@ -459,6 +554,7 @@ export function renderLive(context, channel, edit, player, voiceMount) {
       return;
     }
     if (feedback.textContent === unavailableNote) tell(feedback, "");
+    setPanel("chat");
     if (!sameId(player.activeId(), stream.id)) chooseStream(stream);
   }
 
@@ -466,17 +562,27 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     const own = mine();
     const sharing = screenShare?.active();
     const sharingHere = sharing && sameId(sharing.channel.id, channel.id);
-    reserve.hidden = !canStream || Boolean(own || sharing);
-    audioOption.hidden = Boolean(desktop || nativeCapture || portableShare) || reserve.hidden;
-    if (portableShare) portableShare.element.hidden = reserve.hidden;
-    finish.hidden = !own && !sharingHere;
-    finish.textContent = sharingHere && sharing.phase !== "live"
-      ? t("Cancel screen sharing", "Bildschirmfreigabe abbrechen") : t("End my stream", "Meinen Stream beenden");
-    empty.hidden = streams.length > 0;
-    if (!streams.length) empty.textContent = canStream ? t("Nobody is live here right now.", "Hier ist gerade niemand live.") : t("No streams in this channel right now.", "Gerade läuft kein Stream in diesem Channel.");
+    const nativeHere = localNative();
     const selection = player.activeId();
     const selectedHere = streams.find(stream => sameId(stream.id, selection));
     const previewMedia = sharingHere && sharing.phase === "live" && !selectedHere ? sharing.media : null;
+    reserve.hidden = !canStream || Boolean(own || sharing || nativeBroadcast?.active());
+    audioOption.hidden = Boolean(desktop || nativeCapture || portableShare) || reserve.hidden;
+    if (portableShare) portableShare.element.hidden = reserve.hidden;
+    shareSettings.hidden = reserve.hidden || (audioOption.hidden && !portableShare);
+    if (shareSettings.hidden) shareSettings.open = false;
+    finish.hidden = (!own && !sharingHere) || Boolean(nativeHere && !selectedHere);
+    finish.textContent = sharingHere && sharing.phase !== "live"
+      ? t("Cancel screen sharing", "Bildschirmfreigabe abbrechen") : t("End my stream", "Meinen Stream beenden");
+    const liveCount = streams.filter(stream => stream.live).length;
+    const nextStatus = liveCount ? t("{count} live", "{count} live", { count: liveCount }) : "";
+    living.hidden = !liveCount;
+    if (living.textContent !== nextStatus) living.textContent = nextStatus;
+    const watchNote = liveCount ? t("Choose a stream to watch.", "Wähle einen Stream zum Zuschauen.")
+      : streams.length ? t("Waiting for the first stream to go live.", "Der erste Stream wird vorbereitet.")
+        : t("Nobody is live here right now.", "Hier ist gerade niemand live.");
+    if (streamsReady && empty.textContent !== watchNote) empty.textContent = watchNote;
+    streamsSection.hidden = !streams.length;
     preview.hidden = !previewMedia;
     if (previewVideo.srcObject !== previewMedia) {
       previewVideo.srcObject = previewMedia;
@@ -491,11 +597,12 @@ export function renderLive(context, channel, edit, player, voiceMount) {
       chatScope?.abort();
       chatStreamId = nextChatId;
       chat.hidden = !nextChatId;
+      chatEmpty.hidden = Boolean(nextChatId);
       if (nextChatId) {
         chatScope = new AbortController();
         const chatSignal = AbortSignal.any([signal, chatScope.signal]);
         chatNode = renderStreamChat({ ...context, signal: chatSignal, messageId: target?.messageId }, nextChatId);
-        if (sameId(nextChat.userId, user.id)) chat.replaceChildren(renderStreamAudience({ signal: chatSignal }, nextChatId), chatNode);
+        if (sameId(nextChat.userId, user.id)) chat.replaceChildren(chatNode, renderStreamAudience({ signal: chatSignal }, nextChatId));
         else chat.replaceChildren(chatNode);
       } else {
         chatNode = null;
@@ -505,21 +612,24 @@ export function renderLive(context, channel, edit, player, voiceMount) {
       chatNode?.dispatchEvent(new CustomEvent("open-message", { detail: target }));
     }
     const signature = JSON.stringify(streams);
-    const displayed = selectedHere?.id ?? (previewMedia ? sharing.id : null);
+    const displayed = selectedHere?.id ?? (previewMedia ? sharing.id : nativeHere?.streamId);
     if (signature === lastSignature && displayed === lastSelection) return;
     lastSignature = signature;
     lastSelection = displayed;
     const focused = document.activeElement?.dataset.streamId;
-    cards.replaceChildren(...streams.map(stream => {
+    const ordered = [...streams].sort((a, b) => Number(b.live) - Number(a.live));
+    cards.replaceChildren(...ordered.map(stream => {
       const className = stream.live ? "tag live" : "tag";
       const person = streamer(stream);
       return button([
         el("span", { class: "stream-identity" }, personMark(person), personName(person)),
         el("span", { class: className }, stream.live ? "Live" : t("Waiting", "Wartet")),
-      ], () => {
+      ], event => {
+        const viaKeyboard = event.detail === 0 && event.currentTarget === document.activeElement;
         destination = null;
         if (feedback.textContent === unavailableNote) tell(feedback, "");
         chooseStream(stream);
+        if (stream.live && viaKeyboard && chatButton.offsetParent) chatButton.focus({ preventScroll: true });
       }, {
         class: "stream-pick", "aria-pressed": String(sameId(displayed, stream.id)), "data-stream-id": stream.id,
       });
@@ -530,7 +640,8 @@ export function renderLive(context, channel, edit, player, voiceMount) {
   }
 
   async function requestStream() {
-    if (pending || !canStream || mine() || screenShare?.active()) return;
+    if (pending || !canStream || mine() || screenShare?.active() || nativeBroadcast?.active()) return;
+    shareSettings.open = false;
     tell(feedback, "");
     try {
       if (desktop) {
@@ -538,7 +649,7 @@ export function renderLive(context, channel, edit, player, voiceMount) {
         return;
       }
       if (nativeCapture) {
-        const result = await nativeCapture.open(channel.id, language());
+        const result = nativeBroadcast ? await nativeBroadcast.open(room, channel, language()) : await nativeCapture.open(channel.id, language());
         if (result === "busy") throw new Error(t("The capture controls are already open.", "Die Aufnahmesteuerung ist bereits geöffnet."));
         if (result !== "opened") throw new Error(t("The capture window couldn’t open.", "Das Aufnahmefenster konnte nicht geöffnet werden."));
         return;
@@ -555,6 +666,18 @@ export function renderLive(context, channel, edit, player, voiceMount) {
   }
 
   async function endStream() {
+    if (localNative()) {
+      finish.disabled = true;
+      try {
+        await nativeBroadcast.stop();
+        refreshSoon();
+      } catch (error) {
+        if (!signal.aborted) tell(feedback, error.message, "error");
+      } finally {
+        finish.disabled = false;
+      }
+      return;
+    }
     const sharing = screenShare?.active();
     if (sharing && sameId(sharing.channel.id, channel.id)) {
       screenShare.stop(t("Stream ended.", "Stream beendet."));
@@ -589,6 +712,20 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     refresh();
   }
 
+  function sharingChanged() {
+    const sharing = screenShare?.active();
+    const localStream = localNative()?.streamId ?? (sameId(sharing?.channel.id, channel.id) && sharing.phase === "live" ? sharing.id : null);
+    if (localStream && !sameId(localStream, lastLocalStream)) {
+      lastLocalStream = localStream;
+      setPanel("chat");
+      if (streams.some(stream => sameId(stream.id, player.activeId()))) player.stop();
+    } else if (!localStream) {
+      lastLocalStream = null;
+    }
+    renderControls();
+    refreshSoon();
+  }
+
   async function refresh() {
     if (signal.aborted || polling) return;
     polling = true;
@@ -616,15 +753,17 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     if (!signal.aborted) timer = setTimeout(refresh, 4000);
   }
 
-  const node = el("section", { class: "panel stack live-channel", "aria-labelledby": "live-channel-heading" },
-    el("header", { class: "section-heading" }, el("h2", { id: "live-channel-heading" }, channel.title), edit),
-    el("div", { class: "live-channel-overview" },
-      voiceMount,
-      el("section", { class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading" },
-        el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
-        portableShare?.element, el("div", { class: "inline" }, reserve, audioOption, finish),
-        cards, empty, feedback)),
-    preview, chat);
+  const node = el("section", {
+    class: "panel live-channel", "aria-labelledby": "live-channel-heading", "data-panel": "people",
+  }, el("header", { class: "live-channel-toolbar" },
+    el("div", { class: "inline live-channel-title" }, el("h2", { id: "live-channel-heading", title: channel.title }, channel.title), living),
+    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, finish, edit), feedback),
+  el("div", { class: "live-channel-body" },
+    el("div", { class: "live-channel-watch" }, playerMount, preview,
+      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchHint),
+    el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
+    el("div", { class: "live-channel-people", id: "live-channel-people" }, streamsSection, voiceMount),
+    el("aside", { class: "live-channel-chat", id: "live-channel-chat", "aria-label": t("Stream chat", "Streamchat") }, chat, chatEmpty)));
   node.addEventListener("open-message", event => {
     destination = event.detail?.streamId ? event.detail : null;
     selectDestination();
@@ -635,7 +774,8 @@ export function renderLive(context, channel, edit, player, voiceMount) {
     previewVideo.srcObject = null;
   }, { once: true });
   player.whenChanged(renderControls, { signal });
-  screenShare?.whenChanged(renderControls, { signal });
-  refresh();
+  screenShare?.whenChanged(sharingChanged, { signal });
+  nativeBroadcast?.whenChanged(sharingChanged, { signal });
+  sharingChanged();
   return node;
 }

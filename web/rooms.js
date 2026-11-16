@@ -493,6 +493,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
   let selected;
   let channelView;
   let channelNode;
+  let livePlayerMount;
 
   function updateChannels(nextChannels) {
     const previousIndex = channels.findIndex(channel => sameId(channel.id, selected?.id));
@@ -511,6 +512,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
   function showActivity(visible) {
     layout.toggleAttribute("data-activity-view", visible);
     activityToggle.setAttribute("aria-pressed", String(visible));
+    if (livePlayerMount) context.player.setLocation(topic, selected, visible ? null : livePlayerMount);
   }
 
   function markSelected(channel) {
@@ -532,10 +534,14 @@ export async function renderTopic(context, topicId, selectedId, target) {
     channelView?.abort();
     channelView = new AbortController();
     channelNode = null;
+    livePlayerMount = null;
     selected = channel;
     markSelected(channel);
-    context.player.setLocation(topic, channel, layout);
-    if (channel?.type !== "live") context.voice.setLocation(null);
+    layout.toggleAttribute("data-live-channel", channel?.type === "live");
+    if (channel?.type !== "live") {
+      context.player.setLocation(topic, channel, null);
+      context.voice.setLocation(null);
+    }
     if (!channel) {
       content.replaceChildren(el("section", { class: "panel stack" }, el("h2", {}, t("No channels", "Keine Channels")),
         el("p", { class: "muted" }, manager ? t("Create a chat or a live channel.", "Erstelle einen Chat oder einen Live-Channel.") : t("This room has no channels yet.", "In diesem Raum wurden noch keine Channels erstellt."))));
@@ -545,8 +551,11 @@ export async function renderTopic(context, topicId, selectedId, target) {
     const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
     if (channel.type === "live") {
       const voiceMount = el("div", { class: "voice-inline" });
-      channelNode = renderLive(childContext, channel, edit, context.player, voiceMount);
+      livePlayerMount = el("div", { class: "live-channel-player" });
+      channelNode = renderLive(childContext, channel, edit, context.player, voiceMount, livePlayerMount);
+      context.player.setLocation(topic, channel, livePlayerMount);
       content.replaceChildren(channelNode);
+      context.player.refreshPlacement();
       context.voice.setLocation(channel, topic, voiceMount);
     } else {
       channelNode = renderChat(childContext, channel, edit);

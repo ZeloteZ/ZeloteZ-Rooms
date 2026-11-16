@@ -40,7 +40,7 @@ body {
 
 .header-media:not(:has(> :not([hidden]))) { display: none; }
 .header-media:has(> :not([hidden])) + .profile { margin-inline-start: 0; }
-#player-dock, #voice-dock, #broadcast-dock { min-inline-size: 0; }
+#player-dock, #voice-dock, #broadcast-dock, #native-broadcast-dock { min-inline-size: 0; }
 
 .stream-dock summary {
   min-block-size: 36px;

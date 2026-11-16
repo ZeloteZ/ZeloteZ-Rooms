@@ -56,6 +56,19 @@ paths:
     source: publisher
     overridePublisher: false
     record: false
+  '~^rtc/([a-f0-9]{32})$':
+    source: publisher
+    overridePublisher: false
+    record: false
+    # The native RTMPS feed uses AAC. Convert audio only when a WebRTC player requests it.
+    runOnDemand: >-
+      ffmpeg -hide_banner -nostdin -loglevel warning
+      -rtsp_transport tcp -timeout 5000000 -i rtsp://127.0.0.1:$RTSP_PORT/live/$G1
+      -map 0:v:0 -map 0:a:0? -c:v copy -c:a libopus -ar 48000 -ac 2 -b:a 96k
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/rtc/$G1
+    runOnDemandRestart: true
+    runOnDemandStartTimeout: 7s
+    runOnDemandCloseAfter: 5s
   '~^voice/[a-f0-9]{32}$':
     source: publisher
     overridePublisher: false

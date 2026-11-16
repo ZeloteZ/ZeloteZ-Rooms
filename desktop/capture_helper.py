@@ -1,5 +1,7 @@
 import json
 import os
+import socket
+import stat
 import sys
 from urllib.parse import urlsplit
 
@@ -16,12 +18,47 @@ except (ImportError, ValueError) as error:
 MAX_MESSAGE = 4096
 
 
+class PreviewPipe:
+    def __init__(self, fd):
+        mode = os.fstat(fd).st_mode
+        if stat.S_ISSOCK(mode):
+            with socket.socket(fileno=os.dup(fd)) as connection:
+                if connection.family != socket.AF_UNIX:
+                    raise RuntimeError("The preview requires a local pipe.")
+        elif not stat.S_ISFIFO(mode):
+            raise RuntimeError("The preview requires a local pipe.")
+        os.set_blocking(fd, False)
+        self.fd = fd
+        self.enabled = False
+        self.pending = None
+
+    def send_frame(self, jpeg):
+        if not self.enabled:
+            return
+        # Complete a partially written frame before sending any newer one.
+        packet = self.pending
+        if packet is None:
+            packet = memoryview(len(jpeg).to_bytes(4, "big") + jpeg)
+        try:
+            written = os.write(self.fd, packet)
+        except BlockingIOError:
+            written = 0
+        except OSError:
+            self.enabled = False
+            self.pending = None
+            return
+        self.pending = packet[written:] or None
+
+
 class CaptureSession:
     def __init__(self, origin):
         self.origin = urlsplit(origin)
         self.ready = True
         self.request_id = 0
         self.pending = {}
+        self.live_id = None
+        self.on_live = None
+        self.on_finish = None
 
     @staticmethod
     def send(action, **payload):
@@ -64,10 +101,21 @@ class CaptureSession:
     def finish(self, stream_id):
         if isinstance(stream_id, str) and STREAM_ID.fullmatch(stream_id):
             self.send("finish", streamId=stream_id)
+            if stream_id == self.live_id:
+                self.live_id = None
+                if self.on_finish is not None:
+                    self.on_finish()
 
     def set_live(self, stream_id):
         if stream_id:
+            self.live_id = stream_id
             self.send("live", streamId=stream_id)
+            if self.on_live is not None:
+                self.on_live()
+
+    def send_metrics(self, stream_id, quality, fps, mbps, elapsed):
+        self.send("stats", streamId=stream_id, width=quality.width, height=quality.height,
+                  fps=round(fps, 1), mbps=round(mbps, 2), elapsed=max(0, elapsed))
 
     def close(self):
         self.ready = False
@@ -75,9 +123,10 @@ class CaptureSession:
 
 
 class CaptureApp(Adw.Application):
-    def __init__(self, session):
+    def __init__(self, session, preview=None):
         super().__init__(application_id="de.zelotez.Rooms.Capture", flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.session = session
+        self.preview = preview
         self.window = None
         self.stdin = sys.stdin.fileno()
         self.buffer = b""
@@ -85,12 +134,35 @@ class CaptureApp(Adw.Application):
     def do_activate(self):
         if self.window is None:
             Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
-            self.window = CaptureWindow(self, self.session)
+            if self.preview is None:
+                self.window = CaptureWindow(self, self.session)
+            else:
+                self.session.on_live = self.hide_capture
+                self.session.on_finish = self.finish_embedded
+                self.window = CaptureWindow(self, self.session, preview_frame=self.preview.send_frame,
+                                            on_metrics=self.session.send_metrics)
             GLib.io_add_watch(self.stdin, GLib.PRIORITY_DEFAULT,
                               GLib.IOCondition.IN | GLib.IOCondition.HUP | GLib.IOCondition.ERR, self.read_command)
             self.window.present()
             if not self.session.send("ready"):
-                self.window.close()
+                self.stop_capture()
+
+    def hide_capture(self):
+        self.preview.enabled = True
+        self.window.set_visible(False)
+
+    def finish_embedded(self):
+        self.preview.enabled = False
+        GLib.idle_add(self.stop_capture)
+
+    def stop_capture(self):
+        if self.window is not None:
+            window, self.window = self.window, None
+            # Hidden GTK windows have no mapped surface to deliver a close request to.
+            window.close_requested(window)
+            window.destroy()
+            self.quit()
+        return GLib.SOURCE_REMOVE
 
     def read_command(self, _source, _condition):
         try:
@@ -114,14 +186,14 @@ class CaptureApp(Adw.Application):
                             self.session.reserved(message)
                 else:
                     return GLib.SOURCE_CONTINUE
-        self.window.close()
-        return GLib.SOURCE_REMOVE
+        return self.stop_capture()
 
 
 def main(argv):
-    probe = argv == ["--probe"]
+    probe = argv in (["--probe"], ["--probe-embedded"])
+    embedded = argv[2:] == ["--preview-fd", "3"]
     if not probe:
-        if len(argv) != 2 or argv[1] not in dict(i18n.LANGUAGES):
+        if len(argv) != (4 if embedded else 2) or argv[1] not in dict(i18n.LANGUAGES):
             return 2
         try:
             origin = server_origin(argv[0])
@@ -131,15 +203,16 @@ def main(argv):
     try:
         if not Gtk.init_check():
             raise RuntimeError("A graphical session is required for native capture.")
-        initialize_media()
-    except (GLib.Error, RuntimeError) as error:
+        initialize_media(embedded or argv == ["--probe-embedded"])
+        preview = PreviewPipe(3) if embedded else None
+    except (GLib.Error, OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
         return 1
     if probe:
         print("ok", flush=True)
         return 0
     GLib.set_application_name(i18n.APP_NAME)
-    return CaptureApp(CaptureSession(origin)).run([sys.argv[0]])
+    return CaptureApp(CaptureSession(origin), preview).run([sys.argv[0]])
 
 
 if __name__ == "__main__":

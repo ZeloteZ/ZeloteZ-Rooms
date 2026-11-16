@@ -6,6 +6,7 @@ import { startHistorySharing } from "./history.js";
 import { mountNotifications } from "./notifications.js";
 import { createLivePlayer } from "./live.js";
 import { createScreenShareController } from "./screen-share.js";
+import { createNativeBroadcast } from "./native-broadcast.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
 import { api, button, closeDialog, el, field, form, paintPersonMark, paintPersonName, requireLoginOnExpiry, select } from "./ui.js";
@@ -23,6 +24,7 @@ const logout = document.querySelector("#logout");
 const playerDock = document.querySelector("#player-dock");
 const voiceDock = document.querySelector("#voice-dock");
 const broadcastDock = document.querySelector("#broadcast-dock");
+const nativeBroadcastDock = document.querySelector("#native-broadcast-dock");
 const notificationDock = document.querySelector("#notification-dock");
 
 let user = null;
@@ -32,6 +34,7 @@ let workspaceSession;
 let player;
 let voice;
 let screenShare;
+let nativeBroadcast;
 const invite = takeInvite();
 let pendingInvite = invite;
 
@@ -131,6 +134,7 @@ async function showWorkspace(nextUser) {
   player = createLivePlayer({ signal, user }, playerDock);
   voice = createVoicePanel({ user, signal }, voiceDock);
   screenShare = createScreenShareController({ signal }, broadcastDock);
+  nativeBroadcast = createNativeBroadcast(signal, nativeBroadcastDock);
   mountNotifications(notificationDock, signal, render);
   startHistorySharing(signal, user.id);
   pendingInvite = null;
@@ -154,6 +158,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
   player = null;
   voice = null;
   screenShare = null;
+  nativeBroadcast = null;
   view = null;
   activeTopic = null;
   user = null;
@@ -226,7 +231,7 @@ async function render(force = false) {
   const { signal } = view;
   workspace.replaceChildren(el("p", { class: "panel status", role: "status" }, t("Loading …", "Wird geladen …")));
   workspace.scrollTop = 0;
-  const context = { user, signal, player, voice, screenShare, refresh: () => render(true) };
+  const context = { user, signal, player, voice, screenShare, nativeBroadcast, refresh: () => render(true) };
   try {
     let page;
     if (route.page === "friends") page = await renderFriends(context);

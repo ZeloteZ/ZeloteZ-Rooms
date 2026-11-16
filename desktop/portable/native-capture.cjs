@@ -8,6 +8,7 @@ const { app, ipcMain } = require("electron");
 const run = promisify(execFile);
 const channels = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const streams = /^[a-f0-9]{32}$/u;
+const previewFrameLimit = 128 * 1024;
 const sessions = new Map();
 const childEnv = { ...process.env, PYTHONDONTWRITEBYTECODE: "1" };
 
@@ -15,12 +16,10 @@ async function nativeHelper() {
   if (process.platform !== "linux") return null;
   const script = app.isPackaged ? path.join(process.resourcesPath, "native-capture", "capture_helper.py")
     : path.join(__dirname, "..", "capture_helper.py");
-  try {
-    const { stdout } = await run("python3", ["-u", script, "--probe"], { env: childEnv, timeout: 4500, maxBuffer: 4096 });
-    return stdout.trim() === "ok" ? script : null;
-  } catch {
-    return null;
-  }
+  const probe = flag => run("python3", ["-u", script, flag], { env: childEnv, timeout: 4500, maxBuffer: 4096 })
+    .then(({ stdout }) => stdout.trim() === "ok", () => false);
+  const [available, embedded] = await Promise.all([probe("--probe"), probe("--probe-embedded")]);
+  return available ? { script, embedded } : null;
 }
 
 function senderSession(event) {
@@ -45,9 +44,50 @@ function send(task, message) {
   if (!task.ended && task.child.stdin.writable) task.child.stdin.write(JSON.stringify(message) + "\n");
 }
 
+function toPage(state, channel, ...values) {
+  if (state.web.isDestroyed()) return;
+  const frame = state.web.mainFrame;
+  if (!frame || frame.detached || !state.allowed(frame.url)) return;
+  try { frame.send(channel, ...values); } catch { /* A closing renderer cannot receive it. */ }
+}
+
+function broadcastStatus(state) {
+  const task = state.task;
+  if (!task?.embedded || task.ended || !task.live || !task.id) return null;
+  return { channelId: task.channel, streamId: task.id, startedAt: task.live, ...task.stats };
+}
+
+function notifyStatus(state) {
+  toPage(state, "rooms:native-capture-status", broadcastStatus(state));
+}
+
+function readPreview(state, task) {
+  const pipe = task.child.stdio[3];
+  let buffer = Buffer.alloc(0);
+  pipe.on("error", () => {});
+  pipe.on("data", chunk => {
+    if (task.ended) return;
+    buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
+    while (buffer.length >= 4) {
+      const length = buffer.readUInt32BE(0);
+      if (length < 4 || length > previewFrameLimit) {
+        pipe.destroy();
+        return;
+      }
+      if (buffer.length < length + 4) return;
+      const frame = buffer.subarray(4, length + 4);
+      buffer = buffer.subarray(length + 4);
+      if (task.live && task.id && frame[0] === 0xff && frame[1] === 0xd8) {
+        toPage(state, "rooms:native-capture-preview", task.id, Uint8Array.from(frame));
+      }
+    }
+  });
+}
+
 function close(state, task = state.task) {
   if (!task || task.ended) return;
   task.ended = true;
+  if (task.embedded) notifyStatus(state);
   clearTimeout(task.startTimer);
   task.start("unavailable");
   const released = task.id ? release(state, task.id, task.language) : undefined;
@@ -91,17 +131,23 @@ async function reserve(state, task, requestId) {
   }
 }
 
-function startCapture(state, channel, language) {
+function startCapture(state, channel, language, embedded) {
   let finishStarting;
   const started = new Promise(resolve => { finishStarting = resolve; });
-  const child = spawn("python3", ["-u", state.program, state.origin, language], { env: childEnv, stdio: ["pipe", "pipe", "ignore"] });
-  const task = { channel, language, child, start: finishStarting, id: null, ended: false, reserving: false };
+  const args = ["-u", state.program.script, state.origin, language];
+  if (embedded) args.push("--preview-fd", "3");
+  const child = spawn("python3", args, { env: childEnv, stdio: embedded ? ["pipe", "pipe", "ignore", "pipe"] : ["pipe", "pipe", "ignore"] });
+  const task = { channel, language, child, start: finishStarting, id: null, ended: false, reserving: false, embedded };
   task.startTimer = setTimeout(() => close(state, task), 8000);
   state.task = task;
+  if (embedded) readPreview(state, task);
   child.stdin.on("error", () => close(state, task));
   child.once("error", () => close(state, task));
   child.once("close", () => {
-    if (state.task === task) state.task = null;
+    if (state.task === task) {
+      state.task = null;
+      if (task.embedded) notifyStatus(state);
+    }
     if (!task.ended) {
       task.ended = true;
       clearTimeout(task.startTimer);
@@ -128,20 +174,37 @@ function startCapture(state, channel, language) {
       } else if (message.action === "reserve" && Number.isSafeInteger(message.requestId) && !task.reserving && !task.id) {
         task.reserving = true;
         reserve(state, task, message.requestId);
+      } else if (task.embedded && message.action === "live" && task.id && message.streamId === task.id) {
+        task.live = Date.now();
+        notifyStatus(state);
+      } else if (task.embedded && task.live && message.action === "stats" && message.streamId === task.id) {
+        const { width, height, fps, mbps, elapsed } = message;
+        if ([width, height, fps, mbps, elapsed].every(value => Number.isFinite(value) && value >= 0)) {
+          task.stats = { width, height, fps, mbps, elapsed };
+          notifyStatus(state);
+        }
       } else if (message.action === "finish" && typeof task.id === "string" && message.streamId === task.id) {
         release(state, task.id, language);
         task.id = null;
+        task.live = null;
+        task.stats = null;
+        if (task.embedded) notifyStatus(state);
       }
     }
   });
   return started;
 }
 
-ipcMain.handle("rooms:native-capture-open", (event, channel, language) => {
+ipcMain.handle("rooms:native-capture-open", (event, channel, language, embedded) => {
   const state = senderSession(event);
   if (!state || typeof channel !== "string" || !channels.test(channel)) return "unavailable";
   if (state.task) return "busy";
-  return startCapture(state, channel, language === "de" ? "de" : "en");
+  return startCapture(state, channel, language === "de" ? "de" : "en", embedded === true && state.program.embedded);
+});
+
+ipcMain.handle("rooms:native-capture-status", event => {
+  const state = senderSession(event);
+  return state ? broadcastStatus(state) : null;
 });
 
 ipcMain.handle("rooms:native-capture-close", event => {
@@ -156,7 +219,7 @@ app.on("before-quit", () => {
 function installNativeCapture(web, program, origin, media, allowed) {
   if (!program) return;
   const id = web.id;
-  const state = { origin, media, program, allowed, task: null };
+  const state = { web, origin, media, program, allowed, task: null };
   sessions.set(id, state);
   web.on("did-start-navigation", details => {
     if (details.isMainFrame && !details.isSameDocument) close(state);
