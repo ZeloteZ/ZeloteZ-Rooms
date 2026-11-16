@@ -33,7 +33,7 @@ export function checkAccountResponse(response) {
   return response;
 }
 
-export async function api(path, { method = "GET", body, signal, binary = false, buffer = false } = {}) {
+export async function api(path, { method = "GET", body, signal, binary = false, buffer = false, keepalive = false } = {}) {
   const unauthenticated = ["auth/login", "auth/register", "auth/session"].includes(path);
   const response = checkAccountResponse(await fetch("/api/" + path, {
     method,
@@ -44,6 +44,7 @@ export async function api(path, { method = "GET", body, signal, binary = false, 
     credentials: "same-origin",
     cache: "no-store",
     redirect: "error",
+    keepalive,
     referrer: location.origin + "/",
     referrerPolicy: "same-origin",
     signal,

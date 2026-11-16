@@ -248,9 +248,19 @@ export function editProfile(user, onChange, languageControl, onResetTutorials) {
     el("div", { class: "appearance-profile-preview" }, mark,
       el("div", {}, name, el("p", { class: "subtle" }, "@" + user.username))), fields,
     onResetTutorials && el("div", { class: "inline" },
-      button(t("Reset tutorials", "Rundgänge zurücksetzen"), () => {
-        onResetTutorials();
-        tell(tutorialFeedback, t("Tutorials will restart when you close your profile.", "Die Rundgänge starten erneut, sobald du dein Profil schließt."));
+      button(t("Reset tutorials", "Rundgänge zurücksetzen"), async event => {
+        const control = event.currentTarget;
+        control.disabled = true;
+        tell(tutorialFeedback, "");
+        try {
+          await onResetTutorials();
+          if (!signal.aborted) tell(tutorialFeedback, t("Tutorials will restart when you close your profile.", "Die Rundgänge starten erneut, sobald du dein Profil schließt."));
+        } catch (error) {
+          if (!signal.aborted) tell(tutorialFeedback,
+            t("The tutorials could not be reset. Please try again.", "Die Rundgänge konnten nicht zurückgesetzt werden. Versuche es erneut."), "error");
+        } finally {
+          control.disabled = false;
+        }
       }, { class: "ghost", "data-tutorial": "reset" }), tutorialFeedback),
   ], t("Save profile", "Profil speichern"), async () => {
     const values = { nameColor: color.value(), ...attachments.value(), notifyLive: liveNotifications.checked };

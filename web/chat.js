@@ -117,12 +117,22 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
       const open = event => {
         closePreview = openChatImage(url, name, event.currentTarget);
       };
-      media = isVideo ? el("video", { src: url, class: "attachment-preview", controls: true, playsinline: true, preload: "none", "aria-label": name })
-        : isAudio ? el("audio", { src: url, controls: true, preload: "none", "aria-label": name }) : null;
+      media = isVideo ? el("video", { class: "attachment-preview", controls: true, playsinline: true, preload: "metadata", "aria-label": name })
+        : isAudio ? el("audio", { controls: true, preload: "none", "aria-label": name }) : null;
+      if (media) {
+        const player = media;
+        player.addEventListener("error", () => {
+          if (media !== player || signal.aborted) return;
+          tell(feedback, t("Playback failed on this device. You can download the file and open it in a media player.",
+            "Die Wiedergabe auf diesem Gerät ist fehlgeschlagen. Du kannst die Datei herunterladen und in einem Mediaplayer öffnen."), "error");
+        }, { once: true, signal });
+        player.src = url;
+      }
       const image = isImage && button(preview ? el("img", { class: "attachment-preview", src: url, alt: "", loading: "lazy" })
         : t("Show image", "Bild anzeigen"), open, { class: preview ? "chat-image-trigger" : "", "aria-haspopup": "dialog",
         "aria-label": t("Enlarge {name}", "{name} vergrößern", { name }) });
-      view.replaceChildren(image || media || el("p", { class: "subtle" }, t("File decrypted", "Datei entschlüsselt")),
+      tell(feedback, "");
+      view.replaceChildren(image || media || el("p", { class: "subtle" }, t("File decrypted", "Datei entschlüsselt")), feedback,
         el("a", { class: "attachment", href: url, download: name }, t("Download file · {name}", "Datei herunterladen · {name}", { name })));
       retain(attachment, bytes.byteLength);
     } catch (error) {
@@ -145,10 +155,11 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
       closePreview?.();
       closePreview = undefined;
       if (media) {
-        media.pause();
-        media.removeAttribute("src");
-        media.load();
+        const player = media;
         media = null;
+        player.pause();
+        player.removeAttribute("src");
+        player.load();
       }
       URL.revokeObjectURL(url);
       url = undefined;

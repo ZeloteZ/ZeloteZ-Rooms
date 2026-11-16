@@ -59,6 +59,7 @@ CATALOGS = {
         "The microphone is used for voice chat.": "Das Mikrofon wird für den Sprachchat verwendet.",
         "Allow": "Erlauben",
         "Save attachment": "Anhang speichern",
+        "Choose a local location to save the attachment.": "Wähle einen lokalen Speicherort für den Anhang.",
         "Save": "Speichern",
         "The link couldn’t open in your browser.": "Der Link konnte nicht im Browser geöffnet werden.",
         "Couldn’t connect to the server. Check the address and try again.": "Keine Verbindung zum Server. Prüfe die Adresse und versuch es erneut.",

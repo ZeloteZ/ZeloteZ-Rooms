@@ -559,6 +559,14 @@ class RoomsWindow(Adw.ApplicationWindow):
             if kind == WebKit.PolicyDecisionType.NAVIGATION_ACTION and self.is_app_page(uri):
                 return False
             if self.web_ready and action.is_user_gesture():
+                blob_id = uri.removeprefix("blob:" + self.origin + "/")
+                if (kind == WebKit.PolicyDecisionType.NAVIGATION_ACTION
+                        and action.get_navigation_type() == WebKit.NavigationType.LINK_CLICKED
+                        and self.is_app_page(view.get_uri())
+                        and blob_id != uri and CHANNEL_ID.fullmatch(blob_id)):
+                    # Chat attachments are decrypted to same-origin blobs and downloaded explicitly.
+                    decision.download()
+                    return True
                 try:
                     url = urlsplit(uri)
                     if url.scheme in ("http", "https") and url.hostname and url.username is None:
@@ -614,10 +622,13 @@ class RoomsWindow(Adw.ApplicationWindow):
 
             def selected(picker, response):
                 file = picker.get_file() if response == Gtk.ResponseType.ACCEPT else None
-                if file is not None:
-                    current.set_destination(file.get_uri())
+                path = file.get_path() if file is not None else None
+                if path is not None:
+                    current.set_destination(path)
                 else:
                     current.cancel()
+                    if file is not None:
+                        self._alert(t("Choose a local location to save the attachment."))
                 picker.destroy()
 
             dialog.connect("response", selected)

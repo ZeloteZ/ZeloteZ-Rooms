@@ -13,6 +13,7 @@ import { createNotifications } from './notifications.mjs'
 import { createReactions } from './reactions.mjs'
 import { createStreams } from './streams.mjs'
 import { createStreamChat } from './stream-chat.mjs'
+import { createTutorials } from './tutorials.mjs'
 import { createVoice } from './voice.mjs'
 
 const origin = new URL(process.env.PUBLIC_ORIGIN ?? 'http://127.0.0.1:8080')
@@ -32,6 +33,7 @@ const profileFor = appearance.profile
 const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile,
   revokeBroadcasts: userId => streams.revokeUser(userId) })
 const { requireSession } = auth
+const tutorials = createTutorials(db, { requireSession })
 const recordMentions = input => notifications.recordMentions(input)
 const community = createCommunity(db, { requireSession, appearance, recordMentions,
   recordFriendRequest: input => notifications.recordFriendRequest(input),
@@ -101,6 +103,7 @@ const publicApi = service(async (request, response) => {
       return json(response, 200, { ...live, activities: community.homeActivity(user.id), talkRooms: voice.homeActivity(user.id) })
     }
     if (await appearance.handle(request, response, path, requireSession)) return
+    if (await tutorials.handle(request, response, path)) return
     if (await notifications.handle(request, response, url)) return
     if (await reactions.handle(request, response, url)) return
     if (await voice.handle(request, response, path)) return

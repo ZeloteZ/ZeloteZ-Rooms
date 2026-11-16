@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { createTutorialProgress } from "./tutorial-progress.js";
 import { button, el } from "./ui.js";
 
 function step(selector, title, titleDe, description, descriptionDe) {
@@ -69,18 +70,9 @@ const pages = {
     step(".appearance-profile-preview", "Make it yours", "Dein Profil gestalten",
       "Choose a profile picture and name color. Save your changes to apply them.", "Wähle ein Profilbild und eine Namensfarbe. Speichere deine Änderungen, um sie zu übernehmen."),
     step('[data-tutorial="reset"]', "See the tutorials again", "Rundgänge wieder anzeigen",
-      "Reset tutorials to see these guides again on this device.", "Setze die Rundgänge zurück, um sie auf diesem Gerät erneut zu sehen."),
+      "Reset tutorials to see these guides again on your account.", "Setze die Rundgänge zurück, um sie mit deinem Konto erneut zu sehen."),
   ],
 };
-
-function readCompleted(key) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(key));
-    return Array.isArray(stored) ? stored.filter(page => Object.hasOwn(pages, page)) : [];
-  } catch {
-    return [];
-  }
-}
 
 function targetIn(scope, selector) {
   for (const choice of selector.split(", ")) {
@@ -117,8 +109,7 @@ function visibleBounds(target, viewport) {
 const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
 
 export function createTutorials(accountId, signal) {
-  const storageKey = "zelotez-rooms-tutorials:" + accountId;
-  const completed = new Set(readCompleted(storageKey));
+  const progress = createTutorialProgress(accountId, Object.keys(pages), signal, refresh);
   const spotlight = el("div", { class: "tutorial-spotlight", "aria-hidden": "true", hidden: true });
   const heading = el("h2", { id: "tutorial-title", tabindex: "-1" });
   const text = el("p", { id: "tutorial-text" });
@@ -139,15 +130,9 @@ export function createTutorials(accountId, signal) {
   const mutation = new MutationObserver(schedule);
   resize.observe(card);
 
-  function writeCompleted() {
-    try { localStorage.setItem(storageKey, JSON.stringify([...completed])); } catch { /* Storage may be blocked. */ }
-  }
-
   function finish() {
     if (!guide) return;
-    for (const page of readCompleted(storageKey)) completed.add(page);
-    completed.add(guide.key);
-    writeCompleted();
+    progress.complete(guide.key);
     close();
   }
 
@@ -230,6 +215,10 @@ export function createTutorials(accountId, signal) {
     if (signal.aborted) return;
     const openProfile = profile?.isConnected && profile.closest("dialog")?.open;
     const requested = openProfile ? { key: "profile", scope: profile } : page;
+    if (!progress.ready || !requested || progress.has(requested.key) || !requested.scope.isConnected) {
+      close();
+      return;
+    }
     if (guide?.key === requested?.key && guide) {
       if (guide.scope !== requested.scope) {
         guide.scope = requested.scope;
@@ -239,7 +228,6 @@ export function createTutorials(accountId, signal) {
       return;
     }
     close();
-    if (!requested || completed.has(requested.key) || !requested.scope.isConnected) return;
     if (!openProfile && document.querySelector("dialog[open]")) return;
     const steps = pages[requested.key].filter(step => targetIn(requested.scope, step.selector));
     if (!steps.length) return;
@@ -279,6 +267,7 @@ export function createTutorials(accountId, signal) {
     dialog.remove();
   }, { once: true });
 
+  void progress.sync();
   return {
     visit(key, scope) {
       page = Object.hasOwn(pages, key) ? { key, scope } : null;
@@ -293,11 +282,10 @@ export function createTutorials(accountId, signal) {
       profile = scope;
       refresh();
     },
-    reset() {
-      completed.clear();
-      writeCompleted();
+    async reset() {
       profile = null;
       close();
+      await progress.reset();
       refresh();
     },
   };
