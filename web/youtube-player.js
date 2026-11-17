@@ -2,9 +2,12 @@ const youtube = "https://www.youtube-nocookie.com";
 const videoIdPattern = /^[A-Za-z0-9_-]{11}$/u;
 const connectionInterval = 250;
 const connectionTimeout = 18_000;
+const volumeFeedbackDelay = 350;
 const numeric = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onTitle, onVisibility } = {}) {
+export function createYoutubePlayer(videoId, {
+  onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onVolumeChange, onTitle, onVisibility,
+} = {}) {
   if (typeof videoId !== "string" || !videoIdPattern.test(videoId)) throw new Error("Invalid YouTube video ID");
 
   const element = document.createElement("iframe");
@@ -31,6 +34,10 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   let duration = 0;
   let pendingSeek;
   let volume;
+  let reportedVolume;
+  let reportedMuted;
+  let volumeAppliedAt = -Infinity;
+  let volumeTimer;
   let expectedTransport;
   let ignoreSeekUntil = 0;
   let reportedTitle = false;
@@ -53,9 +60,33 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
   }
 
   function applyVolume() {
-    if (!ready || volume === undefined) return;
-    command("setVolume", Math.round(volume * 100));
-    command(volume === 0 ? "mute" : "unMute");
+    if (!ready || !volume) return;
+    clearTimeout(volumeTimer);
+    volumeAppliedAt = performance.now();
+    command("setVolume", volume.level);
+    command(volume.muted ? "mute" : "unMute");
+  }
+
+  function reportVolume() {
+    if (volume?.level === reportedVolume && volume?.muted === reportedMuted) return;
+    volume = { level: reportedVolume, muted: reportedMuted };
+    onVolumeChange?.(reportedVolume / 100, reportedMuted);
+  }
+
+  function updateVolume(info) {
+    const hasVolume = Number.isInteger(info?.volume) && info.volume >= 0 && info.volume <= 100;
+    const hasMuted = typeof info?.muted === "boolean";
+    if (!hasVolume && !hasMuted) return;
+    if (hasVolume) reportedVolume = info.volume;
+    if (hasMuted) reportedMuted = info.muted;
+    if (!ready || reportedVolume === undefined || reportedMuted === undefined) return;
+
+    // The embedded player may report several earlier values during a Rooms slider drag.
+    clearTimeout(volumeTimer);
+    if (volume?.level === reportedVolume && volume?.muted === reportedMuted) return;
+    const remaining = volumeFeedbackDelay - (performance.now() - volumeAppliedAt);
+    if (remaining > 0) volumeTimer = setTimeout(reportVolume, remaining);
+    else reportVolume();
   }
 
   function applySeek() {
@@ -139,6 +170,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
         break;
       case "initialDelivery":
       case "infoDelivery":
+        updateVolume(message.info);
         if (numeric(message.info?.currentTime)) position = message.info.currentTime;
         if (numeric(message.info?.duration)) duration = message.info.duration;
         if (!reportedTitle && message.info?.videoData?.video_id === videoId &&
@@ -189,9 +221,9 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
       position = pendingSeek;
       applySeek();
     },
-    setVolume(value) {
+    setVolume(value, muted = value === 0) {
       if (destroyed || !numeric(value)) return;
-      volume = Math.min(value, 1);
+      volume = { level: Math.round(Math.min(value, 1) * 100), muted };
       applyVolume();
     },
     getTime: () => position,
@@ -202,6 +234,7 @@ export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBloc
       destroyed = true;
       clearInterval(connecting);
       clearTimeout(failed);
+      clearTimeout(volumeTimer);
       observer.disconnect();
       document.removeEventListener("visibilitychange", updateVisibility);
       unobserveWindow?.();

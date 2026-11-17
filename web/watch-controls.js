@@ -89,7 +89,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     toggle.toggleAttribute("data-playing", playing);
     progress.setAttribute("aria-label", t("Playback position for everyone", "Wiedergabeposition für alle"));
     level.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
-    mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
+    refreshVolumeLabel();
     cinemaButton.textContent = t("Cinema", "Kino");
     cinemaButton.title = inCinema ? t("Exit cinema mode", "Kinomodus verlassen") : t("Cinema mode", "Kinomodus");
     cinemaButton.setAttribute("aria-label", cinemaButton.title);
@@ -187,11 +187,20 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     progress.setAttribute("aria-valuetext", preview);
   }
 
+  function volumeState() {
+    return { volume: previousVolume / 100, muted: level.value === "0" };
+  }
+
+  function refreshVolumeLabel() {
+    mute.textContent = level.value === "0" ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
+  }
+
   function volumeChanged() {
     const value = Number(level.value);
     if (value > 0) previousVolume = value;
-    onVolume(value / 100);
-    refreshLabels();
+    const { volume, muted } = volumeState();
+    onVolume(volume, muted);
+    refreshVolumeLabel();
   }
 
   progress.addEventListener("input", () => { scrubbing = true; paintTimeline(); }, { signal });
@@ -207,7 +216,13 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
   return {
     element, audio, setFullscreenSurface,
     refreshLabels,
-    volume: () => Number(level.value) / 100,
+    volumeState,
+    setVolume(volume, muted) {
+      const value = Math.round(volume * 100);
+      if (value > 0) previousVolume = value;
+      level.value = String(muted ? 0 : value);
+      refreshVolumeLabel();
+    },
     setTransport({ isPlaying = false, enabled = false, shared = true } = {}) {
       playing = isPlaying;
       toggle.disabled = !enabled;

@@ -99,8 +99,8 @@ export function openGuestMedia(source, callbacks) {
     },
     pause() { video.pause(); },
     seek(position) { video.currentTime = position; },
-    setVolume(volume) {
-      video.muted = volume === 0;
+    setVolume(volume, muted) {
+      video.muted = muted;
       video.volume = volume;
     },
     getTime: () => video.currentTime,

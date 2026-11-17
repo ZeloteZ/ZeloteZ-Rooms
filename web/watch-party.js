@@ -42,7 +42,7 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
     play: () => element.play().catch(error => { if (error.name === "NotAllowedError") onBlocked(); }),
     pause: () => element.pause(),
     seek: seconds => { element.currentTime = seconds; },
-    setVolume: value => { element.volume = value; element.muted = value === 0; },
+    setVolume(volume, muted) { element.volume = volume; element.muted = muted; },
     getTime: () => element.currentTime,
     getDuration: () => element.duration,
     destroy: () => { element.pause(); element.removeAttribute("src"); element.load(); },
@@ -93,7 +93,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       void change("play", start);
     },
     onSeek: position => void change("seek", position),
-    onVolume: level => surface?.setVolume(level),
+    onVolume: (volume, muted) => surface?.setVolume(volume, muted),
     fullscreenTarget: () => player,
   });
   const stopTitle = t("End watch party", "Watchparty beenden");
@@ -266,7 +266,8 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
         if (!current()) return;
         ready = true;
         tell(statusNode, "");
-        surface.setVolume(controls.volume());
+        const { volume, muted } = controls.volumeState();
+        surface.setVolume(volume, muted);
         sync(true);
         render();
       },
@@ -295,6 +296,9 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
         if (!current() || !ready) return;
         nativeIntent = { id: party.id, playing };
         sendNativeIntent();
+      },
+      onVolumeChange(volume, muted) {
+        if (current() && ready) controls.setVolume(volume, muted);
       },
       onVisibility(visible) {
         audience?.setVisible(visible);

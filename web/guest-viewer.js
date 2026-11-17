@@ -127,7 +127,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       }
     },
     onSeek: position => void change("seek", position),
-    onVolume: level => playing?.surface.setVolume(level),
+    onVolume: (volume, muted) => playing?.surface.setVolume(volume, muted),
     fullscreenTarget: () => player,
   });
   find(".watch-party-footer").prepend(controls.element);
@@ -336,6 +336,9 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
         nativeIntent = { id: source.id, playing: resumed };
         sendNativeIntent();
       },
+      onVolumeChange(volume, muted) {
+        if (active() && current.ready) controls.setVolume(volume, muted);
+      },
       onVisibility(visible) {
         current.audience?.setVisible(visible);
         if (visible && active()) {
@@ -358,7 +361,8 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     waiting.hidden = true;
     controls.element.hidden = false;
     setPlayback("loading");
-    current.surface.setVolume(controls.volume());
+    const { volume, muted } = controls.volumeState();
+    current.surface.setVolume(volume, muted);
     clock = setInterval(tick, 250);
   }
 
