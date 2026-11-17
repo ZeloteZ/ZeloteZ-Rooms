@@ -1,14 +1,13 @@
 "use strict";
 
-const repository = "ZeloteZ/ZeloteZ-Rooms";
 const versionPattern = /^(?:0|[1-9]\d{0,8})(?:\.(?:0|[1-9]\d{0,8})){2}$/u;
 const artifactPattern = /^[a-z0-9]{1,12}(?:-[a-z0-9]{1,12}){1,2}$/u;
 const maxResponse = 2048;
 const checkIntervals = ["1", "6", "24", "168"];
 
-function releasePage(version) {
-  return typeof version === "string" && versionPattern.test(version)
-    ? "https://github.com/" + repository + "/releases/tag/v" + version : null;
+function releasePage(origin, version) {
+  return releaseEndpoint(origin) && typeof version === "string" && versionPattern.test(version)
+    ? origin + "/#/downloads" : null;
 }
 
 function newerVersion(candidate, installed) {
@@ -67,7 +66,7 @@ async function findUpdate({ origin, installed, platform, arch, signal, fetchRele
     });
     const release = await readMetadata(response);
     if (!release || Object.keys(release).length !== 4 || release.product !== "zelotez-rooms" || release.protocol !== 1 ||
-        !releasePage(release.version) || !Array.isArray(release.artifacts) || release.artifacts.length > 16 ||
+        !releasePage(origin, release.version) || !Array.isArray(release.artifacts) || release.artifacts.length > 16 ||
         new Set(release.artifacts).size !== release.artifacts.length ||
         release.artifacts.some(artifact => typeof artifact !== "string" || !artifactPattern.test(artifact))) {
       return { status: "unavailable" };

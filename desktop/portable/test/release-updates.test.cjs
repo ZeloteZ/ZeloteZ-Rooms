@@ -33,8 +33,22 @@ test("desktop update checks use the configured Rooms origin without credentials 
     { status: "unavailable" });
   assert.deepEqual(await findUpdate({ ...releaseRequest, fetchRelease: () => new Response(null, { status: 404 }) }),
     { status: "unavailable" });
-  assert.equal(releasePage("0.1.15"), "https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/tag/v0.1.15");
-  assert.equal(releasePage("../example"), null);
+  assert.equal(releasePage(origin, "0.1.15"), origin + "/#/downloads");
+  assert.equal(releasePage(origin, "../example"), null);
+});
+
+test("Windows x64 and Linux x64 recognize their server-hosted installers and preserve other platforms", async () => {
+  const data = { ...release, artifacts: ["linux-x64", "windows-x64"] };
+  for (const [platform, arch, installer] of [
+    ["win32", "x64", true], ["linux", "x64", true], ["win32", "arm64", false], ["darwin", "x64", false],
+  ]) {
+    assert.deepEqual(await findUpdate({ ...releaseRequest, platform, arch, fetchRelease: () => Response.json(data) }),
+      { status: "available", version: release.version, installer });
+  }
+  for (const invalid of ["", "http://example.com", origin + "/path", origin + "/", origin + "/?next=evil", "https://name@rooms.example.com"]) {
+    assert.equal(releasePage(invalid, release.version), null);
+  }
+  assert.equal(releasePage("http://127.0.0.1:8080", release.version), "http://127.0.0.1:8080/#/downloads");
 });
 
 test("desktop update checks do not contact an absent or malformed instance and bound the response", async () => {

@@ -100,7 +100,7 @@ async function loadSettings() {
     if (Number.isSafeInteger(saved?.updateLastCheckedAt) && saved.updateLastCheckedAt > 0 && saved.updateLastCheckedAt <= Date.now()) {
       desktopSettings.updateLastCheckedAt = saved.updateLastCheckedAt;
     }
-    if (releasePage(saved?.updateNotified)) desktopSettings.updateNotified = saved.updateNotified;
+    if (releasePage(desktopSettings.origin, saved?.updateNotified)) desktopSettings.updateNotified = saved.updateNotified;
   } catch (error) {
     if (process.platform === "linux" && error.code === "ENOENT") return readLegacyLinuxSettings();
   }
@@ -166,19 +166,22 @@ function scheduleUpdateCheck() {
 }
 
 function showUpdateNotification(version, installer) {
-  const url = releasePage(version);
+  const origin = currentOrigin;
+  const url = releasePage(origin, version);
   if (!url || !Notification.isSupported()) return false;
   try {
     updateToast?.close();
     const toast = new Notification({
       title: text("ZeloteZ Rooms update available", "Update für ZeloteZ Rooms verfügbar", "ZeloteZ Rooms 有可用更新"),
-      body: (installer ? text("Version {version} is ready on GitHub.", "Version {version} ist auf GitHub verfügbar.", "GitHub 上已提供 {version} 版本。")
-        : text("Release notes for version {version} are on GitHub.", "Die Release-Hinweise für Version {version} sind auf GitHub.", "GitHub 上提供了 {version} 版本的发行说明。"))
+      body: (installer ? text("Version {version} is available from your Rooms server.", "Version {version} ist auf deinem Rooms-Server verfügbar.", "你的 Rooms 服务器已提供 {version} 版本。")
+        : text("Version {version} is available. Check your Rooms server for supported devices.", "Version {version} ist verfügbar. Auf deinem Rooms-Server findest du die unterstützten Geräte.", "{version} 版本已可用。请前往你的 Rooms 服务器查看支持的设备。"))
         .replace("{version}", version),
       icon: appIcon,
     });
     toast.once("click", () => {
-      if (!quitting && desktopSettings.updateChecks) void shell.openExternal(url).catch(() => {});
+      if (!quitting && desktopSettings.updateChecks && currentOrigin === origin && roomsDocumentIsActive?.()) {
+        void shell.openExternal(url).catch(() => {});
+      }
     });
     toast.show();
     updateToast = toast;
@@ -345,13 +348,15 @@ ipcMain.handle("rooms:local-update-check", async event => {
   const local = settingsSender(event);
   if (!local) return { status: "unavailable" };
   const result = await checkForUpdates(false);
-  local.availableUpdate = result.status === "available" ? result.version : null;
+  local.availableUpdate = result.status === "available" ? { origin: currentOrigin, version: result.version } : null;
   return result;
 });
 
 ipcMain.handle("rooms:local-update-open", event => {
   const local = settingsSender(event);
-  const url = releasePage(local?.availableUpdate);
+  const update = local?.availableUpdate;
+  if (!update || update.origin !== currentOrigin || !roomsDocumentIsActive?.()) return;
+  const url = releasePage(update.origin, update.version);
   if (url) return shell.openExternal(url).catch(() => {});
 });
 

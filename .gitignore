@@ -3,5 +3,6 @@ deploy/secrets/
 deploy/tls/
 node_modules/
 desktop/portable/dist/
+/desktop-downloads/
 __pycache__/
 *.py[cod]

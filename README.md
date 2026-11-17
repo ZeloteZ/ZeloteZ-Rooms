@@ -47,7 +47,9 @@ If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the w
 
 ## Desktop app
 
-Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. The app reads the version advertised by your verified Rooms instance. The release link opens GitHub in your browser.
+In your browser, sign in to Rooms and select **Downloads** next to your profile picture. The page suggests an installer for your system and offers both a Linux AppImage and a Windows installer for x64.
+
+Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. The app checks which version your verified Rooms instance has published and opens its download page in your browser.
 
 ## YouTube browser extension
 

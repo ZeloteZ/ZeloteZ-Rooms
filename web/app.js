@@ -4,6 +4,7 @@ import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
 import { showAccountSecurity } from "./account-security.js";
 import { renderHowItWorks } from "./how-it-works.js";
+import { isDesktopApp, renderDownloads } from "./downloads.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 import { forgetMemberQuickChatDevices } from "./quick-chat-crypto.js";
 import { clearQuickLinks, confirmYoutubeRoom, mountQuickRoomDock, quickSource } from "./quick-start.js";
@@ -29,6 +30,7 @@ const adminLink = document.querySelector("#admin-link");
 const avatar = document.querySelector("#avatar");
 const profileName = document.querySelector("#profile-name");
 const profileEditor = document.querySelector("#profile-edit");
+const downloadsLink = document.querySelector("#downloads-link");
 const bootstrap = document.querySelector("#boot");
 const auth = document.querySelector("#auth");
 const workspace = document.querySelector("#workspace");
@@ -43,6 +45,7 @@ const notificationDock = document.querySelector("#notification-dock");
 const profileUpdates = new EventTarget();
 const sessionChanges = typeof BroadcastChannel === "function" ? new BroadcastChannel("zelotez-rooms-session") : null;
 const desktopLogin = window.roomsDesktopLogin;
+const desktop = isDesktopApp();
 const roomIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 
 let user = null;
@@ -75,6 +78,10 @@ wordmark.setAttribute("aria-label", t("ZeloteZ Rooms – Home", "ZeloteZ Rooms �
 logout.textContent = t("Sign out", "Abmelden");
 profileEditor.title = t("Edit profile", "Profil bearbeiten");
 profileEditor.setAttribute("aria-label", profileEditor.title);
+downloadsLink.hidden = desktop;
+downloadsLink.title = t("Downloads", "Downloads");
+downloadsLink.setAttribute("aria-label", downloadsLink.title);
+downloadsLink.querySelector(".download-label").textContent = downloadsLink.title;
 document.querySelector("#dialog-close").setAttribute("aria-label", t("Close", "Schließen"));
 bootstrap.querySelector("p").textContent = t("Checking the connection …", "Verbindung wird geprüft …");
 
@@ -142,6 +149,8 @@ function setNav(active) {
     if (link.dataset.nav === active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
+  if (active === "downloads") downloadsLink.setAttribute("aria-current", "page");
+  else downloadsLink.removeAttribute("aria-current");
 }
 
 function setRoomHeader(banner = null, recoverFocus = false) {
@@ -568,6 +577,10 @@ function showTutorial(route, page, banner) {
 async function render(force = false) {
   if (!user) return;
   const route = getRoute();
+  if (desktop && route.page === "downloads") {
+    history.replaceState(history.state, "", "#/rooms");
+    route.page = "rooms";
+  }
   quickRoomHeader.setLocation(route.page === "rooms" || route.page === "watch" ? route.topicId : undefined);
   if (route.sharedVideo) history.replaceState(history.state, "", "#/rooms");
   setNav(route.page === "watch" ? "rooms" : route.page);
@@ -610,6 +623,7 @@ async function render(force = false) {
     else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
     else if (route.page === "invites" && user.admin) page = await renderAdmin({ ...context, onSecurity: openAccountSecurity });
     else if (route.page === "help") page = renderHowItWorks();
+    else if (route.page === "downloads") page = renderDownloads(context);
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       const quick = quickViewerHeading();
       banner = quick.header;

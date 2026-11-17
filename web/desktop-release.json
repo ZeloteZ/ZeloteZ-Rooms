@@ -1,6 +1,6 @@
 {
   "product": "zelotez-rooms",
   "protocol": 1,
-  "version": "0.1.28",
-  "artifacts": ["linux-x64"]
+  "version": "0.1.29",
+  "artifacts": ["linux-x64", "windows-x64"]
 }

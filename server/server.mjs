@@ -112,6 +112,10 @@ const publicApi = service(async (request, response) => {
     return json(response, 200, { product: 'zelotez-rooms', protocol: 1, origin: origin.origin, nonce, handoffReceipt: 1 })
   }
   if (path === '/api/desktop/handoff') return desktopHandoff.handle(request, response)
+  if (request.method === 'GET' && path === '/_internal/desktop-downloads') {
+    requireSession(request)
+    return response.writeHead(204).end()
+  }
   if (request.method === 'GET' && path === '/_internal/stream-view') return streams.checkViewer(request, response)
   if (request.method === 'GET' && path === '/_internal/guest-stream-view') return quickRooms.checkGuestViewer(request, response)
   if (path.startsWith('/api/')) {

@@ -3,6 +3,18 @@ import account from "./i18n-zh-account.js";
 // English source text is the shared message key. Keep named placeholders unchanged.
 export default Object.freeze({
   ...account,
+  "Downloads": "下载",
+  "Make the AppImage executable, then open it.": "为 AppImage 添加执行权限，然后打开它。",
+  "Run the installer to install Rooms.": "运行安装程序以安装 Rooms。",
+  "Installer": "安装程序",
+  "Download for Linux": "下载 Linux 版",
+  "Download for Windows": "下载 Windows 版",
+  "This download is not available yet.": "此下载暂未提供。",
+  "Suggested for this device": "为此设备推荐",
+  "Loading downloads…": "正在加载下载列表…",
+  "Version {version}": "版本 {version}",
+  "This server has no desktop downloads yet.": "此服务器暂未提供桌面客户端下载。",
+  "Downloads are temporarily unavailable.": "暂时无法下载。",
   "# General": "# 常规",
   "Admin": "管理员",
   "Audio": "音频",

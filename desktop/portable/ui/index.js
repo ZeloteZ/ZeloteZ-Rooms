@@ -61,7 +61,7 @@ function settings(state) {
     const intervals = [t("Hourly", "Stündlich", "每小时"), t("Every 6 hours", "Alle 6 Stunden", "每 6 小时"), t("Daily", "Täglich", "每天"), t("Weekly", "Wöchentlich", "每周")];
     intervals.forEach((label, index) => { control("updateInterval").options[index].textContent = label; });
     checkUpdate.textContent = t("Check now", "Jetzt prüfen", "立即检查");
-    openRelease.textContent = t("View release on GitHub", "Release auf GitHub ansehen", "在 GitHub 上查看版本");
+    openRelease.textContent = t("Open update page", "Update-Seite öffnen", "打开更新页面");
     renderUpdateControls();
     control("connection-heading").textContent = t("Connection", "Verbindung", "连接");
     control("current-server-label").textContent = t("Current server", "Aktueller Server", "当前服务器");
