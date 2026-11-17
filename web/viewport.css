@@ -242,8 +242,8 @@ body {
 }
 
 @media (max-width: 1120px) {
-  .bar:has(.header-media .header-dock:not([hidden])) { flex-wrap: wrap; gap: 8px; padding-block: 8px; min-block-size: 0; }
-  .bar:has(.header-media .header-dock:not([hidden])) .navigation { order: 3; flex-basis: 100%; }
+  .bar:has(> .navigation:not([hidden])) { flex-wrap: wrap; gap: 8px; padding-block: 8px; min-block-size: 0; }
+  .bar > .navigation { order: 3; flex-basis: 100%; }
 }
 
 @media (max-width: 740px) {

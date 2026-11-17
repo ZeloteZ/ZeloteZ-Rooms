@@ -140,6 +140,7 @@
 .live-channel-toolbar { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 9px; }
 .live-channel-title { flex: 1 1 10rem; min-inline-size: 0; }
 .live-channel-title h2 { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-channel[data-watching] .live-channel-title h2 { font-size: clamp(1rem, 1.5vi, 1.25rem); }
 .live-channel-tools { gap: 5px; }
 .live-channel-tools .button { min-block-size: 34px; padding-block: 5px; }
 .live-channel-toolbar > .status:not([hidden]) { flex-basis: 100%; }
@@ -159,14 +160,14 @@
 
 .live-channel-body {
   display: grid;
-  grid-template: "watch" minmax(6.5rem, 1.15fr) "switch" auto "support" minmax(var(--live-support-min, 6rem), 1fr) / minmax(0, 1fr);
+  grid-template: "watch" minmax(var(--live-player-min, 6.5rem), 1.15fr) "support" minmax(var(--live-support-min, 6rem), 1fr) / minmax(0, 1fr);
   gap: clamp(6px, 1.15dvh, 12px);
   min-block-size: 0;
   min-inline-size: 0;
   overflow: auto;
   scrollbar-width: thin;
 }
-.live-channel[data-panel="chat"] { --live-support-min: 12rem; }
+.live-channel:is([data-panel="chat"], [data-has-queue]) { --live-support-min: 15rem; }
 
 .live-channel-watch { grid-area: watch; display: grid; min-inline-size: 0; min-block-size: 0; }
 .live-channel-watch > * { grid-area: 1 / 1; min-inline-size: 0; min-block-size: 0; }
@@ -202,10 +203,29 @@
 .live-channel-watch .stage-overlay .stack { gap: 2px; }
 .live-channel-watch .stage-overlay h3 { font-size: clamp(1rem, 2.4vi, 1.85rem); }
 
-.live-channel-switch { grid-area: switch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
-.live-channel-switch .button { min-block-size: 34px; padding: 4px 6px; }
-.live-channel-switch .button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-.live-channel-people, .live-channel-chat { grid-area: support; min-inline-size: 0; min-block-size: 0; }
+.live-channel-support {
+  grid-area: support;
+  display: grid;
+  grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+.live-channel-support:has(.live-channel-switch:not([hidden])) { row-gap: 6px; }
+.live-channel-switch { grid-row: 1; display: flex; gap: 5px; }
+.live-channel-switch .button {
+  flex: 1;
+  min-inline-size: 0;
+  min-block-size: 34px;
+  padding: 4px 5px;
+  font-size: clamp(.75rem, 2.9vi, .875rem);
+  line-height: 1.18;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.live-channel-switch .button[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
+.live-channel-support > :is(.live-channel-people, .live-channel-chat, .live-channel-queue) { grid-row: 2; grid-column: 1; }
+.live-channel-people, .live-channel-chat, .live-channel-queue { min-inline-size: 0; min-block-size: 0; }
+.live-channel-support > [role="tabpanel"]:focus-visible { outline-offset: -2px; }
 .live-channel-people {
   --people-inset: clamp(8px, 1vi, 12px);
   display: grid;
@@ -219,8 +239,6 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
-.live-channel[data-panel="chat"] .live-channel-people,
-.live-channel[data-panel="people"] .live-channel-chat { display: none; }
 .live-channel-streams:not([hidden]) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -245,6 +263,7 @@
   display: grid;
   grid-template: minmax(0, 1fr) auto / minmax(0, 1fr);
 }
+.live-channel-queue { display: grid; }
 .live-channel-audience:not([hidden]) { margin-block-start: 5px; }
 .live-channel-chat-content, .live-channel-legacy-chat {
   display: grid;
@@ -267,16 +286,8 @@
 
 @container live-channel (min-width: 50rem) {
   .live-channel-body {
-    grid-template: "watch chat" minmax(8rem, 1fr) "people chat" minmax(6rem, .47fr) / minmax(0, 1fr) minmax(16rem, .53fr);
+    grid-template: "watch support" minmax(var(--live-player-min, 8rem), 1fr) / minmax(0, 1fr) minmax(16rem, .53fr);
   }
-  .live-channel-switch { display: none; }
-  .live-channel-people { grid-area: people; grid-template-rows: minmax(0, 1fr); }
-  .live-channel-people:has(.live-channel-streams:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .live-channel-streams:not([hidden]) { border-block-start: 0; border-inline-start: 1px solid var(--line); }
-  .live-channel-people .voice-inline, .live-channel-streams .stream-list { overflow: auto; scrollbar-width: thin; }
-  .live-channel-chat { grid-area: chat; }
-  .live-channel[data-panel] .live-channel-people,
-  .live-channel[data-panel] .live-channel-chat { display: grid; }
 }
 
 .desktop-share-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
@@ -349,6 +360,6 @@
   .room-layout .composer-shortcuts { display: none; }
 
   @container live-channel (width < 50rem) {
-    .live-channel-body { grid-template-rows: minmax(5rem, 1fr) auto minmax(var(--live-support-min, 6rem), 1fr); }
+    .live-channel-body { grid-template-rows: minmax(var(--live-player-min, 5rem), 1fr) minmax(var(--live-support-min, 6rem), 1fr); }
   }
 }

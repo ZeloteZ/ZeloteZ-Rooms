@@ -612,10 +612,11 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   });
   if (child.shareSource === "screen") screen?.prepare();
   else if (child.shareSource) setup?.prepareSource(child.shareSource);
-  const actions = el("div", { class: "quick-view-actions" }, screen?.actions, setup?.share, quickRoomActions(context, topic, stopCapture));
+  const shareActions = el("div", { class: "quick-view-actions" }, screen?.actions, setup?.share);
   const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true, videoDock: context.videoDock,
     host: {
-      actions, channelId: channel.id, href: topicHref(topic.id, channel.id), queue: setup?.queue,
+      shareActions, actions: quickRoomActions(context, topic, stopCapture),
+      channelId: channel.id, href: topicHref(topic.id, channel.id), queue: setup?.queue,
       createPreview: screenRoom ? signal => renderQuickPreview(context, topic, channel, signal) : undefined,
       onUnavailable() {
         context.quickRoomHeader.ended(topic.id);
@@ -707,29 +708,23 @@ export async function renderTopic(context, topicId, selectedId, target) {
   let channelView;
   let channelNode;
   let livePlayerMount;
-  let liveSupport;
+  let liveView;
   let liveSupportAnchor;
   const sidebarSpace = matchMedia("(width > 900px) and (height > 500px)");
   sidebarSpace.addEventListener("change", placeLiveSupport, { signal: context.signal });
 
   function placeLiveSupport() {
-    if (!liveSupport || !liveSupportAnchor?.parentNode) return;
+    if (!liveView || !liveSupportAnchor?.parentNode) return;
+    const { people } = liveView;
     const inSidebar = sidebarSpace.matches;
     const target = inSidebar ? supportSlot : liveSupportAnchor.parentNode;
     const before = inSidebar ? null : liveSupportAnchor.nextSibling;
-    if (liveSupport.parentNode !== target) {
-      if (target.isConnected && liveSupport.isConnected && target.moveBefore) target.moveBefore(liveSupport, before);
-      else target.insertBefore(liveSupport, before);
+    if (people.parentNode !== target) {
+      if (target.isConnected && people.isConnected && target.moveBefore) target.moveBefore(people, before);
+      else target.insertBefore(people, before);
     }
     supportSlot.hidden = !inSidebar;
-    channelNode.toggleAttribute("data-support-sidebar", inSidebar);
-    const playback = channelNode.querySelector(".live-channel-watch");
-    const tab = channelNode.querySelector(".live-channel-switch button:first-child");
-    if (tab && playback) {
-      playback.id = "live-channel-playback";
-      tab.textContent = inSidebar ? t("Player", "Player") : t("Voice & streams", "Sprache & Streams");
-      tab.setAttribute("aria-controls", inSidebar ? playback.id : liveSupport.id);
-    }
+    liveView.setSupportSidebar(inSidebar);
   }
 
   function updateChannels(nextChannels) {
@@ -766,7 +761,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
     channelView?.abort();
     supportSlot.replaceChildren();
     supportSlot.hidden = true;
-    liveSupport = null;
+    liveView = null;
     liveSupportAnchor = null;
     channelView = new AbortController();
     channelNode = null;
@@ -789,13 +784,11 @@ export async function renderTopic(context, topicId, selectedId, target) {
     if (channel.type === "live") {
       const voiceMount = el("div", { class: "voice-inline" });
       livePlayerMount = el("div", { class: "live-channel-player" });
-      channelNode = renderLive(childContext, channel, edit, context.player, voiceMount, livePlayerMount);
-      liveSupport = channelNode.querySelector(".live-channel-people");
-      if (liveSupport) {
-        liveSupportAnchor = document.createComment("Voice and streams position in compact layout");
-        liveSupport.before(liveSupportAnchor);
-        placeLiveSupport();
-      }
+      liveView = renderLive(childContext, channel, edit, context.player, voiceMount, livePlayerMount);
+      channelNode = liveView.node;
+      liveSupportAnchor = document.createComment("Voice and streams position in compact layout");
+      liveView.people.before(liveSupportAnchor);
+      placeLiveSupport();
       context.player.setLocation(topic, channel, livePlayerMount);
       content.replaceChildren(channelNode);
       context.player.refreshPlacement();

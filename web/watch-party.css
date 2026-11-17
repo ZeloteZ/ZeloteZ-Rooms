@@ -45,10 +45,8 @@
 .watch-party-player:has(.watch-youtube-frame) { grid-template-rows: auto minmax(200px, 1fr) auto; }
 .watch-party-player:has(.watch-youtube-frame) .watch-party-media { min-block-size: 200px; border-radius: 0; }
 
-.live-channel-body:has(.watch-youtube-frame) { --watch-party-min-height: 22rem; }
-.live-channel-body:has(.watch-party-player:not([hidden])) {
-  grid-template-rows: minmax(var(--watch-party-min-height, 17rem), 1fr) auto minmax(var(--live-support-min, 6rem), 1fr);
-}
+.live-channel-body:has(.watch-party-player:not([hidden])) { --live-player-min: 17rem; }
+.live-channel-body:has(.watch-youtube-frame) { --live-player-min: 22rem; }
 
 .watch-party-footer { min-inline-size: 0; display: grid; gap: 6px; justify-items: start; }
 .watch-party-footer > :empty { display: none; }
@@ -182,21 +180,7 @@
 .watch-queue-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-block-end: 1px solid var(--line); }
 .watch-queue-entry { display: grid; min-inline-size: 0; font-size: .85rem; }
 .watch-queue-entry > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-channel:has(.watch-queue-tab:not([hidden])) .live-channel-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.live-channel[data-panel="queue"] .live-channel-people,
-.live-channel[data-panel="queue"] .live-channel-chat-content,
-.live-channel[data-panel="queue"] .live-channel-audience,
-.live-channel:not([data-panel="queue"]) .live-channel-chat .watch-queue { display: none; }
+.live-channel-queue > .watch-queue { display: flex; flex-direction: column; overflow: hidden; }
+.live-channel-queue .watch-queue-list { min-block-size: 0; max-block-size: none; }
 
 #dialog progress { inline-size: 100%; accent-color: var(--accent); }
-
-@container live-channel (min-width: 50rem) {
-  .live-channel[data-panel] .live-channel-people,
-  .live-channel[data-panel] .live-channel-chat-content:not([hidden]),
-  .live-channel[data-panel] .watch-queue:not([hidden]) { display: grid; }
-  .live-channel[data-panel="queue"] .live-channel-audience:not([hidden]) { display: block; }
-  .live-channel-chat:has(.watch-queue:not([hidden])) { grid-template-rows: minmax(0, 1fr) auto auto; gap: 5px; }
-  .live-channel-body:has(.watch-party-player:not([hidden])) {
-    grid-template-rows: minmax(var(--watch-party-min-height, 17rem), 1fr) minmax(6rem, .47fr);
-  }
-}

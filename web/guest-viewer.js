@@ -64,7 +64,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     <section class="guest-room" hidden>
       <header class="guest-heading">
         <h1 class="guest-room-title"></h1>
-        <span class="tag live" hidden></span>
       </header>
       <div class="quick-view-layout">
         <div class="guest-player-slot"><section class="panel guest-player">
@@ -78,9 +77,11 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
           </div>
         </section></div>
         <aside class="quick-view-support" data-pane="chat">
-          <div class="quick-view-support-tabs" role="tablist" hidden>
-            <button type="button" class="button" role="tab" data-pane="chat" aria-selected="true"></button>
-            <button type="button" class="button" role="tab" data-pane="queue" aria-selected="false" tabindex="-1"></button>
+          <div class="quick-view-support-toolbar">
+            <div class="quick-view-support-tabs" role="tablist" hidden>
+              <button type="button" class="button" role="tab" data-pane="chat" aria-selected="true"></button>
+              <button type="button" class="button" role="tab" data-pane="queue" aria-selected="false" tabindex="-1"></button>
+            </div>
           </div>
           <div class="quick-view-support-panels">
             <div class="quick-view-chat-slot" tabindex="-1"></div>
@@ -98,9 +99,10 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   const passwordLabel = find(".guest-password-label");
   const enter = find("button[type=submit]");
   const room = find(".guest-room");
+  const heading = find(".guest-heading");
   const title = find(".guest-room-title");
-  const live = find(".guest-heading .tag");
   const support = find(".quick-view-support");
+  const supportToolbar = find(".quick-view-support-toolbar");
   const supportTabs = find(".quick-view-support-tabs");
   const chatTab = find("button[data-pane=chat]");
   const queueTab = find("button[data-pane=queue]");
@@ -131,8 +133,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     fullscreenTarget: () => player,
   });
   find(".watch-party-footer").prepend(controls.element);
-  if (host?.actions) find(".guest-heading").append(host.actions);
-  mountQueue();
+  mountHost();
 
   const supportPrefix = "quick-view-" + ++supportId;
   for (const [tab, panel] of [[chatTab, chatSlot], [queueTab, queueSlot]]) {
@@ -142,9 +143,16 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   }
   queueSlot.setAttribute("aria-labelledby", queueTab.id);
 
-  function mountQueue() {
+  function mountHost() {
+    if (host?.shareActions) heading.append(host.shareActions);
+    if (host?.actions) supportToolbar.prepend(host.actions);
     // The shared snapshot is ready before the host's controls may have finished loading.
     queueSlot.replaceChildren(...[host?.queue, viewerQueue.node].filter(Boolean));
+  }
+
+  function removeHostActions() {
+    host?.shareActions?.remove();
+    host?.actions?.remove();
   }
 
   function showPane(pane) {
@@ -162,7 +170,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     if (supportTabs.hidden === !available) return;
     const restoreFocus = !available && (supportTabs.contains(document.activeElement) || queueSlot.contains(document.activeElement));
     supportTabs.hidden = !available;
-    support.toggleAttribute("data-has-queue", available);
     if (available) {
       chatSlot.setAttribute("role", "tabpanel");
       chatSlot.setAttribute("aria-labelledby", chatTab.id);
@@ -220,7 +227,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     setText(title, videoTitle || roomTitle || t("Live room", "Live-Raum"));
     title.classList.toggle("sr-only", watchParty && !videoTitle &&
       (!roomTitle || roomTitle === "Temporary watch party" || roomTitle === "Temporäre Watchparty"));
-    live.textContent = t("Live", "Live");
     chatTab.textContent = t("Live chat", "Livechat");
     queueTab.textContent = t("Queue", "Warteschlange");
     supportTabs.setAttribute("aria-label", t("Watch party panels", "Bereiche der Watchparty"));
@@ -267,7 +273,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     controls.resetPosition();
     controls.element.hidden = true;
     waiting.hidden = false;
-    live.hidden = true;
     setPlayback(undefined);
     setCommand(undefined);
   }
@@ -447,8 +452,8 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
 
   function showRoom(snapshot, sent) {
     authorized = true;
-    const heading = snapshot.roomTitle ?? snapshot.title;
-    roomTitle = typeof heading === "string" ? heading.slice(0, 120) : "";
+    const name = snapshot.roomTitle ?? snapshot.title;
+    roomTitle = typeof name === "string" ? name.slice(0, 120) : "";
     room.toggleAttribute("data-watch-party", snapshot.source === "youtube" || snapshot.source === "local");
     room.hidden = false;
     gate.hidden = true;
@@ -477,7 +482,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     else applyState();
     if (playbackState === "reconnecting") setPlayback(undefined);
     renderTransport();
-    live.hidden = source.kind !== "screen" && !source.playing;
     dockEntry?.activate(source.title || roomTitle || title.textContent, host?.href ?? dockEntry.href ?? "#/watch/" + publicId);
   }
 
@@ -627,17 +631,16 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     viewer, player, slot,
     connectView(nextHost) {
       mounted = true;
-      host?.actions?.remove();
+      removeHostActions();
       host = nextHost;
-      if (host?.actions) find(".guest-heading").append(host.actions);
-      mountQueue();
+      mountHost();
       dismissedSource = undefined;
       openChat();
       schedule(0);
     },
     disconnectView() {
       mounted = false;
-      host?.actions?.remove();
+      removeHostActions();
       host = undefined;
       hidePreview();
       closeChat();

@@ -487,13 +487,13 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     shareSummary.focus({ preventScroll: true });
   });
   const peopleButton = button(t("Voice & streams", "Sprache & Streams"), () => setPanel("people"), {
-    "aria-controls": "live-channel-people", "aria-pressed": "true",
+    id: "live-people-tab", role: "tab", "aria-controls": "live-channel-people",
   });
-  const chatButton = button(t("Chat", "Chat"), () => setPanel("chat"), {
-    "aria-controls": "live-channel-chat", "aria-pressed": "false",
+  const chatButton = button(t("Live chat", "Livechat"), () => setPanel("chat"), {
+    id: "live-chat-tab", role: "tab", "aria-controls": "live-channel-chat",
   });
   const queueButton = button(t("Queue", "Warteschlange"), () => setPanel("queue"), {
-    class: "watch-queue-tab", "aria-controls": "live-channel-queue", "aria-pressed": "false", hidden: true,
+    id: "live-queue-tab", role: "tab", "aria-controls": "live-channel-queue", hidden: true,
   });
   const watchSlot = el("div", { class: "watch-party-slot" });
   const watchParty = createWatchParty(context, channel, {
@@ -514,7 +514,6 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const closeWatch = button("×", () => watchParty.leave(), {
     class: "ghost icon-button", title: closeWatchTitle, "aria-label": closeWatchTitle, hidden: true,
   });
-  watchParty.queue.id = "live-channel-queue";
   const streamsSection = el("section", {
     class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
   }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
@@ -531,6 +530,8 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   let audienceScope;
   let audienceId;
   let legacy;
+  let selectedPanel;
+  let peopleInSidebar = false;
   let requestedShare = context.shareSource;
   let destination = !context.watchId && context.streamId ? { streamId: context.streamId } : null;
   let autoSelectPending = !context.watchId && !context.streamId && !context.shareSource;
@@ -540,10 +541,58 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   }
 
   function setPanel(panel) {
-    node.dataset.panel = panel;
-    peopleButton.setAttribute("aria-pressed", String(panel === "people"));
-    chatButton.setAttribute("aria-pressed", String(panel === "chat"));
-    queueButton.setAttribute("aria-pressed", String(panel === "queue"));
+    selectedPanel = panel;
+    updatePanels();
+  }
+
+  function updatePanels() {
+    const focused = document.activeElement;
+    const hasQueue = !watchParty.queue.hidden;
+    queueButton.hidden = !hasQueue;
+    peopleButton.hidden = peopleInSidebar;
+    tablist.hidden = peopleInSidebar && !hasQueue;
+    if ((selectedPanel === "queue" && !hasQueue) || (selectedPanel === "people" && peopleInSidebar)) selectedPanel = "chat";
+    const focusInChat = chatPanel.contains(focused) || focused === chatButton;
+    const focusInPeople = people.contains(focused) || focused === peopleButton;
+    const defaultPanel = peopleInSidebar || focusInChat || (hasQueue && !focusInPeople) ? "chat" : "people";
+    const activePanel = selectedPanel ?? defaultPanel;
+    node.dataset.panel = activePanel;
+    node.toggleAttribute("data-has-queue", hasQueue);
+
+    for (const [name, tab, panel] of panels) {
+      const active = name === activePanel;
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      panel.hidden = !active && !(name === "people" && peopleInSidebar);
+    }
+    if (tablist.hidden) {
+      chatPanel.removeAttribute("role");
+      chatPanel.removeAttribute("aria-labelledby");
+      chatPanel.tabIndex = -1;
+    } else {
+      chatPanel.setAttribute("role", "tabpanel");
+      chatPanel.setAttribute("aria-labelledby", chatButton.id);
+      chatPanel.tabIndex = 0;
+    }
+    if (panels.some(([, tab, panel]) => (focused === tab && (tab.hidden || tablist.hidden)) ||
+      (panel.hidden && panel.contains(focused)))) {
+      const [, activeTab] = panels.find(([name]) => name === activePanel);
+      (tablist.hidden ? chatPanel : activeTab).focus({ preventScroll: true });
+    }
+  }
+
+  function setSupportSidebar(inSidebar) {
+    peopleInSidebar = inSidebar;
+    people.setAttribute("role", inSidebar ? "region" : "tabpanel");
+    people.tabIndex = inSidebar ? -1 : 0;
+    if (inSidebar) {
+      people.removeAttribute("aria-labelledby");
+      people.setAttribute("aria-label", peopleButton.textContent);
+    } else {
+      people.removeAttribute("aria-label");
+      people.setAttribute("aria-labelledby", peopleButton.id);
+    }
+    updatePanels();
   }
 
   function showChannelChat() {
@@ -617,8 +666,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   }
 
   function renderControls() {
-    queueButton.hidden = watchParty.queue.hidden;
-    if (queueButton.hidden && node.dataset.panel === "queue") setPanel("chat");
+    if (queueButton.hidden !== watchParty.queue.hidden) updatePanels();
     const own = mine();
     const sharing = screenShare?.active();
     const sharingHere = sharing && sameId(sharing.channel.id, channel.id);
@@ -627,6 +675,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     const selectedHere = streams.find(stream => sameId(stream.id, selection));
     const watchingParty = watchParty.selected();
     const nextTitle = watchParty.currentTitle() || channel.title;
+    node.toggleAttribute("data-watching", watchingParty);
     if (liveTitle.textContent !== nextTitle) {
       liveTitle.textContent = nextTitle;
       liveTitle.title = nextTitle;
@@ -802,23 +851,47 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     if (!signal.aborted) timer = setTimeout(refresh, 4000);
   }
 
-  const people = el("section", {
+  const people = el("div", {
     class: "panel live-channel-people", id: "live-channel-people", "data-tutorial": "live-people",
-    "aria-label": t("Voice & streams", "Sprache & Streams"),
+    role: "tabpanel", "aria-labelledby": peopleButton.id, tabindex: 0,
   }, voiceMount, streamsSection);
+  const chatPanel = el("div", {
+    class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat",
+  }, chat, audience);
+  const queuePanel = el("div", {
+    class: "live-channel-queue", id: "live-channel-queue", role: "tabpanel", "aria-labelledby": queueButton.id,
+    tabindex: 0, hidden: true,
+  }, watchParty.queue);
+  const panels = [["people", peopleButton, people], ["chat", chatButton, chatPanel], ["queue", queueButton, queuePanel]];
+  const tablist = el("div", { class: "live-channel-switch", role: "tablist",
+    "aria-label": t("Live channel view", "Live-Channel-Ansicht"),
+  }, peopleButton, chatButton, queueButton);
+  tablist.addEventListener("keydown", event => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const available = panels.filter(([, tab]) => !tab.hidden);
+    const current = available.findIndex(([, tab]) => tab === event.target);
+    if (current === -1) return;
+    let index;
+    if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = available.length - 1;
+    else if (event.key === "ArrowLeft") index = (current + available.length - 1) % available.length;
+    else if (event.key === "ArrowRight") index = (current + 1) % available.length;
+    else return;
+    event.preventDefault();
+    const [panel, tab] = available[index];
+    setPanel(panel);
+    tab.focus();
+  }, { signal });
   const node = el("section", {
-    class: "panel live-channel", "aria-labelledby": "live-channel-heading", "data-panel": "people",
+    class: "panel live-channel", "aria-label": channel.title,
   }, el("header", { class: "live-channel-toolbar" },
     el("div", { class: "live-channel-title" }, liveTitle),
     el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, watchParty.end, finish, edit, closeWatch), feedback),
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint),
-    el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton, queueButton),
-    people,
-    el("aside", {
-      class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat", "aria-label": t("Stream chat", "Streamchat"),
-    }, chat, audience, watchParty.queue)));
+    el("div", { class: "live-channel-support" }, tablist, people, chatPanel, queuePanel)));
+  updatePanels();
   node.addEventListener("open-message", event => {
     if (event.detail?.messageId) showChatTarget(event.detail);
     if (event.detail?.shareSource) {
@@ -847,5 +920,5 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   screenShare?.whenChanged(sharingChanged, { signal });
   nativeBroadcast?.whenChanged(sharingChanged, { signal });
   sharingChanged();
-  return node;
+  return { node, people, setSupportSidebar };
 }

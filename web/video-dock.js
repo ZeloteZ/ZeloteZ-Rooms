@@ -3,13 +3,14 @@ import { button, el } from "./ui.js";
 import { mountFloatingVideo, openVideoWindow } from "./floating-video.js";
 
 export function createVideoDock({ signal, onSelect }, dock) {
-  const controls = dock.parentElement;
   const miniPlayer = t("Mini player", "Miniplayer");
   const title = el("span", { class: "video-dock-title" });
   const summary = el("summary", { class: "button video-dock-toggle" },
     el("i", { class: "video-dock-icon", "aria-hidden": "true" }),
     el("span", { class: "video-dock-label" }, miniPlayer), title);
-  const returnLink = el("a", { class: "button" }, t("Back to the live room", "Zurück zum Live-Raum"));
+  const returnLabel = t("Back to room", "Zurück zum Raum");
+  const returnLink = el("a", { class: "button icon-button", title: returnLabel, "aria-label": returnLabel },
+    el("span", { "aria-hidden": "true" }, "↩"));
   const close = button("×", () => stop(), { class: "icon-button", "aria-label": t("Close player", "Player schließen") });
   const caption = el("h2", { class: "video-dock-caption" });
   const detachLabel = t("Open in a separate window", "In eigenem Fenster öffnen");
@@ -29,13 +30,6 @@ export function createVideoDock({ signal, onSelect }, dock) {
   let active;
   let external;
   let opening = false;
-
-  function updateReturnLink() {
-    const roomLink = controls?.querySelector("#quick-room-dock:not([hidden]) a[href]");
-    returnLink.hidden = dock.hidden || (!external && roomLink?.href === returnLink.href);
-  }
-
-  controls?.addEventListener("rooms:quick-return-changed", updateReturnLink, { signal });
 
   function move(entry, target) {
     const node = entry.instance.player;
@@ -146,7 +140,6 @@ export function createVideoDock({ signal, onSelect }, dock) {
     }
     active.instance.player.dataset.videoMode = slot ? "inline" : "mini";
     returnLink.href = active.href;
-    updateReturnLink();
     const name = active.title || miniPlayer;
     title.textContent = caption.textContent = name;
     if (external && panel.ownerDocument.title !== name) panel.ownerDocument.title = name;

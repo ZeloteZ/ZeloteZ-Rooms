@@ -113,22 +113,3 @@
 @media (pointer: coarse) {
   .live-support-slot :is(.stream-pick, .voice-panel .voice-actions .button) { min-block-size: 40px; }
 }
-
-@container live-channel (width < 50rem) {
-  .live-channel[data-support-sidebar][data-panel="people"] .live-channel-body {
-    grid-template-areas: "watch" "switch";
-    grid-template-rows: minmax(6.5rem, 1fr) auto;
-  }
-  .live-channel[data-support-sidebar][data-panel="people"] .live-channel-body:has(.watch-youtube-frame) {
-    grid-template-rows: minmax(22rem, 1fr) auto;
-  }
-}
-
-@container live-channel (min-width: 50rem) {
-  .live-channel[data-support-sidebar] .live-channel-body {
-    grid-template: "watch chat" minmax(8rem, 1fr) / minmax(0, 1fr) minmax(16rem, .53fr);
-  }
-  .live-channel[data-support-sidebar] .live-channel-body:has(.watch-youtube-frame) {
-    grid-template-rows: minmax(22rem, 1fr);
-  }
-}

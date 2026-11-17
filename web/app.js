@@ -546,6 +546,7 @@ function showTutorial(route, page) {
 async function render(force = false) {
   if (!user) return;
   const route = getRoute();
+  quickRoomHeader.setLocation(route.page === "rooms" || route.page === "watch" ? route.topicId : undefined);
   if (route.sharedVideo) history.replaceState(history.state, "", "#/rooms");
   setNav(route.page === "watch" ? "rooms" : route.page);
   if (force !== true && route.page === "rooms" && route.topicId && activeTopic?.id === route.topicId) {

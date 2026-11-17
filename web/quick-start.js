@@ -23,6 +23,7 @@ export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroa
     el("span", { class: "quick-room-link-label" }, t("Back to room", "Zum Raum")));
   dock.replaceChildren(link);
   let room;
+  let currentRoom;
   let revision = 0;
   let pending = false;
   let timer;
@@ -30,7 +31,7 @@ export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroa
   function paint() {
     const channelId = room?.channelId;
     const hasCaptureLink = channelId && (screenShare.active()?.channel.id === channelId || nativeBroadcast?.active()?.channelId === channelId);
-    dock.hidden = !room || Boolean(hasCaptureLink);
+    dock.hidden = !room || room.topicId === currentRoom || Boolean(hasCaptureLink);
     if (!room) {
       link.removeAttribute("href");
     } else {
@@ -39,7 +40,6 @@ export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroa
       link.setAttribute("aria-label", label);
       link.title = label;
     }
-    dock.dispatchEvent(new Event("rooms:quick-return-changed", { bubbles: true }));
   }
 
   function setRoom(value) {
@@ -94,6 +94,11 @@ export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroa
   void refresh();
 
   return {
+    setLocation(topicId) {
+      if (currentRoom === topicId) return;
+      currentRoom = topicId;
+      paint();
+    },
     created(value) {
       if (signal.aborted) return;
       revision++;
