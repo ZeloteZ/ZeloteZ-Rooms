@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, session, shell } = require("electron");
 const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -9,6 +9,8 @@ const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
 const { createRememberedLogin } = require("./remembered-login.cjs");
+const { checkIntervals, findUpdate, releaseCredential, releasePage } = require("./release-updates.cjs");
+const { parseShareLink, scheme: shareScheme, shareLinkFromArguments } = require("./share-link.cjs");
 const { trayHostAvailable, trayUsable } = require("./tray.cjs");
 
 const localPage = path.join(__dirname, "ui", "index.html");
@@ -27,6 +29,13 @@ let roomsContents;
 let roomsDocumentIsActive;
 let settingsWindow;
 let closeConfirmation;
+let updateIntro;
+let updateCredential;
+let updateTokenSaved = false;
+let updateTimer;
+let updateCheck;
+let updateToast;
+let lastUpdateAttempt = 0;
 let tray;
 let trayInitializing;
 let connection = 0;
@@ -34,13 +43,15 @@ let connecting = false;
 let backgrounding = false;
 let quitting = false;
 let currentOrigin = "";
-let desktopSettings = { language: "system", appearance: "dark", notifications: true, keepRunning: true, suppressCloseHint: false, origin: "" };
+let desktopSettings = { language: "system", appearance: "dark", notifications: true, keepRunning: true, suppressCloseHint: false,
+  origin: "", updateChecks: false, updateInterval: "24", updateIntroSeen: false, updateLastCheckedAt: 0, updateNotified: "" };
 let settingsWrites = Promise.resolve();
 let german = false;
 let captureProgram;
+let pendingShare = shareLinkFromArguments(process.argv, serverOrigin);
 const text = (en, de) => german ? de : en;
 const preferenceOptions = { language: ["system", "en", "de"], appearance: ["dark", "system", "light"],
-  notifications: [true, false], keepRunning: [true, false] };
+  notifications: [true, false], keepRunning: [true, false], updateChecks: [true, false], updateInterval: checkIntervals };
 const verificationErrors = new Set(["invalid", "unreachable", "not_rooms", "incompatible"]);
 
 function webUrl(value) {
@@ -84,6 +95,11 @@ async function loadSettings() {
     }
     desktopSettings.suppressCloseHint = saved?.suppressCloseHint === true;
     desktopSettings.origin = serverOrigin(saved?.origin) ?? "";
+    desktopSettings.updateIntroSeen = saved?.updateIntroSeen === true;
+    if (Number.isSafeInteger(saved?.updateLastCheckedAt) && saved.updateLastCheckedAt > 0 && saved.updateLastCheckedAt <= Date.now()) {
+      desktopSettings.updateLastCheckedAt = saved.updateLastCheckedAt;
+    }
+    if (releasePage(saved?.updateNotified)) desktopSettings.updateNotified = saved.updateNotified;
   } catch (error) {
     if (process.platform === "linux" && error.code === "ENOENT") return readLegacyLinuxSettings();
   }
@@ -133,6 +149,74 @@ function applyPreferences() {
   if (!desktopSettings.notifications) notifications.clear();
 }
 
+function scheduleUpdateCheck() {
+  clearTimeout(updateTimer);
+  if (quitting || !desktopSettings.updateChecks || !updateTokenSaved || updateCheck) return;
+  const interval = Number(desktopSettings.updateInterval) * 60 * 60 * 1000;
+  const last = Math.max(lastUpdateAttempt, desktopSettings.updateLastCheckedAt);
+  updateTimer = setTimeout(() => { void checkForUpdates(true); }, Math.max(0, last + interval - Date.now()));
+  updateTimer.unref();
+}
+
+function showUpdateNotification(version, installer) {
+  const url = releasePage(version);
+  if (!url || !Notification.isSupported()) return false;
+  try {
+    updateToast?.close();
+    const toast = new Notification({
+      title: text("ZeloteZ Rooms update available", "Update für ZeloteZ Rooms verfügbar"),
+      body: (installer ? text("Version {version} is ready on GitHub.", "Version {version} ist auf GitHub verfügbar.")
+        : text("Release notes for version {version} are on GitHub.", "Die Release-Hinweise für Version {version} sind auf GitHub."))
+        .replace("{version}", version),
+      icon: appIcon,
+    });
+    toast.once("click", () => {
+      if (!quitting && desktopSettings.updateChecks) void shell.openExternal(url).catch(() => {});
+    });
+    toast.show();
+    updateToast = toast;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cancelUpdateCheck() {
+  clearTimeout(updateTimer);
+  updateCheck?.controller.abort();
+  updateToast?.close();
+  updateToast = null;
+}
+
+function checkForUpdates(automatic) {
+  if (quitting || (automatic && !desktopSettings.updateChecks)) return Promise.resolve({ status: "cancelled" });
+  if (updateCheck) return updateCheck.result;
+  if (!updateTokenSaved) return Promise.resolve({ status: "token" });
+  clearTimeout(updateTimer);
+  const controller = new AbortController();
+  const attempt = Date.now();
+  lastUpdateAttempt = attempt;
+  const result = (async () => {
+    try {
+      const token = await updateCredential.get();
+      if (controller.signal.aborted) return { status: "cancelled" };
+      const result = await findUpdate({ token, installed: app.getVersion(), platform: process.platform,
+        arch: process.arch, signal: controller.signal });
+      if (controller.signal.aborted) return { status: "cancelled" };
+      const changes = { updateLastCheckedAt: attempt };
+      if (automatic && desktopSettings.updateChecks && result.status === "available" && result.version !== desktopSettings.updateNotified &&
+          showUpdateNotification(result.version, result.installer)) changes.updateNotified = result.version;
+      await saveSettings(changes).catch(() => {});
+      return result;
+    } finally {
+      updateCheck = null;
+      scheduleUpdateCheck();
+    }
+  })();
+  updateCheck = { controller, result };
+  return result;
+}
+
 function titlebarOverlay() {
   return {
     height: titlebarHeight,
@@ -156,18 +240,20 @@ ipcMain.handle("rooms:titlebar-settings", event => {
 
 function localWindow(mode, state, parent) {
   const settings = mode === "settings";
+  const introduction = mode === "update-intro";
   const titles = {
     audio: text("Choose audio", "Tonquelle auswählen"),
     picker: text("Share your screen", "Bildschirm teilen"),
     settings: state.currentOrigin ? text("Desktop settings", "Desktop-Einstellungen") : "ZeloteZ Rooms",
+    "update-intro": text("Desktop updates", "Desktop-Updates"),
   };
   const window = new BrowserWindow({
     parent, modal: Boolean(parent) && !settings, show: false, icon: appIcon, autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b0b0e" : "#f4f6fb",
     title: titles[mode],
-    useContentSize: settings,
-    width: settings ? 610 : 745,
-    height: settings ? (state.currentOrigin ? 625 : 436) : 590,
+    useContentSize: settings || introduction,
+    width: introduction ? 470 : settings ? 610 : 745,
+    height: introduction ? 380 : settings ? (state.currentOrigin ? 625 : 555) : 590,
     minWidth: 340, minHeight: 310,
     webPreferences: {
       preload: path.join(__dirname, "local-preload.cjs"), sandbox: true, contextIsolation: true,
@@ -237,7 +323,47 @@ ipcMain.handle("rooms:local-preference", async (event, name, value) => {
   applyPreferences();
   local.state.preferences[name] = value;
   local.state.language = german ? "de" : "en";
+  if (name === "updateChecks" && !value) cancelUpdateCheck();
+  if (name === "updateChecks" || name === "updateInterval") scheduleUpdateCheck();
   return { language: local.state.language };
+});
+
+ipcMain.handle("rooms:local-update-intro", (event, action) => {
+  const local = localSender(event);
+  if (!local || local !== updateIntro || !["settings", "dismiss"].includes(action)) return;
+  local.window.close();
+  if (action === "settings") showSettings(false, "", true);
+});
+
+ipcMain.handle("rooms:local-update-token", async (event, action, token) => {
+  const local = settingsSender(event);
+  if (!local || !updateCredential || !["save", "remove"].includes(action)) return { status: "unavailable" };
+  if (action === "remove") cancelUpdateCheck();
+  const status = action === "save" ? await updateCredential.save(token) : await updateCredential.remove();
+  if (["saved", "removed"].includes(status)) {
+    cancelUpdateCheck();
+    updateTokenSaved = status === "saved";
+    local.state.updateTokenSaved = updateTokenSaved;
+    local.availableUpdate = null;
+    lastUpdateAttempt = 0;
+    await saveSettings({ updateLastCheckedAt: 0 }).catch(() => {});
+  }
+  scheduleUpdateCheck();
+  return { status, tokenSaved: updateTokenSaved };
+});
+
+ipcMain.handle("rooms:local-update-check", async event => {
+  const local = settingsSender(event);
+  if (!local) return { status: "unavailable" };
+  const result = await checkForUpdates(false);
+  local.availableUpdate = result.status === "available" ? result.version : null;
+  return result;
+});
+
+ipcMain.handle("rooms:local-update-open", event => {
+  const local = settingsSender(event);
+  const url = releasePage(local?.availableUpdate);
+  if (url) return shell.openExternal(url).catch(() => {});
 });
 
 ipcMain.handle("rooms:local-check", async (event, input) => {
@@ -278,10 +404,15 @@ ipcMain.handle("rooms:local-connect", async (event, input) => {
   }
 });
 
-function showSettings(error = false, suggested = "") {
+function showSettings(error = false, suggested = "", focusUpdates = false) {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (focusUpdates) {
+      const local = localWindows.get(settingsWindow.webContents.id);
+      if (local) local.state.focusUpdates = true;
+      settingsWindow.webContents.send("rooms:local-focus-updates");
+    }
     settingsWindow.focus();
-    return;
+    return settingsWindow;
   }
   if (connecting) return;
   const parent = roomsWindow?.isVisible() ? roomsWindow : undefined;
@@ -289,6 +420,8 @@ function showSettings(error = false, suggested = "") {
     address: currentOrigin || suggested,
     currentOrigin,
     error,
+    focusUpdates,
+    updateTokenSaved,
     preferences: Object.fromEntries(Object.keys(preferenceOptions).map(name => [name, desktopSettings[name]])),
   }, parent);
   settingsWindow = local.window;
@@ -299,6 +432,15 @@ function showSettings(error = false, suggested = "") {
     local.operation?.abort();
     settingsWindow = null;
   });
+  return settingsWindow;
+}
+
+function showUpdateIntro(parent) {
+  if (!parent || parent.isDestroyed() || desktopSettings.updateIntroSeen || updateIntro) return;
+  const local = localWindow("update-intro", {}, parent);
+  updateIntro = local;
+  local.window.once("ready-to-show", () => { void saveSettings({ updateIntroSeen: true }).catch(() => {}); });
+  local.window.once("closed", () => { if (updateIntro === local) updateIntro = null; });
 }
 
 function chooseSource(parent, sources) {
@@ -324,6 +466,17 @@ function restoreWindow(window) {
   window.show();
   window.focus();
   if (window === roomsWindow && !roomsContents?.isDestroyed()) roomsContents?.send("rooms:visibility", true);
+}
+
+function receiveShare(share) {
+  if (!share) return;
+  if (!roomsDocumentIsActive?.()) {
+    pendingShare = share;
+    return;
+  }
+  if (share.origin !== currentOrigin || !isRoomsPage(roomsContents.getURL(), currentOrigin)) return;
+  restoreWindow(roomsWindow);
+  void roomsContents.executeJavaScript(`location.hash = ${JSON.stringify(share.fragment)}`).catch(() => {});
 }
 
 function wantsTray() {
@@ -692,6 +845,9 @@ async function connect(origin, { signal, local } = {}) {
     local?.window.close();
     window.show();
     roomsContents.focus();
+    const share = pendingShare;
+    pendingShare = null;
+    receiveShare(share);
     updateTray();
     previous?.close();
     return true;
@@ -719,26 +875,39 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("window-all-closed", () => { if (!connecting) app.quit(); });
-  app.on("before-quit", () => { quitting = true; notifications.clear(); updateTray(); });
-  app.on("second-instance", () => restoreWindow(settingsWindow ?? roomsWindow));
+  app.on("before-quit", () => { quitting = true; cancelUpdateCheck(); notifications.clear(); updateTray(); });
+  app.on("second-instance", (_event, args) => {
+    const share = shareLinkFromArguments(args, serverOrigin);
+    if (share) receiveShare(share);
+    else restoreWindow(settingsWindow ?? roomsWindow);
+  });
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    receiveShare(parseShareLink(url, serverOrigin));
+  });
   app.on("activate", () => restoreWindow(settingsWindow ?? roomsWindow));
   app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId("de.zelotez.rooms");
+    if (app.isPackaged && !app.isDefaultProtocolClient(shareScheme)) app.setAsDefaultProtocolClient(shareScheme);
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     nativeTheme.on("updated", () => { if (roomsWindow) updateTitlebar(roomsWindow); });
     const legacyLinuxAddress = await loadSettings();
     applyPreferences();
+    updateCredential = releaseCredential(path.join(app.getPath("userData"), "desktop-release-token.bin"), safeStorage, process.platform);
+    updateTokenSaved = await updateCredential.has();
+    scheduleUpdateCheck();
     captureProgram = await nativeHelper();
     const supplied = process.env.ZELOTEZ_ROOMS_ORIGIN;
     const origin = supplied === undefined ? desktopSettings.origin : serverOrigin(supplied);
     if (origin) {
       const result = await connect(origin);
-      if (result !== true) showSettings(result.error, origin);
+      const parent = result === true ? roomsWindow : showSettings(result.error, origin);
+      showUpdateIntro(parent);
       return;
     }
     let legacy;
     try { legacy = serverOrigin(await readFile(path.join(app.getPath("userData"), "server-origin"), "utf8")); } catch { /* First launch. */ }
-    showSettings(supplied === undefined ? false : "invalid", legacy ?? legacyLinuxAddress ?? "");
+    showUpdateIntro(showSettings(supplied === undefined ? false : "invalid", legacy ?? legacyLinuxAddress ?? ""));
   });
 }

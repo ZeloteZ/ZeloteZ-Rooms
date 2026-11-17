@@ -1,6 +1,6 @@
 {
   "name": "zelotez-rooms-desktop",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "ZeloteZ Rooms desktop client",
   "author": "ZeloteZ",
   "desktopName": "de.zelotez.rooms.desktop",
@@ -27,6 +27,10 @@
       "*.cjs",
       "ui/**"
     ],
+    "protocols": [{
+      "name": "ZeloteZ Rooms share links",
+      "schemes": ["zelotez-rooms"]
+    }],
     "win": {
       "target": "nsis",
       "icon": "ui/icon.png"

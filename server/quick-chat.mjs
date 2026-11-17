@@ -72,13 +72,13 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     if (!isGuestActive(scope.guestKey, scope.roomId)) throw unauthorized()
   }
 
-  function prunePeers(id, room, at, checkAccess) {
+  function pruneRevoked(id, room) {
     for (const [device, peer] of room.peers) {
-      if (peer.expiresAt <= at || (checkAccess && !isGuestActive(peer.credential, id))) room.peers.delete(device)
+      if (!isGuestActive(peer.credential, id)) room.peers.delete(device)
     }
   }
 
-  function roomFor(scope, at, join = false) {
+  function roomFor(scope, join = false) {
     let room = rooms.get(scope.roomId)
     if (!room && join) {
       if (rooms.size >= maxRooms) throw tooBusy()
@@ -86,7 +86,7 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
       rooms.set(scope.roomId, room)
     }
     if (!room) throw conflict()
-    prunePeers(scope.roomId, room, at, join)
+    if (join) pruneRevoked(scope.roomId, room)
     return room
   }
 
@@ -94,15 +94,15 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     const peer = room.peers.get(id)
     if (!peer || !sameCredential(peer.credential, scope.guestKey)) throw conflict()
     if (!peer.guest) peer.name = senderName(scope)
-    peer.expiresAt = at + peerLease
+    peer.presentUntil = at + peerLease
     return peer
   }
 
-  function snapshot(room, viewer, after) {
+  function snapshot(room, viewer, after, at) {
     const participants = new Map()
-    const peers = [...room.peers.values()].map(({ id, credential, publicKey, name, guest }) => {
+    const peers = [...room.peers.values()].map(({ id, credential, publicKey, name, guest, presentUntil }) => {
       const identity = guest ? `guest:${credential.token}` : `account:${credential.userId}`
-      participants.set(identity, { name, guest })
+      if (presentUntil > at) participants.set(identity, { name, guest })
       return { id, publicKey, name, guest }
     })
     return { deviceId: viewer.id,
@@ -121,18 +121,25 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     const publicKey = ephemeralKey(input.publicKey)
     assertAccess(scope)
     const at = now()
-    const room = roomFor(scope, at, true)
+    const room = roomFor(scope, true)
     const existing = room.peers.get(input.deviceId)
     if (existing) {
       if (existing.publicKey.x !== publicKey.x || existing.publicKey.y !== publicKey.y) throw conflict()
       const peer = ownPeer(room, scope, input.deviceId, at)
-      return json(response, 200, snapshot(room, peer, peer.joinedSeq))
+      return json(response, 200, snapshot(room, peer, peer.joinedSeq, at))
     }
-    if (room.peers.size >= maxPeers || [...room.peers.values()].filter(peer => sameCredential(peer.credential, scope.guestKey)).length >= maxDevicesPerCredential) throw tooBusy()
+    const peers = [...room.peers.values()]
+    const sameAccess = peers.filter(peer => sameCredential(peer.credential, scope.guestKey))
+    const candidates = sameAccess.length >= maxDevicesPerCredential ? sameAccess : room.peers.size >= maxPeers ? peers : null
+    if (candidates) {
+      const dormant = candidates.filter(peer => peer.presentUntil <= at).sort((a, b) => a.presentUntil - b.presentUntil)[0]
+      if (!dormant) throw tooBusy()
+      room.peers.delete(dormant.id)
+    }
     const peer = { id: input.deviceId, publicKey, name: senderName(scope), guest: Boolean(scope.guestKey.token),
-      credential: scope.guestKey, joinedSeq: room.seq, expiresAt: at + peerLease, burst: { used: 0, resetAt: 0 } }
+      credential: scope.guestKey, joinedSeq: room.seq, presentUntil: at + peerLease, burst: { used: 0, resetAt: 0 } }
     room.peers.set(peer.id, peer)
-    return json(response, 200, snapshot(room, peer, peer.joinedSeq))
+    return json(response, 200, snapshot(room, peer, peer.joinedSeq, at))
   }
 
   function read(response, scope, url) {
@@ -143,9 +150,9 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
         !Number.isSafeInteger(Number(cursor)) || url.searchParams.size !== devices.length + cursors.length) throw invalid()
     assertAccess(scope)
     const at = now()
-    const room = roomFor(scope, at)
+    const room = roomFor(scope)
     const viewer = ownPeer(room, scope, devices[0], at)
-    return json(response, 200, snapshot(room, viewer, Number(cursor)))
+    return json(response, 200, snapshot(room, viewer, Number(cursor), at))
   }
 
   async function post(request, response, scope) {
@@ -157,13 +164,13 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
         Object.keys(keys).length > maxPeers) throw invalid()
     assertAccess(scope)
     const at = now()
-    const room = roomFor(scope, at)
-    prunePeers(scope.roomId, room, at, true)
+    const room = roomFor(scope)
+    pruneRevoked(scope.roomId, room)
     const sender = ownPeer(room, scope, input.deviceId, at)
     const previous = room.messages.find(message => message.id === input.id)
     if (previous) {
       if (previous.from !== sender.id) throw conflict()
-      return json(response, 201, snapshot(room, sender, previous.seq - 1))
+      return json(response, 201, snapshot(room, sender, previous.seq - 1, at))
     }
     if (!fields(keys, [...room.peers.keys()])) throw conflict()
     const deliveries = new Map()
@@ -177,7 +184,7 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     room.messages.push({ id: input.id, seq: ++room.seq, from: sender.id, name, guest, publicKey, sentAt: new Date(at).toISOString(),
       nonce, blob, keys: deliveries })
     if (room.messages.length > maxMessages) room.messages.shift()
-    return json(response, 201, snapshot(room, sender, room.seq - 1))
+    return json(response, 201, snapshot(room, sender, room.seq - 1, at))
   }
 
   async function leave(request, response, scope) {
@@ -186,7 +193,7 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     assertAccess(scope)
     const room = rooms.get(scope.roomId)
     const peer = room?.peers.get(input.deviceId)
-    if (peer && sameCredential(peer.credential, scope.guestKey)) room.peers.delete(peer.id)
+    if (peer && sameCredential(peer.credential, scope.guestKey)) peer.presentUntil = 0
     return json(response, 200, { ok: true })
   }
 
@@ -199,9 +206,8 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
   }
 
   function sweep() {
-    const at = now()
     for (const [id, room] of rooms) {
-      prunePeers(id, room, at, true)
+      pruneRevoked(id, room)
       if (!room.peers.size) rooms.delete(id)
     }
   }

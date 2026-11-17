@@ -1,6 +1,7 @@
 import { language, t } from "./i18n.js";
 import { guestPassword, guestRoomId, guestSource, openGuestMedia } from "./guest-media.js";
 import { renderQuickChat } from "./quick-chat.js";
+import { watchQueue } from "./watch-queue.js";
 import { createWatchControls } from "./watch-controls.js";
 import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
 
@@ -77,6 +78,14 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
             <button class="button primary guest-play" type="button" hidden></button>
           </div>
         </section></div>
+        <aside class="quick-view-support" data-pane="chat">
+          <div class="quick-view-support-tabs inline" hidden>
+            <button type="button" class="button" data-pane="chat" aria-pressed="true"></button>
+            <button type="button" class="button" data-pane="queue" aria-pressed="false"></button>
+          </div>
+          <div class="quick-view-chat-slot"></div>
+          <div class="quick-view-queue-slot"></div>
+        </aside>
       </div>
     </section>`;
   const find = selector => viewer.querySelector(selector);
@@ -91,7 +100,13 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   const title = find(".guest-room-title");
   const videoTitle = find(".guest-video-title");
   const live = find(".guest-heading .tag");
-  const layout = find(".quick-view-layout");
+  const support = find(".quick-view-support");
+  const supportTabs = find(".quick-view-support-tabs");
+  const chatTab = find("button[data-pane=chat]");
+  const queueTab = find("button[data-pane=queue]");
+  const chatSlot = find(".quick-view-chat-slot");
+  const queueSlot = find(".quick-view-queue-slot");
+  const viewerQueue = watchQueue();
   const slot = find(".guest-player-slot");
   const player = find(".guest-player");
   const stage = find(".guest-media");
@@ -117,6 +132,16 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   });
   find(".watch-party-footer").prepend(controls.element);
   if (host?.actions) find(".guest-heading").append(host.actions);
+  queueSlot.append(host?.queue ?? viewerQueue.node);
+
+  function showPane(pane) {
+    support.dataset.pane = pane;
+    chatTab.setAttribute("aria-pressed", String(pane === "chat"));
+    queueTab.setAttribute("aria-pressed", String(pane === "queue"));
+  }
+
+  chatTab.addEventListener("click", () => showPane("chat"), { signal });
+  queueTab.addEventListener("click", () => showPane("queue"), { signal });
 
   let gateState = "opening";
   let playbackState;
@@ -147,6 +172,8 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     setText(videoTitle, watch?.source.title || "");
     videoTitle.hidden = !videoTitle.textContent;
     live.textContent = t("Live", "Live");
+    chatTab.textContent = t("Live chat", "Livechat");
+    queueTab.textContent = t("Queue", "Warteschlange");
     setText(waiting, copy("waiting"));
     setText(playbackStatus, copy(playbackState));
     setText(commandStatus, copy(commandState));
@@ -180,12 +207,12 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     updateLabels();
   }
 
-  function discardMedia() {
+  function discardMedia(keepFullscreen = false) {
     const old = playing;
     playing = undefined;
     old?.audience?.stop();
     old?.surface.destroy();
-    controls.setFullscreenSurface(null);
+    if (!keepFullscreen) controls.setFullscreenSurface(null);
     clearInterval(clock);
     controls.resetPosition();
     controls.element.hidden = true;
@@ -265,7 +292,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   }
 
   function startPlayback() {
-    discardMedia();
+    discardMedia(Boolean(playing && watch && playing.kind !== "screen" && watch.source.kind !== "screen"));
     if (!watch) return;
     const { source } = watch;
     const current = { id: source.id, kind: source.kind, ready: false, started: false };
@@ -293,7 +320,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       onEnded() {
         if (!active() || !watch?.source.playing) return;
         const duration = current.surface.getDuration();
-        if (Number.isFinite(duration) && duration > 0 && expectedPosition() >= duration - 1) void change("pause");
+        if (Number.isFinite(duration) && duration > 0 && expectedPosition() >= duration - 1) void change("ended", duration);
       },
       onBlocked() { if (active() && (source.kind === "screen" || watch?.source.playing)) setPlayback("gesture"); },
       onError() {
@@ -335,12 +362,13 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     clock = setInterval(tick, 250);
   }
 
-  function revoke() {
+  function revoke(notifyChat = false) {
     authorized = false;
     watch = undefined;
     nativeIntent = undefined;
     hidePreview();
     discardMedia();
+    if (notifyChat) chat?.dispatchEvent(new Event("quick-chat-revoke"));
     closeChat();
     dockEntry?.deactivate();
   }
@@ -355,8 +383,8 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   function openChat() {
     if (chat || !mounted || !authorized) return;
     chatScope = new AbortController();
-    chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]) });
-    layout.append(chat);
+    chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]), member });
+    chatSlot.append(chat);
   }
 
   function showRoom(snapshot, sent) {
@@ -368,6 +396,11 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     passwordInput.value = "";
     openChat();
     const source = guestSource(snapshot, base);
+    const hasQueue = Boolean(source && source.kind !== "screen");
+    support.toggleAttribute("data-has-queue", hasQueue);
+    supportTabs.hidden = !hasQueue;
+    if (!hasQueue) showPane("chat");
+    viewerQueue.update(snapshot.queue, { visible: hasQueue });
     if (!source) {
       watch = undefined;
       if (playing) discardMedia();
@@ -379,7 +412,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     const received = performance.now();
     watch = { source, serverTime: snapshot.serverTime, received, roundTrip: received - sent };
     updateLabels();
-    if (source.id === dismissedSource) return;
+    if ((source.sessionId ?? source.id) === dismissedSource) return;
     if (source.id !== playing?.id || source.kind !== playing?.kind) {
       showPreview();
       startPlayback();
@@ -406,7 +439,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
 
   function accessLost(response) {
     if (![401, 403, 404, 410].includes(response.status)) return false;
-    revoke();
+    revoke(true);
     showGate(!member && [401, 403].includes(response.status) ? "required" : "unavailable");
     host?.onUnavailable?.();
     return true;
@@ -465,9 +498,9 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       }
       if (signal.aborted || watch?.source.id !== id) return;
       const response = await request("/playback", "PATCH", { partyId: id, revision, action, position });
-      if (signal.aborted || accessLost(response)) return;
-      if (response.status === 409) {
-        setCommand("conflict");
+      if (signal.aborted || (response.status !== 404 && accessLost(response))) return;
+      if (response.status === 409 || response.status === 404) {
+        if (action !== "ended") setCommand("conflict");
         if (playing) playing.revision = undefined;
       } else {
         if (!response.ok) throw new Error();
@@ -520,6 +553,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   viewer.addEventListener("guest-language", () => {
     updateLabels();
     controls.refreshLabels();
+    viewerQueue.refreshLabels();
     chat?.dispatchEvent(new Event("guest-language"));
   }, { signal });
   signal.addEventListener("abort", () => {
@@ -539,6 +573,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       host?.actions?.remove();
       host = nextHost;
       if (host?.actions) find(".guest-heading").append(host.actions);
+      queueSlot.replaceChildren(host?.queue ?? viewerQueue.node);
       dismissedSource = undefined;
       openChat();
       schedule(0);
@@ -551,7 +586,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       closeChat();
     },
     stopPlayback() {
-      dismissedSource = watch?.source.id;
+      dismissedSource = watch?.source.sessionId ?? watch?.source.id;
       discardMedia();
       dockEntry?.deactivate();
     },

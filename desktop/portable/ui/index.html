@@ -15,42 +15,84 @@
       <h1 id="heading"></h1>
       <p class="note" id="description"></p>
       <section id="preferences" hidden>
-        <section class="settings-group" aria-labelledby="display-heading">
-          <h2 id="display-heading"></h2>
+        <div class="settings-tabs" id="settings-tabs" role="group">
+          <button type="button" id="general-settings-tab" aria-controls="general-preferences" aria-pressed="true"></button>
+          <button type="button" id="update-settings-tab" aria-controls="update-preferences" aria-pressed="false"></button>
+        </div>
+        <div id="general-preferences">
+          <section class="settings-group" aria-labelledby="display-heading">
+            <h2 id="display-heading"></h2>
+            <div class="settings-card">
+              <label class="settings-row" for="language">
+                <span><strong id="language-label"></strong><small id="language-detail"></small></span>
+                <select id="language" aria-labelledby="language-label" aria-describedby="language-detail"><option value="system"></option><option value="en">English</option><option value="de">Deutsch</option></select>
+              </label>
+              <label class="settings-row" for="appearance">
+                <span><strong id="appearance-label"></strong><small id="appearance-detail"></small></span>
+                <select id="appearance" aria-labelledby="appearance-label" aria-describedby="appearance-detail"><option value="dark"></option><option value="system"></option><option value="light"></option></select>
+              </label>
+            </div>
+          </section>
+          <section class="settings-group" aria-labelledby="background-heading">
+            <h2 id="background-heading"></h2>
+            <div class="settings-card">
+              <label class="settings-row" for="notifications">
+                <span><strong id="notifications-label"></strong><small id="notifications-detail"></small></span>
+                <input type="checkbox" role="switch" id="notifications" aria-labelledby="notifications-label" aria-describedby="notifications-detail">
+              </label>
+              <label class="settings-row" for="keepRunning">
+                <span><strong id="keep-running-label"></strong><small id="keep-running-detail"></small></span>
+                <input type="checkbox" role="switch" id="keepRunning" aria-labelledby="keep-running-label" aria-describedby="keep-running-detail">
+              </label>
+            </div>
+          </section>
+          <section class="settings-group" aria-labelledby="connection-heading">
+            <h2 id="connection-heading"></h2>
+            <div class="settings-card">
+              <div class="settings-row"><span><strong id="current-server-label"></strong><small id="current-server" class="origin"></small></span>
+                <button id="change-server" type="button"></button>
+              </div>
+            </div>
+          </section>
+        </div>
+        <section class="settings-group" id="update-preferences" aria-labelledby="updates-heading" hidden>
+          <h2 id="updates-heading"></h2>
           <div class="settings-card">
-            <label class="settings-row" for="language">
-              <span><strong id="language-label"></strong><small id="language-detail"></small></span>
-              <select id="language" aria-labelledby="language-label" aria-describedby="language-detail"><option value="system"></option><option value="en">English</option><option value="de">Deutsch</option></select>
+            <label class="settings-row" for="updateChecks">
+              <span><strong id="update-checks-label"></strong><small id="update-checks-detail"></small></span>
+              <input type="checkbox" role="switch" id="updateChecks" aria-labelledby="update-checks-label" aria-describedby="update-checks-detail">
             </label>
-            <label class="settings-row" for="appearance">
-              <span><strong id="appearance-label"></strong><small id="appearance-detail"></small></span>
-              <select id="appearance" aria-labelledby="appearance-label" aria-describedby="appearance-detail"><option value="dark"></option><option value="system"></option><option value="light"></option></select>
+            <label class="settings-row" for="updateInterval">
+              <span><strong id="update-interval-label"></strong></span>
+              <select id="updateInterval" aria-labelledby="update-interval-label">
+                <option value="1"></option><option value="6"></option><option value="24"></option><option value="168"></option>
+              </select>
             </label>
-          </div>
-        </section>
-        <section class="settings-group" aria-labelledby="background-heading">
-          <h2 id="background-heading"></h2>
-          <div class="settings-card">
-            <label class="settings-row" for="notifications">
-              <span><strong id="notifications-label"></strong><small id="notifications-detail"></small></span>
-              <input type="checkbox" role="switch" id="notifications" aria-labelledby="notifications-label" aria-describedby="notifications-detail">
-            </label>
-            <label class="settings-row" for="keepRunning">
-              <span><strong id="keep-running-label"></strong><small id="keep-running-detail"></small></span>
-              <input type="checkbox" role="switch" id="keepRunning" aria-labelledby="keep-running-label" aria-describedby="keep-running-detail">
-            </label>
-          </div>
-        </section>
-        <section class="settings-group" aria-labelledby="connection-heading">
-          <h2 id="connection-heading"></h2>
-          <div class="settings-card">
-            <div class="settings-row"><span><strong id="current-server-label"></strong><small id="current-server" class="origin"></small></span>
-              <button id="change-server" type="button"></button>
+            <div class="settings-row github-access">
+              <label for="update-token"><strong id="update-token-label"></strong><small id="update-token-detail"></small></label>
+              <div class="update-token-form">
+                <input id="update-token" type="password" maxlength="211" spellcheck="false" autocapitalize="none"
+                  autocomplete="off" aria-describedby="update-token-detail">
+                <button id="save-update-token" type="button" disabled></button>
+                <button id="remove-update-token" type="button" hidden></button>
+              </div>
+              <div class="update-actions">
+                <button id="check-update" type="button" disabled></button>
+                <button id="open-release" class="primary" type="button" hidden></button>
+              </div>
+              <p class="status" id="update-status" role="status" hidden></p>
             </div>
           </div>
         </section>
         <p class="error status" id="preferences-status" role="status" hidden></p>
         <div class="actions"><button id="done" class="primary" type="button"></button></div>
+      </section>
+      <section class="update-intro settings-card" id="update-intro" hidden>
+        <p class="note" id="update-intro-details"></p>
+        <div class="actions">
+          <button id="dismiss-update-intro" type="button"></button>
+          <button id="open-update-settings" class="primary" type="button"></button>
+        </div>
       </section>
       <form id="server-form" hidden>
         <div class="settings-card address-card">

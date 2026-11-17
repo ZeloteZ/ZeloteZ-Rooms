@@ -12,11 +12,20 @@ function settings(state) {
   const back = control("back");
   const status = control("address-status");
   const preferenceStatus = control("preferences-status");
+  const updateToken = control("update-token");
+  const saveToken = control("save-update-token");
+  const removeToken = control("remove-update-token");
+  const checkUpdate = control("check-update");
+  const openRelease = control("open-release");
+  const updateStatus = control("update-status");
   let language = state.language;
   let phase = "idle";
   let verifiedOrigin = "";
   let statusKey = state.error || "hint";
-  let editing = !state.currentOrigin;
+  let editing = !state.currentOrigin && !state.focusUpdates;
+  let updatesTab = Boolean(state.focusUpdates);
+  let updating = false;
+  let updateResult;
 
   function t(en, de) { return language === "de" ? de : en; }
 
@@ -31,6 +40,13 @@ function settings(state) {
         ? t("Your current room stays open until you connect to the new server.", "Dein aktueller Raum bleibt offen, bis du dich mit dem neuen Server verbindest.")
         : t("Enter the Rooms address your host shared with you.", "Gib die Rooms-Adresse ein, die dir der Betreiber gegeben hat.")
       : t("These preferences apply to this device.", "Diese Einstellungen gelten für dieses Gerät.");
+    control("settings-tabs").setAttribute("aria-label", t("Settings sections", "Einstellungsbereiche"));
+    control("general-settings-tab").textContent = t("General", "Allgemein");
+    control("update-settings-tab").textContent = t("Desktop updates", "Desktop-Updates");
+    control("general-settings-tab").setAttribute("aria-pressed", String(!updatesTab));
+    control("update-settings-tab").setAttribute("aria-pressed", String(updatesTab));
+    control("general-preferences").hidden = updatesTab;
+    control("update-preferences").hidden = !updatesTab;
     control("display-heading").textContent = t("Display", "Anzeige");
     control("language-label").textContent = t("App language", "App-Sprache");
     control("language-detail").textContent = t("Menus and desktop dialogs", "Menüs und Desktop-Dialoge");
@@ -41,10 +57,27 @@ function settings(state) {
     control("notifications-detail").textContent = t("Show new activity while the app is running", "Neue Aktivitäten anzeigen, solange die App läuft");
     control("keep-running-label").textContent = t("Keep Rooms running", "Rooms weiterlaufen lassen");
     control("keep-running-detail").textContent = t("Keep calls and streams active when you close the window", "Anrufe und Streams beim Schließen des Fensters fortsetzen");
+    control("updates-heading").textContent = t("Desktop updates", "Desktop-Updates");
+    control("update-checks-label").textContent = t("Notify me about updates", "Über Updates benachrichtigen");
+    control("update-checks-detail").textContent = t("Check official GitHub releases while Rooms is running.", "Offizielle GitHub-Releases prüfen, solange Rooms läuft.");
+    control("update-interval-label").textContent = t("Check frequency", "Prüfintervall");
+    const intervals = [t("Hourly", "Stündlich"), t("Every 6 hours", "Alle 6 Stunden"), t("Daily", "Täglich"), t("Weekly", "Wöchentlich")];
+    intervals.forEach((label, index) => { control("updateInterval").options[index].textContent = label; });
+    control("update-token-label").textContent = state.updateTokenSaved ? t("GitHub token saved", "GitHub-Token gespeichert") : t("GitHub access token", "GitHub-Zugriffstoken");
+    control("update-token-detail").textContent = t(
+      "Use a fine-grained token with read-only Contents access to ZeloteZ/ZeloteZ-Rooms.",
+      "Verwende einen Fine-grained-Token mit Leserechten für „Contents“ in ZeloteZ/ZeloteZ-Rooms.");
+    updateToken.placeholder = state.updateTokenSaved ? t("Replace saved token", "Gespeicherten Token ersetzen") : "github_pat_…";
+    saveToken.textContent = t("Save token", "Token speichern");
+    removeToken.textContent = t("Remove token", "Token entfernen");
+    checkUpdate.textContent = t("Check now", "Jetzt prüfen");
+    openRelease.textContent = t("View release on GitHub", "Release auf GitHub ansehen");
+    renderUpdateControls();
     control("connection-heading").textContent = t("Connection", "Verbindung");
     control("current-server-label").textContent = t("Current server", "Aktueller Server");
-    control("change-server").textContent = t("Change…", "Wechseln …");
-    control("done").textContent = t("Done", "Fertig");
+    control("current-server").textContent = state.currentOrigin || t("Not connected", "Nicht verbunden");
+    control("change-server").textContent = state.currentOrigin ? t("Change…", "Wechseln …") : t("Set address…", "Adresse eingeben …");
+    control("done").textContent = state.currentOrigin ? t("Done", "Fertig") : t("Continue setup", "Einrichtung fortsetzen");
     control("address-label").textContent = t("Server address", "Serveradresse");
     control("language").options[0].textContent = t("System", "System");
     control("appearance").options[0].textContent = t("Dark", "Dunkel");
@@ -53,7 +86,7 @@ function settings(state) {
     preferenceStatus.textContent = t("This preference couldn’t be saved.", "Diese Einstellung konnte nicht gespeichert werden.");
     check.textContent = phase === "checking" ? t("Checking…", "Wird geprüft …") : t("Check address", "Adresse prüfen");
     connect.textContent = phase === "connecting" ? t("Connecting…", "Verbindung wird hergestellt …") : t("Connect", "Verbinden");
-    back.textContent = t("Back", "Zurück");
+    back.textContent = state.currentOrigin ? t("Back", "Zurück") : t("Desktop settings", "Desktop-Einstellungen");
 
     const messages = {
       hint: t("Rooms checks the address before you connect.", "Rooms prüft die Adresse, bevor du dich verbindest."),
@@ -84,14 +117,42 @@ function settings(state) {
     check.classList.toggle("primary", !verifiedOrigin);
     connect.hidden = !verifiedOrigin;
     connect.disabled = busy || !verifiedOrigin;
-    back.hidden = !state.currentOrigin;
+    back.hidden = false;
     back.disabled = busy;
     form.hidden = !editing;
     overview.hidden = editing;
   }
 
+  function renderUpdateControls() {
+    updateToken.disabled = updating;
+    saveToken.disabled = updating || !updateToken.value.trim();
+    removeToken.hidden = !state.updateTokenSaved;
+    removeToken.disabled = updating;
+    checkUpdate.disabled = updating || !state.updateTokenSaved;
+    openRelease.hidden = updateResult?.status !== "available";
+    const statuses = {
+      saved: t("The token was saved in your system’s secure storage.", "Der Token wurde im sicheren Speicher deines Systems abgelegt."),
+      removed: t("The saved token was removed.", "Der gespeicherte Token wurde entfernt."),
+      invalid: t("Enter a GitHub fine-grained personal access token.", "Gib einen persönlichen Fine-grained-Token von GitHub ein."),
+      secureStorage: t("Your system’s secure storage is unavailable. Check your keychain or credential manager.",
+        "Der sichere Systemspeicher ist nicht verfügbar. Prüfe deinen Schlüsselbund oder die Anmeldeinformationsverwaltung."),
+      access: t("GitHub denied access. Check the token’s repository permissions and expiry.",
+        "GitHub hat den Zugriff verweigert. Prüfe die Repository-Berechtigungen und das Ablaufdatum des Tokens."),
+      token: t("Unlock the system credential store or add a GitHub token.", "Entsperre den sicheren Systemspeicher oder füge einen GitHub-Token hinzu."),
+      unavailable: t("The update check couldn’t finish. Try again later.", "Die Update-Prüfung konnte nicht abgeschlossen werden. Versuch es später erneut."),
+      current: t("You’re using the latest version.", "Du verwendest die neueste Version."),
+      available: (updateResult?.installer ? t("Version {version} is available.", "Version {version} ist verfügbar.")
+        : t("Version {version} has been published. This release contains no installer for your platform.",
+          "Version {version} wurde veröffentlicht. Dieses Release enthält keinen Installer für deine Plattform."))
+        .replace("{version}", updateResult?.version ?? ""),
+    };
+    const message = updating ? t("One moment…", "Einen Moment …") : statuses[updateResult?.status] ?? "";
+    updateStatus.textContent = message;
+    updateStatus.hidden = !message;
+    updateStatus.classList.toggle("error", ["invalid", "access", "secureStorage", "unavailable"].includes(updateResult?.status));
+  }
+
   address.value = state.address;
-  control("current-server").textContent = state.currentOrigin;
   for (const id of Object.keys(state.preferences)) {
     const field = control(id);
     const property = field.type === "checkbox" ? "checked" : "value";
@@ -117,19 +178,56 @@ function settings(state) {
   }
   function showOverview() {
     editing = false;
+    updatesTab = false;
     render();
     control("change-server").focus();
   }
-  control("done").addEventListener("click", () => bridge.cancel());
-  control("change-server").addEventListener("click", () => {
-    address.value = state.currentOrigin;
+  function showServer() {
+    address.value = state.currentOrigin || state.address;
     editing = true;
     verifiedOrigin = "";
     statusKey = "hint";
     render();
     address.select();
-  });
+  }
+  function focusUpdateSettings() {
+    if (phase !== "idle") return;
+    editing = false;
+    updatesTab = true;
+    render();
+    control("updateChecks").focus();
+    control("updates-heading").scrollIntoView({ block: "nearest" });
+  }
+  control("done").addEventListener("click", () => state.currentOrigin ? bridge.cancel() : showServer());
+  control("change-server").addEventListener("click", showServer);
   back.addEventListener("click", showOverview);
+  bridge.onFocusUpdates(focusUpdateSettings);
+  control("general-settings-tab").addEventListener("click", () => { updatesTab = false; render(); });
+  control("update-settings-tab").addEventListener("click", () => { updatesTab = true; render(); });
+  updateToken.addEventListener("input", renderUpdateControls);
+  async function updateOperation(operation) {
+    if (updating) return;
+    updating = true;
+    updateResult = undefined;
+    renderUpdateControls();
+    try {
+      updateResult = await operation();
+      if (typeof updateResult?.tokenSaved === "boolean") state.updateTokenSaved = updateResult.tokenSaved;
+    } catch {
+      updateResult = { status: "unavailable" };
+    } finally {
+      updating = false;
+      render();
+    }
+  }
+  saveToken.addEventListener("click", () => {
+    const token = updateToken.value.trim();
+    updateToken.value = "";
+    if (token) void updateOperation(() => bridge.updateToken("save", token));
+  });
+  removeToken.addEventListener("click", () => void updateOperation(() => bridge.updateToken("remove")));
+  checkUpdate.addEventListener("click", () => void updateOperation(bridge.checkUpdate));
+  openRelease.addEventListener("click", () => void bridge.openRelease());
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape" || phase === "connecting") return;
     if (editing && state.currentOrigin && phase === "idle") showOverview();
@@ -179,7 +277,8 @@ function settings(state) {
     address.focus();
   });
   render();
-  if (editing) address.focus();
+  if (state.focusUpdates) focusUpdateSettings();
+  else if (editing) address.focus();
   else control("language").focus();
 }
 
@@ -192,6 +291,24 @@ async function setup() {
   }
   const t = (en, de) => state.language === "de" ? de : en;
   document.documentElement.lang = state.language;
+  if (state.mode === "update-intro") {
+    document.body.dataset.settingsView = "update-intro";
+    control("heading").textContent = t("Desktop update notifications", "Desktop-Update-Hinweise");
+    control("description").textContent = t("Choose whether Rooms checks GitHub for new versions.", "Du entscheidest, ob Rooms auf GitHub nach neuen Versionen sucht.");
+    control("update-intro-details").textContent = t(
+      "Update checks are off by default. In Desktop settings, you can turn them on, change the frequency and set up access to the private release page.",
+      "Die Update-Prüfung ist standardmäßig aus. In den Desktop-Einstellungen kannst du sie einschalten, das Prüfintervall wählen und den Zugriff auf die private Release-Seite einrichten.");
+    const dismiss = control("dismiss-update-intro");
+    const settings = control("open-update-settings");
+    dismiss.textContent = t("Not now", "Jetzt nicht");
+    settings.textContent = t("Open settings", "Einstellungen öffnen");
+    dismiss.addEventListener("click", () => void bridge.updateIntro("dismiss"));
+    settings.addEventListener("click", () => void bridge.updateIntro("settings"));
+    document.addEventListener("keydown", event => { if (event.key === "Escape") void bridge.updateIntro("dismiss"); });
+    control("update-intro").hidden = false;
+    dismiss.focus();
+    return;
+  }
   control("picker-cancel").textContent = t("Cancel", "Abbrechen");
   control("picker-cancel").addEventListener("click", () => bridge.cancel());
   document.addEventListener("keydown", event => {

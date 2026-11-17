@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>ZeloteZ Rooms</title>
+  <link rel="stylesheet" href="panel.css">
+  <script src="panel.js" type="module"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="brand" aria-hidden="true">Z</span>
+      <h1 data-text="settingsTitle"></h1>
+    </header>
+    <form id="settings" hidden>
+      <label>
+        <span data-text="instanceLabel"></span>
+        <input id="instance" type="url" inputmode="url" required autocomplete="off" spellcheck="false" placeholder="https://rooms.example.org">
+      </label>
+      <label>
+        <span data-text="targetLabel"></span>
+        <select id="target">
+          <option value="browser" data-text="targetBrowser"></option>
+          <option value="desktop" data-text="targetDesktop"></option>
+        </select>
+      </label>
+      <p data-text="privacyNote"></p>
+      <button type="submit" id="save" data-text="save"></button>
+    </form>
+    <p id="status" role="status" hidden></p>
+    <section id="desktop" hidden>
+      <p data-text="desktopNote"></p>
+      <div class="actions">
+        <a class="button" id="open-desktop" data-text="openDesktop" referrerpolicy="no-referrer"></a>
+        <button type="button" id="browser-fallback" data-text="openBrowser"></button>
+      </div>
+    </section>
+    <button type="button" id="edit" data-text="editSettings" hidden></button>
+  </main>
+</body>
+</html>

@@ -185,6 +185,76 @@ test('guest and member playback use one canonical revision for the authorized te
   assert.equal(revoked.position, 13.5)
 })
 
+test('watch queues preserve order and temporary scope while advancing across source types', async t => {
+  const { request, session, users, room, channel, temporary, guestSnapshot, controlGuestPlayback, reportGuestViewer, tick } = await fixture(t)
+  const host = session(users.host)
+  const member = session(users.viewer)
+  const video = Buffer.alloc(24)
+  video.writeUInt32BE(24)
+  video.write('ftypisom', 4)
+  const upload = { 'content-type': 'application/octet-stream' }
+  const local = { source: 'local', mime: 'video/mp4', size: video.length, title: 'Local clip' }
+  const youtube = { source: 'youtube', videoId: 'K5ABskPJN1Q' }
+  temporary.add(channel)
+  const { party: first } = (await request(host, 'POST', '', local)).data
+  const firstPath = `/${first.id}`
+  await request(host, 'PUT', `${firstPath}/upload?offset=0`, video, upload)
+  await assert.rejects(request(member, 'POST', `${firstPath}/queue`, youtube), { status: 403 })
+  const { enqueued: middle } = (await request(host, 'POST', `${firstPath}/queue`, youtube)).data
+  const { enqueued: last } = (await request(host, 'POST', `${firstPath}/queue`, local)).data
+  const { enqueued: removed } = (await request(host, 'POST', `${firstPath}/queue`, youtube)).data
+  await assert.rejects(request(member, 'DELETE', `/${removed.id}/queue`), { status: 404 })
+  await request(host, 'DELETE', `/${removed.id}/queue`)
+  await assert.rejects(request(host, 'GET', `/${last.id}/media`), { status: 404 })
+  await request(host, 'PUT', `/${last.id}/upload?offset=0`, video, upload)
+  const scope = { roomId: room, channelId: channel, ownerId: users.host, source: 'local', guestKey: { token: 'queue-test-ticket' } }
+  assert.deepEqual(guestSnapshot(scope).queue.map(({ id, state }) => ({ id, state })), [
+    { id: middle.id, state: 'ready' }, { id: last.id, state: 'ready' },
+  ])
+  assert.throws(() => controlGuestPlayback(scope, { partyId: first.id, action: 'next', revision: 2 }), { status: 404 })
+  controlGuestPlayback(scope, { partyId: first.id, action: 'play', revision: 2 })
+  assert.throws(() => controlGuestPlayback(scope, { partyId: first.id, action: 'ended', position: 8, revision: 3 }), { status: 409 })
+  tick(8000)
+  controlGuestPlayback(scope, { partyId: first.id, action: 'ended', position: 8, revision: 3 })
+  const advanced = guestSnapshot(scope).party
+  assert.equal(advanced.id, middle.id)
+  assert.equal(advanced.sessionId, first.id)
+  assert.equal(advanced.source, 'youtube')
+  assert.equal(advanced.playing, false)
+  assert.equal(guestSnapshot({ ...scope, source: 'youtube' }).party, null)
+  assert.throws(() => controlGuestPlayback(scope, { partyId: first.id, action: 'ended', position: 8, revision: 3 }), { status: 404 })
+  reportGuestViewer(scope, { partyId: middle.id, playerId: randomUUID(), revision: 1 }, 'POST', () => true)
+  assert.equal(guestSnapshot(scope).party.playing, true)
+  const next = (await request(host, 'PATCH', `/${middle.id}`, { action: 'next', revision: 2 })).data
+  assert.equal(next.party.id, last.id)
+  assert.equal(next.party.playing, true)
+  assert.deepEqual(next.queue, [])
+  assert.equal(guestSnapshot(scope).party.mediaUrl, `/api/guest/${room}/media/${last.id}`)
+})
+
+test('a watch party waits for the first queued upload and automatically starts it on completion', async t => {
+  const { request, session, users, tick } = await fixture(t)
+  const host = session(users.host)
+  const video = Buffer.alloc(24)
+  video.writeUInt32BE(24)
+  video.write('ftypisom', 4)
+  const body = { source: 'local', mime: 'video/mp4', size: video.length }
+  const upload = { 'content-type': 'application/octet-stream' }
+  const { party: first } = (await request(host, 'POST', '', body)).data
+  await request(host, 'PUT', `/${first.id}/upload?offset=0`, video, upload)
+  const { enqueued } = (await request(host, 'POST', `/${first.id}/queue`, body)).data
+  await request(host, 'PATCH', `/${first.id}`, { action: 'play', revision: 2 })
+  tick(8000)
+  const waiting = (await request(host, 'PATCH', `/${first.id}`, { action: 'ended', position: 8, revision: 3 })).data
+  assert.equal(waiting.party.id, first.id)
+  assert.equal(waiting.party.playing, false)
+  assert.equal(waiting.queue[0].state, 'uploading')
+  const { party: next } = (await request(host, 'PUT', `/${enqueued.id}/upload?offset=0`, video, upload)).data
+  assert.equal(next.id, enqueued.id)
+  assert.equal(next.sessionId, first.id)
+  assert.equal(next.playing, true)
+})
+
 test('Live Now shows visible ready watch parties and the original host can supply YouTube title metadata once', async t => {
   const { request, session, users, room, channel, homeActivity } = await fixture(t)
   const host = session(users.host)

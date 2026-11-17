@@ -164,9 +164,29 @@
 
 .watch-party-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 9px; }
 .watch-party-sources button { min-block-size: 48px; }
+
+.watch-queue { display: grid; gap: 6px; min-inline-size: 0; min-block-size: 0; padding: 9px; border-radius: 13px; overflow: auto; }
+.watch-queue-heading { flex-wrap: wrap; }
+.watch-queue-heading h2 { font-size: 1rem; }
+.watch-queue-actions .button { min-block-size: 30px; padding: 4px 7px; }
+.watch-queue-list { list-style: none; display: grid; align-content: start; gap: 3px; max-block-size: min(22dvh, 12rem); padding: 0; overflow: auto; }
+.watch-queue-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-block-end: 1px solid var(--line); }
+.watch-queue-entry { display: grid; min-inline-size: 0; font-size: .85rem; }
+.watch-queue-entry > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-channel:has(.watch-queue-tab:not([hidden])) .live-channel-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.live-channel[data-panel="queue"] .live-channel-people,
+.live-channel[data-panel="queue"] .live-channel-chat-content,
+.live-channel[data-panel="queue"] .live-channel-audience,
+.live-channel:not([data-panel="queue"]) .live-channel-chat .watch-queue { display: none; }
+
 #dialog progress { inline-size: 100%; accent-color: var(--accent); }
 
 @container live-channel (min-width: 50rem) {
+  .live-channel[data-panel] .live-channel-people,
+  .live-channel[data-panel] .live-channel-chat-content:not([hidden]),
+  .live-channel[data-panel] .watch-queue:not([hidden]) { display: grid; }
+  .live-channel[data-panel="queue"] .live-channel-audience:not([hidden]) { display: block; }
+  .live-channel-chat:has(.watch-queue:not([hidden])) { grid-template-rows: minmax(0, 1fr) auto auto; gap: 5px; }
   .live-channel-body:has(.watch-party-player:not([hidden])) {
     grid-template-rows: minmax(var(--watch-party-min-height, 17rem), 1fr) minmax(6rem, .47fr);
   }

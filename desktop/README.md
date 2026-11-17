@@ -4,11 +4,15 @@ The desktop app opens the same Rooms interface as the website. Enter your server
 
 Open **Desktop settings** from the app menu or with Ctrl+, to change local preferences while staying signed in. Friend requests, direct messages, mentions, and opted-in live alerts can also appear as system notifications. By default, the close button asks whether to keep Rooms running in the background or quit. Select **Don’t show this again** to minimize automatically on future clicks. Restore Rooms from the tray or taskbar, depending on your desktop. Change what X does in Desktop settings.
 
+Under **Desktop settings → Desktop updates**, turn on update notifications and choose the check frequency. Update checks start off. Access to the private GitHub repository requires a fine-grained personal access token limited to `ZeloteZ/ZeloteZ-Rooms` with read-only **Contents** permission. Rooms saves the token through your system’s secure credential storage. Update notifications open the official release page for a manual download. [GitHub token setup](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)
+
 Upgrade the self-hosted gateway and server together before connecting a current desktop app. The app checks `/api/desktop/instance` and the `X-ZeloteZ-Rooms-Client` header on the main page. Any HTTPS reverse proxy in front of the gateway must pass through that response header.
 
 ## Windows and portable Linux
 
 On Windows x64, run the `ZeloteZ-Rooms-…-x64.exe` installer. On Linux x64, mark the AppImage as executable and open it. Use the KDE or GNOME ScreenCast portal and PipeWire for sharing on Wayland.
+
+The browser extension can pass a YouTube video directly to the desktop app when your system recognizes the `zelotez-rooms:` link handler. On Linux, integrate the AppImage with your desktop to make the handler discoverable. Set the same Rooms instance in the extension and desktop app.
 
 Open a live channel, choose the resolution and frame rate, then click **Share screen** to select a screen or application window. For a region, enable the crop option and select the area in the local preview before starting.
 

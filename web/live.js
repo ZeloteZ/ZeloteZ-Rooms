@@ -492,6 +492,9 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const chatButton = button(t("Chat", "Chat"), () => setPanel("chat"), {
     "aria-controls": "live-channel-chat", "aria-pressed": "false",
   });
+  const queueButton = button(t("Queue", "Warteschlange"), () => setPanel("queue"), {
+    class: "watch-queue-tab", "aria-controls": "live-channel-queue", "aria-pressed": "false", hidden: true,
+  });
   const watchSlot = el("div", { class: "watch-party-slot" });
   const watchParty = createWatchParty(context, channel, {
     mount: watchSlot,
@@ -507,6 +510,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     onUnavailable: () => tell(feedback, unavailableWatch),
     onShareUnavailable: () => tell(feedback, t("Video sharing is unavailable in this channel.", "In diesem Kanal kannst du gerade kein Video teilen.")),
   });
+  watchParty.queue.id = "live-channel-queue";
   const streamsSection = el("section", {
     class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
   }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
@@ -535,6 +539,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     node.dataset.panel = panel;
     peopleButton.setAttribute("aria-pressed", String(panel === "people"));
     chatButton.setAttribute("aria-pressed", String(panel === "chat"));
+    queueButton.setAttribute("aria-pressed", String(panel === "queue"));
   }
 
   function showChannelChat() {
@@ -608,6 +613,8 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   }
 
   function renderControls() {
+    queueButton.hidden = watchParty.queue.hidden;
+    if (queueButton.hidden && node.dataset.panel === "queue") setPanel("chat");
     const own = mine();
     const sharing = screenShare?.active();
     const sharingHere = sharing && sameId(sharing.channel.id, channel.id);
@@ -800,11 +807,11 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint),
-    el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton),
+    el("div", { class: "live-channel-switch", role: "group", "aria-label": t("Live channel view", "Live-Channel-Ansicht") }, peopleButton, chatButton, queueButton),
     people,
     el("aside", {
       class: "live-channel-chat", id: "live-channel-chat", "data-tutorial": "live-chat", "aria-label": t("Stream chat", "Streamchat"),
-    }, chat, audience)));
+    }, chat, audience, watchParty.queue)));
   node.addEventListener("open-message", event => {
     if (event.detail?.messageId) showChatTarget(event.detail);
     if (event.detail?.shareSource) {

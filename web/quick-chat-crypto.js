@@ -2,6 +2,9 @@ const suite = "zelotez-rooms/quick-chat/v1";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const curve = { name: "ECDH", namedCurve: "P-256" };
+const keyLifetime = 12 * 60 * 60_000;
+const keyStore = "devices";
+const resident = new Map();
 
 function encode(bytes) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
@@ -27,9 +30,87 @@ function decrypt(key, envelope, additionalData) {
   return crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData }, key, decode(envelope.blob));
 }
 
-export async function createQuickChatCrypto(roomId) {
-  const deviceId = crypto.randomUUID();
-  const pair = await crypto.subtle.generateKey(curve, false, ["deriveBits"]);
+function storageKey(roomId, member) {
+  return (member ? "member:" : "guest:") + roomId;
+}
+
+async function newDevice() {
+  return { deviceId: crypto.randomUUID(), pair: await crypto.subtle.generateKey(curve, false, ["deriveBits"]), expiresAt: Date.now() + keyLifetime };
+}
+
+async function changeDeviceStore(operation) {
+  if (!globalThis.indexedDB) throw new Error("Local chat key storage is unavailable");
+  const db = await new Promise((resolve, reject) => {
+    const request = indexedDB.open("zelotez-rooms-quick-chat", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(keyStore);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Local chat key storage is busy"));
+  });
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(keyStore, "readwrite");
+      let result;
+      transaction.oncomplete = () => resolve(result);
+      transaction.onabort = () => reject(transaction.error);
+      operation(transaction.objectStore(keyStore), value => { result = value; });
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function roomDevice(key) {
+  if (resident.get(key)?.expiresAt > Date.now()) return resident.get(key);
+  const candidate = await newDevice();
+  const record = await changeDeviceStore((store, finish) => {
+    const request = store.get(key);
+    request.onsuccess = () => {
+      const existing = request.result;
+      if (existing?.expiresAt > Date.now() && existing.pair?.privateKey) finish(existing);
+      else {
+        store.put(candidate, key);
+        finish(candidate);
+      }
+    };
+    const cursor = store.openCursor();
+    cursor.onsuccess = () => {
+      const entry = cursor.result;
+      if (!entry) return;
+      if (entry.value.expiresAt <= Date.now()) entry.delete();
+      entry.continue();
+    };
+  }).catch(() => resident.get(key)?.expiresAt > Date.now() ? resident.get(key) : candidate);
+  resident.set(key, record);
+  return record;
+}
+
+export async function forgetQuickChatDevice(roomId, member, deviceId) {
+  const key = storageKey(roomId, member);
+  if (deviceId === undefined || resident.get(key)?.deviceId === deviceId) resident.delete(key);
+  await changeDeviceStore(store => {
+    const request = store.get(key);
+    request.onsuccess = () => {
+      if (deviceId === undefined || request.result?.deviceId === deviceId) store.delete(key);
+    };
+  }).catch(() => {});
+}
+
+export async function forgetMemberQuickChatDevices() {
+  for (const key of resident.keys()) if (key.startsWith("member:")) resident.delete(key);
+  await changeDeviceStore(store => {
+    const request = store.openKeyCursor(IDBKeyRange.bound("member:", "member:\uffff"));
+    request.onsuccess = () => {
+      const current = request.result;
+      if (!current) return;
+      store.delete(current.primaryKey);
+      current.continue();
+    };
+  }).catch(() => {});
+}
+
+export async function createQuickChatCrypto(roomId, options) {
+  const { deviceId, pair } = options ? await roomDevice(storageKey(roomId, options.member)) : await newDevice();
   const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", pair.publicKey);
   const salt = context("room", roomId);
 

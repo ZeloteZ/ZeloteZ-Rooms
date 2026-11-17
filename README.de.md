@@ -13,7 +13,7 @@ ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In
 - **Direkt mit Freunden schreiben.** Starte einen Ende-zu-Ende-verschlüsselten Chat über **Nachrichten** oder **Freunde**. Die Glocke zeigt Direktnachrichten, Freundschaftsanfragen und Erwähnungen. Hinweise auf Live-Starts in deinen Räumen kannst du im Profil einschalten.
 - **Moderation und Konten.** Du kannst eigene Nachrichten löschen. Raumersteller und Raum-Admins können Nachrichten anderer Mitglieder mit einer Begründung löschen oder zwischen den Textkanälen desselben Raums verschieben. Der Betreiber kann unter **Einladungen → Konten** Konten sperren und ihre Sitzungen samt Streams beenden.
 - **Sprache und Streams.** Über **Sprachchat betreten** hörst du zunächst zu. Zum Sprechen schaltest du das Mikrofon ein und erlaubst den Zugriff. Der verschlüsselte Livechat des Kanals steht bei jeder Videoquelle und zwischen Übertragungen zur Verfügung. Beim Wechsel zwischen Seiten bleiben die Bedienelemente neben deinem Profil erreichbar. Der Player bietet direkte Wiedergabe per WebRTC und gepufferte Wiedergabe per HLS.
-- **Gemeinsam Videos schauen.** Über **Video teilen** kannst du im Live-Kanal YouTube einbetten oder eine MP4- oder WebM-Datei bis 256 MiB hochladen. Abspielen, Pausieren und Spulen wirken für alle. Die Lautstärke stellt jede Person selbst ein. Beim Seitenwechsel wandert das Video in den Mini-Player. YouTube pausiert, sobald die letzte Person ihren Player schließt oder ausblendet.
+- **Gemeinsam Videos schauen.** Über **Video teilen** kannst du YouTube einbetten oder eine MP4- oder WebM-Datei bis 256 MiB hochladen. Wer teilen darf, kann Videos zur Warteschlange hinzufügen und entfernen. Abspielen, Pausieren und Spulen wirken für alle. Die Lautstärke stellt jede Person selbst ein. Beim Seitenwechsel wandert das Video in den Mini-Player. YouTube pausiert, sobald die letzte Person ihren Player schließt oder ausblendet.
 - **Jetzt streamen.** Wähle in der Rooms-Übersicht Bildschirm, YouTube oder eine lokale Datei und nutze einen bestehenden Live-Kanal oder einen temporären Raum. Temporäre Räume können für angemeldete Mitglieder unter **Gerade live** erscheinen und einen passwortgeschützten Zuschauerlink für Gäste anbieten.
 - **Ein eigener Look.** Lege Profilbild und Namensfarbe fest. Berechtigte Mitglieder können Räume mit Titelbild, Banner, Chat-Hintergrund und eigenen Farben gestalten. Für Bilder stehen Vorlagen und eigene JPEG-, PNG- und WebP-Dateien bis 8 MiB zur Auswahl.
 - **Orientierung beim ersten Besuch.** Die Rundgänge erklären die wichtigsten Bedienelemente. Du kannst sie im Profil zurücksetzen. Rooms startet auf Englisch. Beim Anmelden und im Profil kannst du **Deutsch** wählen.
@@ -32,7 +32,7 @@ In einer Watchparty liefert YouTube den eingebetteten Player und das Video direk
 
 Über den Gastlink eines temporären Raums können Besucher zuschauen, mitchatten und bei einer Watchparty abspielen, pausieren oder spulen. Das Passwort im URL-Fragment wird gegen eine Sitzung für genau diesen Raum eingetauscht. Unter **Stream-Zugriff** lässt sich der Link widerrufen oder ersetzen.
 
-Der temporäre Livechat verwendet für jedes teilnehmende Gerät eigene, kurzlebige Schlüssel. Der Server leitet verschlüsselte Nachrichten weiter und kann Absender und Zeitpunkte sehen. Teilnehmer sehen keine Nachrichten, die vor ihrem Beitritt gesendet wurden. Wenn der Raum geschlossen wird, wird der Chat gelöscht.
+Der temporäre Livechat verschlüsselt Nachrichten auch für eingeladene Gäste. Jeder teilnehmende Browser hält seinen privaten Schlüssel lokal. Mit demselben gültigen Zugang kann er seine letzten Nachrichten beim Zurückkehren wieder lesen, auch wenn sie während der Abwesenheit gesendet wurden. Ein neuer Browser erhält Nachrichten ab seinem Beitritt. Der Server hält die letzten 64 verschlüsselten Nachrichten bis zum Raumende im Arbeitsspeicher und sieht Absender und Zeitpunkte.
 
 ## Selbst hosten
 
@@ -59,5 +59,9 @@ Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 ## Desktop-App
 
 Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer und Linux-AppImage.
+
+Updatehinweise sind optional. In den Desktop-Einstellungen kannst du sie einschalten und das Prüfintervall festlegen. Für das private GitHub-Repo braucht die Prüfung einen fein abgestuften GitHub-Token mit Lesezugriff auf den Repo-Inhalt. Die App speichert ihn im sicheren Systemspeicher.
+
+Die optionale Browsererweiterung ergänzt **Create ZeloteZ Room** auf YouTube in Chromium-Browsern und Firefox. Wähle eine geprüfte Instanz und öffne das Video im Browser oder in deiner konfigurierten Desktop-App. [Anleitung zur Erweiterung](extension/README.md)
 
 Wenn du **Auf diesem Gerät angemeldet bleiben** auswählst, schützt der sichere Systemspeicher deine Sitzung und den Chat-Entsperrschlüssel bis zur Abmeldung oder bis die Sitzung abläuft.

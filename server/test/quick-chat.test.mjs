@@ -147,9 +147,31 @@ test('revoked credentials cannot access chat and replacement devices only see la
   assert.deepEqual((await read(owner)).body.messages[0].publicKey, guest.publicKey)
   assert.deepEqual((await read(replacement, 0)).body.messages, [])
   tick(120_001)
-  await assert.rejects(read(owner), { status: 409 })
-  assert.deepEqual((await join(owner)).body.messages, [])
+  assert.equal((await read(owner)).body.messages.length, 1)
+  assert.equal((await join(owner)).body.messages.length, 1)
   await assert.rejects(request(owner, 'GET', 'chat', undefined, `?deviceId=${owner.id}&deviceId=${owner.id}`), { status: 400 })
+})
+
+test('the same device can decrypt the recent chat after leaving and rejoining', async t => {
+  const { viewer, join, request, read, send, tick } = fixture(t)
+  const roomId = randomUUID()
+  const [hostKeys, guestKeys] = await Promise.all([createQuickChatCrypto(roomId), createQuickChatCrypto(roomId)])
+  const host = { ...viewer(roomId), id: hostKeys.deviceId, publicKey: hostKeys.publicKey }
+  const guest = { ...viewer(roomId, true), id: guestKeys.deviceId, publicKey: guestKeys.publicKey }
+  await join(host)
+  await join(guest)
+  const first = randomUUID()
+  await send(host, await hostKeys.seal(first, 'before leaving', (await read(host)).body.peers), first)
+  await request(guest, 'POST', 'leave', { deviceId: guest.id })
+  tick(120_001)
+  const { peers, participants } = (await read(host)).body
+  assert.equal(participants.length, 1)
+  const second = randomUUID()
+  await send(host, await hostKeys.seal(second, 'while away', peers), second)
+  const returned = (await join(guest)).body
+  assert.equal(returned.participants.length, 2)
+  assert.deepEqual(await Promise.all(returned.messages.map(guestKeys.open)), ['before leaving', 'while away'])
+  assert.deepEqual((await join(viewer(roomId, true))).body.messages, [])
 })
 
 test('registration validates keys and bounds devices and send rate', async t => {

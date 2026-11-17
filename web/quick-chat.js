@@ -1,5 +1,5 @@
 import { language, locale, t } from "./i18n.js";
-import { createQuickChatCrypto } from "./quick-chat-crypto.js";
+import { createQuickChatCrypto, forgetQuickChatDevice } from "./quick-chat-crypto.js";
 
 const messages = {
   connecting: ["Connecting to live chat…", "Livechat wird verbunden …"],
@@ -10,12 +10,18 @@ const messages = {
   sendLimited: ["Wait a moment before sending another message.", "Warte kurz, bevor du eine weitere Nachricht sendest."],
 };
 
-export function renderQuickChat({ publicId, signal }) {
+export function renderQuickChat({ publicId, signal, member = false }) {
   const pane = document.createElement("section");
   pane.className = "panel quick-chat";
   pane.innerHTML = `
     <div class="quick-chat-heading">
-      <h2></h2>
+      <div class="quick-chat-title">
+        <h2></h2>
+        <details class="quick-chat-encryption">
+          <summary class="tag"></summary>
+          <p class="subtle"></p>
+        </details>
+      </div>
       <details class="quick-chat-roster" open hidden>
         <summary></summary>
         <ul class="quick-chat-participants" role="list" tabindex="0"></ul>
@@ -31,6 +37,7 @@ export function renderQuickChat({ publicId, signal }) {
       <button type="submit" class="button primary" disabled></button>
     </form>`;
   const heading = pane.querySelector("h2");
+  const encryption = pane.querySelector(".quick-chat-encryption");
   const roster = pane.querySelector(".quick-chat-roster");
   const rosterSummary = roster.querySelector("summary");
   const rosterList = roster.querySelector("ul");
@@ -90,6 +97,10 @@ export function renderQuickChat({ publicId, signal }) {
 
   function updateLabels() {
     heading.textContent = t("Live chat", "Livechat");
+    encryption.querySelector("summary").textContent = t("End-to-end encrypted", "Ende-zu-Ende-verschlüsselt");
+    encryption.querySelector("p").textContent = t(
+      "Messages are encrypted on the devices of room participants, including guests. This browser can reopen recent messages it received while its room access is valid. A new device can read messages sent after it joins. The server keeps encrypted messages and participant names while the room is open.",
+      "Nachrichten werden auf den Geräten der Teilnehmenden verschlüsselt, auch bei Gästen. Solange der Zugang gilt, kann dieser Browser seinen letzten Verlauf wieder öffnen. Ein neues Gerät kann Nachrichten ab seinem Beitritt lesen. Der Server speichert verschlüsselte Nachrichten und Teilnehmernamen, solange der Raum offen ist.");
     pane.setAttribute("aria-label", heading.textContent);
     const logLabel = t("Messages in live chat", "Nachrichten im Livechat");
     scroll.setAttribute("aria-label", logLabel);
@@ -108,11 +119,12 @@ export function renderQuickChat({ publicId, signal }) {
     return t("Guest {name}", "Gast {name}", { name });
   }
 
-  function stop() {
+  function stop(invalidate = false) {
     if (stopped) return;
     stopped = true;
     clearTimeout(timer);
-    if (device) void request("/leave", { deviceId: device.deviceId }, true).catch(() => {});
+    if (invalidate) void forgetQuickChatDevice(publicId, member, device?.deviceId);
+    else if (device) void request("/leave", { deviceId: device.deviceId }, true).catch(() => {});
     peers = [];
     participants = [];
     device = undefined;
@@ -179,21 +191,20 @@ export function renderQuickChat({ publicId, signal }) {
 
   function saveStatus(error, fallback) {
     if (stopped) return;
-    if ([401, 403, 404, 410].includes(error.status)) stop();
+    if ([401, 403, 404, 410].includes(error.status)) stop(true);
     else return error.status === 429 ? "busy" : fallback;
   }
 
   async function poll() {
     try {
       if (!device) {
-        const session = await createQuickChatCrypto(publicId);
+        const session = await createQuickChatCrypto(publicId, { member });
         if (stopped) return;
         device = session;
       }
-      const { deviceId, publicKey } = device;
       let batch;
       if (joined) {
-        const query = new URLSearchParams({ deviceId, after: cursor });
+        const query = new URLSearchParams({ deviceId: device.deviceId, after: cursor });
         try {
           batch = await request("?" + query);
         } catch (error) {
@@ -201,11 +212,23 @@ export function renderQuickChat({ publicId, signal }) {
           joined = false;
         }
       }
-      if (!joined) batch = await request("/join", { deviceId, publicKey });
+      if (!joined) {
+        const register = () => request("/join", { deviceId: device.deviceId, publicKey: device.publicKey });
+        try {
+          batch = await register();
+        } catch (error) {
+          if (error.status !== 409 || stopped) throw error;
+          await forgetQuickChatDevice(publicId, member, device.deviceId);
+          const replacement = await createQuickChatCrypto(publicId, { member });
+          if (stopped) return;
+          device = replacement;
+          batch = await register();
+        }
+      }
       if (stopped) return;
-      if (batch.deviceId !== deviceId || !batch.peers.some(peer => peer.id === deviceId)
+      if (batch.deviceId !== device.deviceId || !batch.peers.some(peer => peer.id === device.deviceId)
         || !Number.isSafeInteger(batch.cursor) || batch.cursor < (joined ? cursor : 0)) throw new Error("Invalid live chat state");
-      if (batch.cursor < cursor) log.replaceChildren();
+      if (!joined) log.replaceChildren();
       await display(batch.messages);
       if (stopped) return;
       cursor = batch.cursor;
@@ -279,7 +302,8 @@ export function renderQuickChat({ publicId, signal }) {
     update();
   }, { signal });
   pane.addEventListener("guest-language", updateLabels, { signal });
-  signal.addEventListener("abort", stop, { once: true });
+  pane.addEventListener("quick-chat-revoke", () => stop(true), { signal });
+  signal.addEventListener("abort", () => stop(), { once: true });
   window.addEventListener("pagehide", event => {
     if (!event.persisted) stop();
   }, { signal });

@@ -14,7 +14,7 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 - **Message a friend.** Open an end-to-end encrypted direct chat from **Messages** or **Friends**. Share links and files with a confirmed friend. The notification bell shows friend requests, direct messages and mentions. Turn on live alerts in your profile for rooms you’ve joined.
 - **Talk and watch together.** A live channel brings voice, streams, and an encrypted channel chat into one view. The chat is available between broadcasts and alongside any video source. Choose **Join voice chat** to listen, then enable your microphone when you want to speak. Voice and playback controls stay in the header as you browse. Viewers can choose direct WebRTC playback or buffered HLS.
 - **Share a screen.** Choose **Share screen** in a live channel. Supported browsers can share a screen, window, or tab. The desktop app also supports region capture. On Linux you can share audio from one application or a whole playback device using PipeWire.
-- **Start a watch party.** Use **Share video** in a live channel to share a YouTube embed or upload an original MP4 or WebM up to 256 MiB. Viewers share play, pause, and seek controls and adjust volume individually. The video moves to the mini player as you browse. YouTube pauses when the last viewer closes or hides their player.
+- **Start a watch party.** Use **Share video** to share a YouTube embed or upload an MP4 or WebM up to 256 MiB. People with permission to share can add or remove upcoming videos in the queue. Viewers share play, pause and seek controls while keeping their own volume. The video moves to the mini player as you browse. YouTube pauses when the last viewer closes or hides their player.
 - **Stream now.** Choose a screen, YouTube video, or local file from the Rooms overview. Use an existing live channel or open a temporary room. Temporary rooms can appear in **Live now** for signed-in members or offer a password-protected viewer link for guests.
 - **Change the look.** Choose a profile picture and name color. Give a room its own cover, banner, colors, and chat background. Built-in image presets are available for profile pictures and room images. You can also upload JPEG, PNG, or WebP images up to 8 MiB.
 - **Find your way around.** First-visit guides introduce the main views and can be reset in your profile. The interface is available in English and German.
@@ -37,6 +37,10 @@ If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the w
 
 ## Desktop app
 
+Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. Because the GitHub repository is private, the checker takes a fine-grained token with read access to the repository contents and stores it in the system credential store.
+
+The optional browser extension adds **Create ZeloteZ Room** to YouTube in Chromium browsers and Firefox. Choose a verified instance and open the video in a browser tab or in your configured desktop app. [Extension setup](extension/README.md)
+
 ## What stays private
 
 Room and direct chat messages, shared links, attachment names and files, reaction emojis, and moderation reasons are end-to-end encrypted in the browser. Your password unlocks the private key used to read your chats. A direct message's key is wrapped for the sender and recipient. When someone joins a room, an unlocked browser with access automatically shares encrypted copies of the older message keys. The server stores each message and attachment once. Each regular live channel keeps its own chat history between broadcasts.
@@ -49,4 +53,4 @@ For watch parties, YouTube serves its own embedded player and video directly to 
 
 A temporary room’s guest link lets visitors watch, use the live chat, and play, pause, or seek in a watch party. The password in the link’s URL fragment is exchanged for a session limited to that room. The host can revoke or replace it from **Stream access**.
 
-Temporary live chat uses separate, short-lived keys for each participating device. The server carries encrypted messages and can see who sent them and when. Participants do not receive messages sent before they joined, and the chat is cleared when the room closes.
+Temporary live chat uses separate keys for each participating browser, including invited guests. The browser keeps its private key locally. While its room access is valid, the same browser can reopen the recent chat it received, including messages sent during its absence. A new browser starts with messages sent after it joins. The server holds the latest 64 encrypted messages in memory until the room closes and can see senders and timestamps.

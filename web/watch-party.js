@@ -3,6 +3,7 @@ import { api, button, closeDialog, el, field, form, identifier, showDialog, stat
 import { createYoutubePlayer } from "./youtube-player.js";
 import { createWatchControls } from "./watch-controls.js";
 import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
+import { watchQueue } from "./watch-queue.js";
 
 const chunkSize = 4 * 1024 * 1024;
 const maxFileSize = 64 * chunkSize;
@@ -68,7 +69,9 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
   const sourceLimit = room?.temporary ? room.quickSource : null;
-  const share = button(t("Share video", "Video teilen"), chooseSource, { hidden: true });
+  const share = button(t("Share video", "Video teilen"), () => chooseSource(false), { hidden: true });
+  const queue = watchQueue({ add: () => chooseSource(true), remove: removeQueuedVideo,
+    next: () => void change("next", undefined, queue.feedback) });
   const cardName = el("strong");
   const cardSource = el("small", { class: "muted" });
   const card = button([el("span", { class: "watch-party-card-title" }, cardName, cardSource),
@@ -170,15 +173,14 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     stop.hidden = !canStop;
     stop.disabled = busy;
     controls.setTransport({ isPlaying: party?.playing, enabled: !busy && ready });
-    if (selectedId) dockEntry?.activate(title.textContent, topicHref(room.id, channel.id, { watchId: selectedId }));
+    queue.update(sample?.queue, { visible: isReady, manage: canShare, pending: busy });
+    if (selectedId) dockEntry?.activate(title.textContent, topicHref(room.id, channel.id, { watchId: party?.sessionId ?? selectedId }));
     view?.onChange?.();
   }
 
-  function leaveParty() {
+  function clearSurface(keepFullscreen = false) {
     const previous = surface;
     surface = null;
-    const hadSelection = Boolean(selectedId);
-    selectedId = null;
     ready = false;
     controls.resetPosition();
     appliedRevision = undefined;
@@ -187,8 +189,14 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     audience = undefined;
     clearInterval(clockTimer);
     previous?.destroy();
-    controls.setFullscreenSurface(null);
+    if (!keepFullscreen) controls.setFullscreenSurface(null);
     media.replaceChildren();
+  }
+
+  function leaveParty() {
+    const hadSelection = Boolean(selectedId);
+    selectedId = null;
+    clearSurface();
     player.hidden = true;
     dockEntry?.deactivate();
     enable.hidden = true;
@@ -215,7 +223,8 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     if (!linkedId || !hasSnapshot || signal.aborted) return;
     const id = linkedId;
     linkedId = undefined;
-    if (sample?.party.id === id && sample.party.state === "ready") join();
+    const party = sample?.party;
+    if (party?.state === "ready" && (party.id === id || party.sessionId === id)) join();
     else view?.onUnavailable?.();
   }
 
@@ -268,7 +277,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       onEnded() {
         if (!current() || !sample?.party.playing) return;
         const duration = surface.getDuration();
-        if (Number.isFinite(duration) && duration > 0 && desiredPosition() >= duration - 1) void change("pause");
+        if (Number.isFinite(duration) && duration > 0 && desiredPosition() >= duration - 1) void change("ended", duration);
       },
       onBlocked() {
         if (current() && sample?.party.playing) enable.hidden = false;
@@ -311,8 +320,15 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   function apply(data, requestedAt = performance.now()) {
     const refreshedAt = performance.now();
     const party = data.party ?? null;
-    if (selectedId && selectedId !== party?.id) leaveParty();
-    sample = party ? { party, refreshedAt, age: data.serverTime - party.updatedAt + (refreshedAt - requestedAt) / 2 } : null;
+    const changedVideo = Boolean(selectedId && selectedId !== party?.id);
+    const advancing = changedVideo && party?.state === "ready" && party.sessionId && party.sessionId === sample?.party.sessionId;
+    if (changedVideo && !advancing) leaveParty();
+    sample = party ? { party, queue: data.queue, refreshedAt, age: data.serverTime - party.updatedAt + (refreshedAt - requestedAt) / 2 } : null;
+    if (advancing) {
+      selectedId = party.id;
+      clearSurface(true);
+      resetPlayer(party);
+    }
     hasSnapshot = true;
     if (typeof data.canShare === "boolean") canShare = data.canShare;
     if (typeof data.canStop === "boolean") canStop = data.canStop;
@@ -381,15 +397,15 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     void change(intent.playing ? "play" : "pause", intent.playing ? restartPosition() : undefined);
   }
 
-  function change(action, position) {
+  function change(action, position, feedback = statusNode) {
     const party = sample?.party;
-    if (!party || selectedId !== party.id) return;
+    if (!party || (action === "next" ? !canShare : selectedId !== party.id)) return;
     return run(async () => {
       if (action === "play" && audience && !await audience.ensure()) {
         sync(true);
         throw new Error(t("Open the video player to start playback.", "Öffne den Videoplayer, um die Wiedergabe zu starten."));
       }
-      if (signal.aborted || selectedId !== party.id) return;
+      if (signal.aborted || sample?.party.id !== party.id || (action !== "next" && selectedId !== party.id)) return;
       const startedAt = performance.now();
       try {
         const result = await api(endpoint + "/" + identifier(party.id), {
@@ -397,7 +413,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
         });
         if (!signal.aborted) apply(result, startedAt);
       } catch (error) {
-        if (error.status !== 409) {
+        if (error.status !== 409 && error.status !== 404) {
           sync(true);
           throw error;
         }
@@ -405,9 +421,18 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
         const refreshedAt = performance.now();
         const newest = await api(endpoint, { signal });
         if (!signal.aborted) apply(newest, refreshedAt);
-        tell(statusNode, t("Playback changed in the room. The player will catch up.", "Die Wiedergabe wurde im Raum geändert. Der Player gleicht sie ab."));
+        if (action !== "ended") tell(feedback, t("Playback changed in the room. The player will catch up.", "Die Wiedergabe wurde im Raum geändert. Der Player gleicht sie ab."));
       }
-    });
+    }, feedback);
+  }
+
+  function removeQueuedVideo(id) {
+    if (!canShare) return;
+    tell(queue.feedback, "");
+    void run(async () => {
+      const data = await api(endpoint + "/" + identifier(id) + "/queue", { method: "DELETE", signal });
+      if (!signal.aborted) apply(data);
+    }, queue.feedback);
   }
 
   function stopParty() {
@@ -420,45 +445,51 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     });
   }
 
-  function chooseSource() {
-    if (!canShare || sample?.party || busy) return;
-    if (sourceLimit) {
+  function chooseSource(enqueue) {
+    if (!canShare || busy) return;
+    const behind = enqueue && sample?.party?.state === "ready" ? sample.party.id : undefined;
+    if (enqueue ? !behind : sample?.party) return;
+    if (!enqueue && sourceLimit) {
       prepareSource(sourceLimit);
       return;
     }
-    showDialog(t("Share video", "Video teilen"), el("div", { class: "watch-party-sources" },
-      button(t("Share YouTube video", "YouTube-Video teilen"), youtubeForm),
-      button(t("Share local video", "Lokales Video teilen"), localForm)));
+    showDialog(enqueue ? t("Add video", "Video hinzufügen") : t("Share video", "Video teilen"), el("div", { class: "watch-party-sources" },
+      button(enqueue ? t("YouTube video", "YouTube-Video") : t("Share YouTube video", "YouTube-Video teilen"), () => youtubeForm(behind)),
+      button(enqueue ? t("Local video", "Lokales Video") : t("Share local video", "Lokales Video teilen"), () => localForm(behind))));
   }
 
-  function youtubeForm() {
+  function videoEndpoint(behind) {
+    return behind ? endpoint + "/" + identifier(behind) + "/queue" : endpoint;
+  }
+
+  function youtubeForm(behind) {
     const input = el("input", { type: "text", inputmode: "url", required: true, maxlength: 2048,
       placeholder: "https://youtu.be/…", spellcheck: "false", autocomplete: "off" });
     showDialog(t("Share YouTube video", "YouTube-Video teilen"), form([
       field(t("YouTube link", "YouTube-Link"), input),
       el("p", { class: "muted" }, t("Viewers connect to YouTube when they open the player.", "Beim Öffnen des Players verbinden sich Zuschauer mit YouTube.")),
-    ], t("Share", "Teilen"), async feedback => {
+    ], behind ? t("Add to queue", "Zur Warteschlange hinzufügen") : t("Share", "Teilen"), async feedback => {
       const videoId = youtubeVideoId(input.value);
       if (!videoId) throw new Error(t("Enter a YouTube video link.", "Gib einen Link zu einem YouTube-Video ein."));
       if (await run(async () => {
-        const data = await api(endpoint, { method: "POST", body: { source: "youtube", videoId }, signal });
+        const data = await api(videoEndpoint(behind), { method: "POST", body: { source: "youtube", videoId }, signal });
         if (!signal.aborted) apply(data);
       }, feedback) && !signal.aborted) {
         closeDialog();
-        join();
+        if (!behind) join();
       }
     }));
     input.focus();
   }
 
-  function localForm() {
+  function localForm(behind) {
     const input = el("input", { type: "file", accept: "video/mp4,video/webm,.mp4,.webm", required: true });
     const uploadProgress = el("progress", { max: 100, value: 0, hidden: true, "aria-label": t("Upload progress", "Upload-Fortschritt") });
     showDialog(t("Share local video", "Lokales Video teilen"), form([
       field(t("Video file", "Videodatei"), input),
       el("p", { class: "muted" }, t("MP4 or WebM up to 256 MiB. Rooms temporarily stores the original for playback in this channel.",
         "MP4 oder WebM bis 256 MiB. Rooms speichert das Original vorübergehend für die Wiedergabe in diesem Kanal.")), uploadProgress,
-    ], t("Upload & share", "Hochladen und teilen"), async (feedback, uploadForm) => {
+    ], behind ? t("Upload & add", "Hochladen und hinzufügen") : t("Upload & share", "Hochladen und teilen"), async (feedback, uploadForm) => {
       const file = input.files?.[0];
       const mime = file && localVideoType(file);
       if (!mime || !file.size || file.size > maxFileSize) {
@@ -473,10 +504,11 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       const complete = await run(async () => {
         let uploadedParty;
         try {
-          let data = await api(endpoint, { method: "POST", body: {
+          let data = await api(videoEndpoint(behind), { method: "POST", body: {
             source: "local", mime, size: file.size, title: [...file.name.replace(/\.[^.]+$/u, "")].slice(0, 120).join(""),
           }, signal: uploadSignal });
-          uploadedParty = identifier(data.party.id);
+          uploadedParty = identifier(behind ? data.enqueued.id : data.party.id);
+          if (behind && !signal.aborted) apply(data);
           for (let offset = 0; offset < file.size;) {
             if (!uploadForm.isConnected) throw new DOMException("Upload closed", "AbortError");
             data = await api(endpoint + "/" + uploadedParty + "/upload?offset=" + offset, {
@@ -490,7 +522,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
           if (!data.complete || !data.party) throw new Error(t("The upload didn’t finish.", "Der Upload wurde nicht abgeschlossen."));
           if (!signal.aborted) apply(data);
         } catch (error) {
-          if (uploadedParty) void api(endpoint + "/" + uploadedParty, { method: "DELETE", keepalive: true }).catch(() => {});
+          if (uploadedParty) void api(endpoint + "/" + uploadedParty + (behind ? "/queue" : ""), { method: "DELETE", keepalive: true }).catch(() => {});
           throw error;
         }
       }, feedback);
@@ -499,7 +531,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       uploadProgress.hidden = true;
       if (complete && !signal.aborted && uploadForm.isConnected) {
         closeDialog();
-        join();
+        if (!behind) join();
       }
     }));
     input.focus();
@@ -511,7 +543,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     leaveParty();
   }, { once: true });
   if (sourceLimit !== "screen") schedule(0);
-  return { share, card, player, active: () => sample?.party.state === "ready", hasSnapshot: () => hasSnapshot,
+  return { share, card, player, queue: queue.node, active: () => sample?.party.state === "ready", hasSnapshot: () => hasSnapshot,
     selected: () => Boolean(selectedId), join, leave: leaveParty, open, prepareSource,
     stopPlayback: leaveParty,
     connectView(options, id) {

@@ -129,6 +129,31 @@ function audienceFields(settings = {}) {
   };
 }
 
+export function confirmYoutubeRoom(context, videoId) {
+  if (!/^[A-Za-z0-9_-]{11}$/u.test(videoId)) return;
+  const heading = t("Create temporary room", "Temporären Raum erstellen");
+  showDialog(heading, form([
+    el("p", {}, t("Open this YouTube video in a private temporary room.", "Öffne dieses YouTube-Video in einem privaten temporären Raum.")),
+  ], heading, async (_feedback, currentForm) => {
+    let room;
+    try {
+      room = await api("quick-rooms", { method: "POST", body: { source: "youtube" }, signal: context.signal });
+      if (!currentForm.isConnected) throw new DOMException("Room creation canceled", "AbortError");
+      await api("channels/" + identifier(room.channelId) + "/watch", {
+        method: "POST", body: { source: "youtube", videoId }, signal: context.signal,
+      });
+      context.signal.throwIfAborted();
+      if (!currentForm.isConnected) throw new DOMException("Room creation canceled", "AbortError");
+    } catch (error) {
+      if (room) await api("quick-rooms/" + identifier(room.publicId), { method: "DELETE", keepalive: true }).catch(() => {});
+      throw error;
+    }
+    context.quickRoomHeader.created(room);
+    closeDialog();
+    location.hash = topicHref(room.topicId, room.channelId);
+  }));
+}
+
 export function openStreamNow(context) {
   const heading = t("Stream Now", "Jetzt streamen");
   const destinationHeading = t("Where do you want to stream?", "Wo möchtest du streamen?");

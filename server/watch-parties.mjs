@@ -7,7 +7,7 @@ import { json, readBytes, readJson, RequestError } from './http.mjs'
 
 const uuid = '[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}'
 const partyIdPattern = new RegExp(`^${uuid}$`, 'u')
-const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media|metadata|viewers))?)?$`, 'u')
+const watchRoute = new RegExp(`^/api/channels/(${uuid})/watch(?:/(${uuid})(?:/(upload|media|metadata|viewers|queue))?)?$`, 'u')
 const storedName = new RegExp(`^${uuid}\\.video$`, 'u')
 const youtubeId = /^[\w-]{11}$/u
 const videoTypes = new Map([['video/mp4', 'video.mp4'], ['video/webm', 'video.webm']])
@@ -15,6 +15,7 @@ const chunkSize = 4 * 1024 ** 2
 const maxFileSize = 256 * 1024 ** 2
 const maxStorage = 512 * 1024 ** 2
 const maxParties = 8
+const maxQueue = 16
 const maxUploadRequests = 4
 const maxMediaReads = 128
 const maxMediaReadsPerSession = 8
@@ -35,8 +36,9 @@ const validPosition = position => Number.isFinite(position) && position >= 0 && 
 const invalidControl = () => new RequestError(400, 'Ungültige Videosteuerung.')
 
 function playbackCommand({ action, revision, position }) {
-  if (!['play', 'pause', 'seek'].includes(action) || !Number.isSafeInteger(revision) || revision < 1 ||
-      ((action === 'seek' || position !== undefined) && (!['seek', 'play'].includes(action) || !validPosition(position)))) {
+  if (!['play', 'pause', 'seek', 'ended', 'next'].includes(action) || !Number.isSafeInteger(revision) || revision < 1 ||
+      ((action === 'seek' || action === 'ended' || position !== undefined) &&
+        (!['seek', 'play', 'ended'].includes(action) || !validPosition(position)))) {
     throw invalidControl()
   }
   return { action, revision, position }
@@ -120,9 +122,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     }).finally(() => { party.deleting = false })
   }
 
-  function retire(party) {
-    if (parties.get(party.channelId) !== party) return
-    parties.delete(party.channelId)
+  function discardVideo(party) {
     for (const read of reads) {
       if (read.party === party) read.abort.abort()
     }
@@ -130,6 +130,34 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       retiredFiles.add(party)
       removeFile(party)
     }
+  }
+
+  function retire(party) {
+    const current = parties.get(party.channelId)
+    if (current === party) {
+      parties.delete(party.channelId)
+      discardVideo(party)
+      for (const video of party.queue) discardVideo(video)
+    } else {
+      const index = current?.queue.indexOf(party) ?? -1
+      if (index < 0) return
+      current.queue.splice(index, 1)
+      discardVideo(party)
+    }
+  }
+
+  function advance(party, time) {
+    const video = party.queue[0]
+    if (video?.state !== 'ready') return party
+    party.queue.shift()
+    Object.assign(video, {
+      sessionId: party.sessionId, firstSource: party.firstSource, queue: party.queue,
+      hostId: party.hostId, hostSession: party.hostSession, expiresAt: party.expiresAt,
+      updatedAt: time, playing: video.source === 'local', autoStart: video.source === 'youtube',
+    })
+    parties.set(party.channelId, video)
+    discardVideo(party)
+    return video
   }
 
   function activeParty(channelId, time) {
@@ -140,7 +168,11 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       retire(party)
       return null
     }
-    return party
+    for (const video of [...party.queue]) {
+      if (video.state === 'uploading' && (video.expiresAt <= time || video.uploadUntil <= time ||
+          !isSessionActive(video.uploaderSession, video.uploaderId) || !channelAccess(video.uploaderId, channelId)?.canStream)) retire(video)
+    }
+    return party.waitingForNext ? advance(party, time) : party
   }
 
   function sweep() {
@@ -188,13 +220,23 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
         [...party.viewers.values()].filter(viewer => viewer.key === credential.key).length >= maxViewersPerCredential)) throw tooBusy()
     // Retain a release until any older in-flight heartbeat has had time to arrive.
     party.viewers.set(id, { ...credential, present, revision: report.revision, expiresAt: time + viewerLease })
+    if (present && party.autoStart) {
+      party.autoStart = false
+      party.playing = true
+      party.updatedAt = time
+      party.revision++
+    }
     if (!present) reconcileViewers(party, time)
   }
 
   function playbackState(party, time) {
     reconcileViewers(party, time)
-    return { id: party.id, source: party.source, title: party.title,
+    return { id: party.id, sessionId: party.sessionId, source: party.source, title: party.title,
       position: party.position, playing: party.playing, updatedAt: party.updatedAt, revision: party.revision }
+  }
+
+  function queueState(party) {
+    return party?.queue.map(({ id, source, title, state, videoId }) => ({ id, source, title, state, ...(videoId && { videoId }) })) ?? []
   }
 
   function snapshot(actor, access, party, time) {
@@ -205,7 +247,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       ...(party.source === 'youtube' ? { videoId: party.videoId } : { mime: party.mime,
         ...(party.state === 'uploading' ? { offset: party.offset, size: party.size } :
           { mediaUrl: `${watchPath(party.channelId, party.id)}/media` }) }),
-    } : null, serverTime: time, canShare: Boolean(access.canStream), canStop }
+    } : null, queue: visible ? queueState(party) : [], serverTime: time, canShare: Boolean(access.canStream), canStop }
   }
 
   function homeActivity(userId) {
@@ -218,7 +260,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       const access = channelAccess(userId, channelId)
       if (!access?.canView) continue
       const { topicId, topicTitle, channelTitle } = access
-      entries.push({ id: party.id, source: party.source, title: party.title, topicId, topicTitle, channelId, channelTitle })
+      entries.push({ id: party.sessionId, source: party.source, title: party.title, topicId, topicTitle, channelId, channelTitle })
     }
     return entries
   }
@@ -230,7 +272,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
   function guestParty(scope, time) {
     if (!isTemporaryChannel(scope.channelId) || !['youtube', 'local'].includes(scope.source)) return null
     const party = activeParty(scope.channelId, time)
-    return party?.state === 'ready' && party.hostId === scope.ownerId && party.source === scope.source ? party : null
+    return party?.state === 'ready' && party.hostId === scope.ownerId && party.firstSource === scope.source ? party : null
   }
 
   function guestSnapshot(scope) {
@@ -240,7 +282,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       ...playbackState(party, serverTime), ...(party.source === 'youtube' ? { videoId: party.videoId } : {
         mime: party.mime, mediaUrl: `/api/guest/${scope.roomId}/media/${party.id}`,
       }),
-    } : null }
+    } : null, queue: queueState(party) }
   }
 
   function specificParty(channelId, id, time) {
@@ -249,18 +291,31 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     return party
   }
 
-  function chargeStart(userId, time) {
+  function specificVideo(channelId, id, time) {
+    const party = activeParty(channelId, time)
+    if (party?.id === id) return party
+    const queued = party?.queue.find(video => video.id === id)
+    if (!queued) throw missing()
+    return queued
+  }
+
+  function chargeStart(userId, time, queued) {
     let budget = starts.get(userId)
     if (!budget || budget.expires <= time) {
       if (!budget && starts.size >= 4096) throw tooBusy()
-      budget = { count: 0, expires: time + 60_000 }
+      budget = { count: 0, queued: 0, expires: time + 60_000 }
       starts.set(userId, budget)
     }
-    if (budget.count >= 4) throw tooBusy()
-    budget.count++
+    if (queued) {
+      if (budget.queued >= maxQueue) throw tooBusy()
+      budget.queued++
+    } else {
+      if (budget.count >= 4) throw tooBusy()
+      budget.count++
+    }
   }
 
-  async function start(request, response, actor, channelId) {
+  async function start(request, response, actor, channelId, queueBehind) {
     if (!accessTo(actor, channelId).canStream) throw new RequestError(403, 'Du darfst in diesem Channel nicht streamen.')
     const { source, videoId, mime, size, title } = await readJson(request)
     if (source !== 'youtube' && source !== 'local') throw new RequestError(400, 'Ungültige Auswahl.')
@@ -277,16 +332,19 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     if (current.id !== actor.id || !access.canStream) throw new RequestError(403, 'Du darfst in diesem Channel nicht streamen.')
     sweep()
     const time = now()
-    if (parties.has(channelId)) {
+    const active = activeParty(channelId, time)
+    if (!queueBehind && active) {
       throw new RequestError(409, 'In diesem Channel läuft bereits eine Watchparty.')
     }
-    if (parties.size >= maxParties || (source === 'local' && reservedBytes + size > maxStorage)) {
+    if (queueBehind && (active?.id !== queueBehind || active.state !== 'ready')) throw conflict()
+    if (queueBehind && active.queue.length >= maxQueue) throw tooBusy()
+    if ((!queueBehind && parties.size >= maxParties) || (source === 'local' && reservedBytes + size > maxStorage)) {
       throw new RequestError(503, 'Es ist gerade kein Platz für eine weitere Watchparty frei.')
     }
-    assertTemporarySource(channelId, current.id, source)
-    chargeStart(current.id, time)
+    if (!queueBehind) assertTemporarySource(channelId, current.id, source)
+    chargeStart(current.id, time, Boolean(queueBehind))
     const id = randomUUID()
-    const party = { id, channelId, hostId: current.id, hostSession: sessionKey(request), source,
+    const party = { id, channelId, source, uploaderId: current.id, uploaderSession: sessionKey(request),
       title: source === 'local' ? watchTitle(title, source) : '',
       playing: false, position: 0, updatedAt: time, revision: 1,
       commandWindowUntil: time, commandCount: 0,
@@ -296,6 +354,15 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       }),
     }
     if (party.file) reservedBytes += size
+    if (queueBehind) {
+      active.queue.push(party)
+      const currentParty = active.waitingForNext ? advance(active, time) : active
+      return json(response, 201, { ...snapshot(current, access, currentParty, time), enqueued: {
+        id: party.id, state: party.state,
+        ...(party.state === 'uploading' && { offset: party.offset, size: party.size }),
+      } })
+    }
+    Object.assign(party, { sessionId: id, firstSource: source, hostId: current.id, hostSession: party.uploaderSession, queue: [] })
     parties.set(channelId, party)
     try {
       noteTemporarySource(channelId, current.id)
@@ -307,7 +374,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
   }
 
   function assertUploader(request, actor, party) {
-    if (party.state !== 'uploading' || party.hostId !== actor.id || party.hostSession !== sessionKey(request)) throw missing()
+    if (party.state !== 'uploading' || party.uploaderId !== actor.id || party.uploaderSession !== sessionKey(request)) throw missing()
   }
 
   async function addMetadata(request, response, actor, party) {
@@ -347,7 +414,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
       }
       const current = requireSession(request)
       const access = accessTo(current, party.channelId)
-      specificParty(party.channelId, party.id, now())
+      specificVideo(party.channelId, party.id, now())
       assertUploader(request, current, party)
       try {
         const file = await open(party.file, offset ? constants.O_WRONLY | constants.O_NOFOLLOW : 'wx', 0o600)
@@ -366,13 +433,14 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
         throw error
       }
       const time = now()
-      specificParty(party.channelId, party.id, time)
+      specificVideo(party.channelId, party.id, time)
       party.offset += length
       const complete = party.offset === party.size
       if (complete) {
-        Object.assign(party, { state: 'ready', updatedAt: time, expiresAt: time + partyLifetime, revision: party.revision + 1 })
+        Object.assign(party, { state: 'ready', updatedAt: time, revision: party.revision + 1 })
+        if (parties.get(party.channelId) === party) party.expiresAt = time + partyLifetime
       } else party.uploadUntil = time + uploadIdleTime
-      return json(response, 200, { ...snapshot(current, access, party, time), offset: party.offset, complete })
+      return json(response, 200, { ...snapshot(current, access, activeParty(party.channelId, time), time), offset: party.offset, complete })
     } finally {
       party.uploading = false
       uploadRequests--
@@ -434,19 +502,31 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     return serve(request, response, party, { key, isActive, verifyAccess() { if (!isActive()) throw missing() } })
   }
 
-  function updatePlayback(party, { action, revision, position }, time) {
+  function updatePlayback(party, { action, revision, position }, time, canChooseNext = false) {
     const hasViewer = reconcileViewers(party, time)
     if (party.state !== 'ready' || party.revision !== revision || (action === 'play' && !hasViewer)) throw conflict()
+    if (action === 'next' && !canChooseNext) throw missing()
+    if (action === 'next' && party.queue[0]?.state !== 'ready') throw conflict()
+    if (action === 'ended' && (!party.playing || position <= 0 || Math.abs(positionAt(party, time) - position) > 4)) throw conflict()
     if (party.commandWindowUntil <= time) {
       party.commandWindowUntil = time + 1000
       party.commandCount = 0
     }
     if (party.commandCount >= 12) throw tooBusy()
+    if (action === 'next' || action === 'ended') {
+      const next = advance(party, time)
+      if (next !== party) return next
+    }
     party.position = position ?? positionAt(party, time)
-    if (action !== 'seek') party.playing = action === 'play'
+    if (action !== 'seek') {
+      party.playing = action === 'play'
+      party.autoStart = false
+    }
+    party.waitingForNext = action === 'ended'
     party.updatedAt = time
     party.commandCount++
     party.revision++
+    return party
   }
 
   function controlGuestPlayback(scope, input) {
@@ -488,8 +568,11 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     if (current.id !== actor.id) throw missing()
     const access = accessTo(current, party.channelId)
     const time = now()
-    updatePlayback(specificParty(party.channelId, party.id, time), command, time)
-    return json(response, 200, snapshot(current, access, party, time))
+    const active = activeParty(party.channelId, time)
+    if (!active || active.sessionId !== party.sessionId) throw missing()
+    if (active !== party) throw conflict()
+    const next = updatePlayback(active, command, time, access.canStream)
+    return json(response, 200, snapshot(current, access, next, time))
   }
 
   const timer = setInterval(sweep, 5000)
@@ -507,9 +590,25 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     if (!partyId && method === 'GET') json(response, 200, snapshot(actor, access, activeParty(channelId, time), time))
     else if (!partyId && method === 'POST') await start(request, response, actor, channelId)
     else if (partyId) {
+      if (resource === 'queue' && method === 'POST') {
+        await start(request, response, actor, channelId, partyId)
+        return true
+      }
+      if (resource === 'queue' && method === 'DELETE') {
+        const active = activeParty(channelId, time)
+        const target = active?.queue.find(video => video.id === partyId)
+        if (!target || !access.canStream) throw missing()
+        retire(target)
+        const next = active.waitingForNext ? advance(active, time) : active
+        json(response, 200, snapshot(actor, access, next, time))
+        return true
+      }
+      if (resource === 'upload' && method === 'PUT') {
+        await upload(request, response, url, actor, specificVideo(channelId, partyId, time))
+        return true
+      }
       const party = specificParty(channelId, partyId, time)
       if (resource === 'media' && (method === 'GET' || method === 'HEAD')) await serveMemberMedia(request, response, actor, party)
-      else if (resource === 'upload' && method === 'PUT') await upload(request, response, url, actor, party)
       else if (resource === 'metadata' && method === 'PATCH') await addMetadata(request, response, actor, party)
       else if (resource === 'viewers' && (method === 'POST' || method === 'DELETE')) await reportMemberViewer(request, response, actor, party)
       else if (!resource && method === 'PATCH') await control(request, response, actor, party)

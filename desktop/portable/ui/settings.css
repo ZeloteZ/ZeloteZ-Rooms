@@ -32,6 +32,8 @@ body[data-settings-view="preferences"] main { padding-block: 20px; }
 body[data-settings-view="preferences"] h1 { margin-top: 17px; }
 body[data-settings-view="preferences"] .note { margin-bottom: 16px; }
 
+.settings-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.settings-tabs [aria-pressed="true"] { background: var(--selected); border-color: var(--accent); }
 .settings-group + .settings-group { margin-top: 12px; }
 
 .settings-group h2 {
@@ -114,9 +116,30 @@ body[data-settings-view="preferences"] .note { margin-bottom: 16px; }
 #server-form .actions { margin-top: 19px; }
 #back { margin-inline-end: auto; }
 
+#preferences .github-access {
+  display: grid;
+  align-items: start;
+  gap: 8px;
+}
+.github-access > label { display: grid; gap: 3px; }
+.update-token-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+.update-token-form input { min-inline-size: 0; }
+.update-token-form input:not([hidden]) ~ button#remove-update-token { grid-column: 2; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+#update-status { margin-top: 0; }
+.update-intro { padding: 15px; }
+.update-intro .note { margin-bottom: 0; }
+body[data-settings-view="update-intro"] main { padding-block: 20px; }
+
 @media (max-width: 360px) {
   #preferences .settings-row { gap: 8px; }
   #preferences .settings-row select { padding-inline: 6px; }
+  .update-token-form { grid-template-columns: minmax(0, 1fr); }
+  .update-token-form input:not([hidden]) ~ button#remove-update-token { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

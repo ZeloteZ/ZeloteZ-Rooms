@@ -4,7 +4,8 @@ import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
 import { renderHowItWorks } from "./how-it-works.js";
 import { renderGuestViewer } from "./guest-viewer.js";
-import { clearQuickLinks, mountQuickRoomDock, quickSource } from "./quick-start.js";
+import { forgetMemberQuickChatDevices } from "./quick-chat-crypto.js";
+import { clearQuickLinks, confirmYoutubeRoom, mountQuickRoomDock, quickSource } from "./quick-start.js";
 import { startHistorySharing } from "./history.js";
 import { mountNotifications } from "./notifications.js";
 import { startPresence } from "./presence.js";
@@ -100,6 +101,8 @@ function takeInvite() {
 function getRoute() {
   try {
     const [path, query] = location.hash.replace(/^#\/?/u, "").split("?", 2);
+    const sharedVideo = query === undefined && /^share\/youtube\/([A-Za-z0-9_-]{11})$/u.exec(path)?.[1];
+    if (sharedVideo) return { page: "rooms", sharedVideo };
     const [page = "rooms", topicId, channelId] = path.split("/").filter(Boolean).map(decodeURIComponent);
     const params = new URLSearchParams(query);
     const message = params.get("message");
@@ -183,6 +186,7 @@ async function showWorkspace(nextUser) {
 
 function showAuth(note = "", preset = "", showInvite = false) {
   clearQuickLinks();
+  if (user) void forgetMemberQuickChatDevices();
   if (user) window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
   if (user) window.roomsNativeCapture?.close().catch(() => {});
   if (view) view.abort();
@@ -284,6 +288,7 @@ function showTutorial(route, page) {
 async function render(force = false) {
   if (!user) return;
   const route = getRoute();
+  if (route.sharedVideo) history.replaceState(history.state, "", "#/rooms");
   setNav(route.page === "watch" ? "rooms" : route.page);
   if (force !== true && route.page === "rooms" && route.topicId && activeTopic?.id === route.topicId) {
     activeTopic.view.select(route.channelId, route.target);
@@ -330,7 +335,8 @@ async function render(force = false) {
       workspace.replaceChildren(page);
       player.refreshPlacement();
       videoDock.refreshPlacement();
-      showTutorial(route, page);
+      if (route.sharedVideo) confirmYoutubeRoom(context, route.sharedVideo);
+      else showTutorial(route, page);
     }
   } catch (error) {
     if (!signal.aborted) {

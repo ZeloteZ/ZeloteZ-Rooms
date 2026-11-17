@@ -184,6 +184,10 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
       throw new RequestError(429, 'Warte einen Moment, bevor du es erneut versuchst.')
     }
     if (typeof password !== 'string' || !passwordPattern.test(password) || !timingSafeEqual(digest(password), room.guest_hash)) throw unauthorized()
+    if (ticketValid(room, cookieValue(request, cookieName), time)) {
+      response.writeHead(204).end()
+      return
+    }
     const expires = Math.floor(room.expires_at / 1000)
     const unsigned = `${expires}.${randomBytes(16).toString('base64url')}`
     const ticket = unsigned + '.' + ticketDigest(room, unsigned).toString('base64url')
@@ -225,8 +229,8 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
       throw error
     }) : null
     const watch = !room.used || room.source === 'screen' ? null : watchParties.guestSnapshot(mediaScope)
-    return { title: watch?.party?.title || room.title, roomTitle: room.title, source: room.source, stream,
-      party: watch?.party ?? null, serverTime: watch?.serverTime ?? now() }
+    return { title: watch?.party?.title || room.title, roomTitle: room.title, source: watch?.party?.source ?? room.source, stream,
+      party: watch?.party ?? null, queue: watch?.queue ?? [], serverTime: watch?.serverTime ?? now() }
   }
 
   async function homeActivity() {
@@ -236,7 +240,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
       if (!state.stream && !state.party) return null
       const current = byId.get(room.topic_id)
       if (current?.member_visibility !== 1 || !isActive(current)) return null
-      return { publicId: room.topic_id, title: state.title, source: room.source }
+      return { publicId: room.topic_id, title: state.title, source: state.source }
     }))
     return entries.filter(Boolean)
   }

@@ -9,6 +9,11 @@
 }
 .quick-chat h2 { font-size: 1.05rem; }
 .quick-chat-heading { min-inline-size: 0; }
+.quick-chat-title { display: flex; align-items: start; flex-wrap: wrap; gap: 4px 8px; }
+.quick-chat-encryption { min-inline-size: 0; }
+.quick-chat-encryption[open] { flex-basis: 100%; }
+.quick-chat-encryption summary { width: fit-content; cursor: pointer; white-space: normal; }
+.quick-chat-encryption p { margin-block: 5px 0; font-size: .79rem; }
 .quick-chat-roster { margin-block-start: 7px; border-block-end: 1px solid var(--line); padding-block-end: 6px; }
 .quick-chat-roster summary { width: fit-content; color: var(--muted); cursor: pointer; font-size: .78rem; }
 .quick-chat-participants {
