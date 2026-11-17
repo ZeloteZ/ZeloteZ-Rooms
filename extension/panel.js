@@ -1,4 +1,5 @@
-import { configFrom, configKey, desktopHandoff, instanceOrigin, permissionFor, verifyInstance, videoIdPattern } from "./links.mjs";
+import { configFrom, configKey, desktopHandoff, handoffId, instanceOrigin, permissionFor, verifyInstance, videoIdPattern,
+  waitForDesktopReceipt } from "./links.mjs";
 
 const api = globalThis.browser ?? globalThis.chrome;
 const text = key => api.i18n.getMessage(key);
@@ -12,6 +13,7 @@ const handoff = find("#handoff");
 const handoffInstance = find("#handoff-instance");
 const desktopNote = find("#desktop-note");
 const openDesktop = find("#open-desktop");
+const openOlderDesktop = find("#open-older-desktop");
 const openInBrowser = find("#browser-fallback");
 const edit = find("#edit");
 const defaults = mountAccessOptions("#default-access");
@@ -20,6 +22,8 @@ const videoId = location.hash.slice(1);
 const selectedVideo = videoIdPattern.test(videoId);
 const knownErrors = ["invalidAddress", "invalidInstance", "incompatibleInstance", "permissionRequired"];
 let current;
+let supportsReceipt = false;
+let desktopAttempt;
 
 document.documentElement.lang = api.i18n.getUILanguage();
 document.title = text(selectedVideo ? "createRoom" : "settingsTitle");
@@ -47,6 +51,8 @@ function setStatus(key, error = false) {
 }
 
 function showSettings() {
+  cancelDesktopAttempt();
+  openOlderDesktop.hidden = true;
   handoff.hidden = true;
   openDesktop.removeAttribute("href");
   edit.hidden = true;
@@ -59,6 +65,7 @@ function showError(error) {
 }
 
 async function openBrowser() {
+  cancelDesktopAttempt();
   setStatus("opening");
   handoff.hidden = true;
   edit.hidden = true;
@@ -68,21 +75,72 @@ async function openBrowser() {
 }
 
 function updateDesktopLink() {
-  openDesktop.href = desktopHandoff(current.origin, videoId, forVideo.read());
+  openDesktop.href = openOlderDesktop.href = desktopHandoff(current.origin, videoId, forVideo.read());
 }
 
-async function showHandoff(alreadyVerified = false) {
+function cancelDesktopAttempt() {
+  desktopAttempt?.abort();
+  desktopAttempt = undefined;
+  openDesktop.removeAttribute("aria-disabled");
+}
+
+function openDesktopApp(event) {
+  if (!supportsReceipt) return;
+  if (desktopAttempt) {
+    event.preventDefault();
+    return;
+  }
+  const receipt = handoffId();
+  const origin = current.origin;
+  const source = location.href;
+  const attempt = new AbortController();
+  desktopAttempt = attempt;
+  // Set the receipt before the browser follows the user-activated protocol link.
+  openDesktop.href = desktopHandoff(origin, videoId, forVideo.read(), receipt);
+  openDesktop.setAttribute("aria-disabled", "true");
+  setStatus("waitingDesktop");
+  const hint = setTimeout(() => {
+    if (desktopAttempt === attempt) openOlderDesktop.hidden = false;
+  }, 12000);
+  void (async () => {
+    try {
+      if (await waitForDesktopReceipt(origin, receipt, attempt.signal) && desktopAttempt === attempt) {
+        const tab = await api.tabs.getCurrent();
+        if (desktopAttempt !== attempt || location.href !== source ||
+            (tab?.url && tab.url !== source) || (tab?.pendingUrl && tab.pendingUrl !== source)) return;
+        if (Number.isInteger(tab?.id)) {
+          await api.tabs.remove(tab.id);
+          return;
+        }
+      }
+    } catch {
+      // Keep the fallback available if confirmation or tab closure fails.
+    } finally {
+      clearTimeout(hint);
+      if (desktopAttempt === attempt) {
+        cancelDesktopAttempt();
+        updateDesktopLink();
+        openOlderDesktop.hidden = false;
+        setStatus("");
+      }
+    }
+  })();
+}
+
+async function showHandoff(instance) {
   form.hidden = true;
   edit.hidden = true;
   const inDesktop = current.target === "desktop";
-  if (inDesktop && !alreadyVerified) {
+  if (inDesktop && !instance) {
     setStatus("checking");
     if (!await api.permissions.contains(permissionFor(current.origin))) throw new Error("permissionRequired");
-    await verifyInstance(current.origin);
+    instance = await verifyInstance(current.origin);
   }
+  supportsReceipt = inDesktop && instance.handoffReceipt;
   forVideo.set(current);
   handoffInstance.textContent = current.origin;
   desktopNote.hidden = openDesktop.hidden = !inDesktop;
+  openOlderDesktop.hidden = true;
   if (inDesktop) updateDesktopLink();
   openInBrowser.classList.toggle("primary", !inDesktop);
   openInBrowser.textContent = text(inDesktop ? "openBrowser" : "openInBrowser");
@@ -106,12 +164,12 @@ form.addEventListener("submit", async event => {
   try {
     permitted = await api.permissions.request(permission);
     if (!permitted) throw new Error("permissionRequired");
-    await verifyInstance(next.origin);
+    const instance = await verifyInstance(next.origin);
     await api.storage.local.set({ [configKey]: next });
     if (previous && changedHost) await api.permissions.remove(previous).catch(() => {});
     current = next;
     address.value = next.origin;
-    if (selectedVideo) await showHandoff(true);
+    if (selectedVideo) await showHandoff(instance);
     else setStatus("saved");
   } catch (error) {
     if (permitted && changedHost && current !== next) await api.permissions.remove(permission).catch(() => {});
@@ -123,8 +181,18 @@ form.addEventListener("submit", async event => {
 
 edit.addEventListener("click", showSettings);
 find("#video-access").addEventListener("change", () => {
-  if (!openDesktop.hidden) updateDesktopLink();
+  if (openDesktop.hidden) return;
+  cancelDesktopAttempt();
+  updateDesktopLink();
+  setStatus("");
 });
+openDesktop.addEventListener("click", openDesktopApp);
+openOlderDesktop.addEventListener("click", () => {
+  cancelDesktopAttempt();
+  updateDesktopLink();
+  setStatus("");
+});
+window.addEventListener("pagehide", cancelDesktopAttempt);
 openInBrowser.addEventListener("click", () => void openBrowser().catch(showError));
 
 try {

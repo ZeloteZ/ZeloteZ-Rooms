@@ -87,3 +87,18 @@ test("desktop handoff forwards only explicit guest and live flags in a canonical
   ]) assert.equal(parseShareLink(valid + suffix, allow), null);
   assert.equal(parseShareLink(prefix + "guests=0&live=1", allow), null);
 });
+
+test("desktop handoff accepts one lowercase hexadecimal receipt ID and keeps it out of the renderer route", () => {
+  const allow = value => value === origin ? origin : null;
+  const valid = "zelotez-rooms://share/youtube/M7lc1UVf-VE?instance=" + encodeURIComponent(origin);
+  const handoffId = "0123456789abcdef0123456789abcdef";
+  const receipt = "&handoff=" + handoffId;
+  assert.deepEqual(parseShareLink(valid + "&live=0" + receipt + "&guests=1", allow),
+    { origin, fragment: "#/share/youtube/M7lc1UVf-VE?guests=1&live=0", handoffId });
+  assert.deepEqual(shareLinkFromArguments(["rooms", valid + receipt], allow),
+    { origin, fragment: "#/share/youtube/M7lc1UVf-VE", handoffId });
+  for (const invalid of [
+    receipt + receipt, receipt + "&other=1", receipt + "=1", receipt.slice(0, -1), receipt + "0",
+    "&handoff=", "&handoff=" + handoffId.toUpperCase(), "&handoff=%30" + handoffId.slice(1), "&h%61ndoff=" + handoffId,
+  ]) assert.equal(parseShareLink(valid + invalid, allow), null);
+});

@@ -450,15 +450,37 @@ function restoreWindow(window) {
   if (window === roomsWindow && !roomsContents?.isDestroyed()) roomsContents?.send("rooms:visibility", true);
 }
 
-function receiveShare(share) {
+async function receiveShare(share) {
   if (!share) return;
   if (!roomsDocumentIsActive?.()) {
     pendingShare = share;
     return;
   }
-  if (share.origin !== currentOrigin || !isRoomsPage(roomsContents.getURL(), currentOrigin)) return;
-  restoreWindow(roomsWindow);
-  void roomsContents.executeJavaScript(`location.hash = ${JSON.stringify(share.fragment)}`).catch(() => {});
+  const window = roomsWindow;
+  const contents = roomsContents;
+  const isShareWindowActive = () => roomsWindow === window && roomsContents === contents &&
+    share.origin === currentOrigin && roomsDocumentIsActive?.() && isRoomsPage(contents.getURL(), share.origin);
+  if (!isShareWindowActive()) return;
+  restoreWindow(window);
+  try {
+    const frame = contents.mainFrame;
+    const opened = await frame.executeJavaScript(`(() => {
+      if (location.origin !== ${JSON.stringify(share.origin)} || location.pathname !== "/") return false;
+      const fragment = ${JSON.stringify(share.fragment)};
+      location.hash = fragment;
+      return location.hash === fragment;
+    })()`);
+    if (opened !== true || !share.handoffId || !isShareWindowActive() || contents.mainFrame !== frame ||
+        !window.isVisible() || window.isMinimized()) return;
+    const response = await fetch(new URL("/api/desktop/handoff", share.origin), {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", redirect: "error",
+      cache: "no-store", referrerPolicy: "no-referrer", signal: AbortSignal.timeout(3000),
+      body: JSON.stringify({ id: share.handoffId, action: "opened" }),
+    });
+    await response.body?.cancel();
+  } catch {
+    // The browser keeps its fallback when the route or acknowledgement fails.
+  }
 }
 
 function wantsTray() {
@@ -845,7 +867,7 @@ async function connect(origin, { signal, local } = {}) {
     scheduleUpdateCheck();
     const share = pendingShare;
     pendingShare = null;
-    receiveShare(share);
+    void receiveShare(share);
     updateTray();
     previous?.close();
     return true;
@@ -888,12 +910,12 @@ if (process.platform === "linux" && app.commandLine.hasSwitch("no-sandbox")) {
   app.on("before-quit", () => { quitting = true; cancelUpdateCheck(); notifications.clear(); updateTray(); });
   app.on("second-instance", (_event, args) => {
     const share = shareLinkFromArguments(args, serverOrigin);
-    if (share) receiveShare(share);
+    if (share) void receiveShare(share);
     else restoreWindow(settingsWindow ?? roomsWindow);
   });
   app.on("open-url", (event, url) => {
     event.preventDefault();
-    receiveShare(parseShareLink(url, serverOrigin));
+    void receiveShare(parseShareLink(url, serverOrigin));
   });
   app.on("activate", () => restoreWindow(settingsWindow ?? roomsWindow));
   app.whenReady().then(async () => {

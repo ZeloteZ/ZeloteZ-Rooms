@@ -453,11 +453,11 @@ export function createLivePlayer(context, dock) {
   };
 }
 
-export function renderLive(context, channel, edit, player, voiceMount, playerMount = el("div", { class: "live-channel-player" })) {
+export function renderLive(context, channel, player, voiceMount, playerMount = el("div", { class: "live-channel-player" })) {
   const { signal, user, room, screenShare, nativeBroadcast } = context;
   const endpoint = streamsPath(channel);
   const cards = el("div", { class: "screen-stream-cards" });
-  const liveTitle = el("h2", { id: "live-channel-heading", title: channel.title }, channel.title);
+  const liveTitle = el("h2", { id: "live-channel-heading", title: channel.title, tabindex: -1 }, channel.title);
   const empty = el("p", { class: "muted", role: "status" }, t("Loading streams…", "Streams werden geladen …"));
   const watchHint = el("div", { class: "live-channel-placeholder", "aria-label": t("Stream player", "Stream-Player") }, empty);
   const channelChat = renderChat({ ...context, liveChat: true, messageId: undefined }, channel);
@@ -511,9 +511,14 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     onShareUnavailable: () => tell(feedback, t("Video sharing is unavailable in this channel.", "In diesem Kanal kannst du gerade kein Video teilen.")),
   });
   const closeWatchTitle = t("Close player", "Player schließen");
-  const closeWatch = button("×", () => watchParty.leave(), {
-    class: "ghost icon-button", title: closeWatchTitle, "aria-label": closeWatchTitle, hidden: true,
-  });
+  const closeWatch = button(closeWatchTitle, () => {
+    const restoreFocus = document.activeElement === closeWatch;
+    watchParty.leave();
+    if (restoreFocus) liveTitle.focus({ preventScroll: true });
+  }, { hidden: true });
+  const watchActions = el("div", {
+    class: "live-channel-watch-actions", role: "group", "aria-label": t("Watch party actions", "Watchparty-Aktionen"), hidden: true,
+  }, closeWatch, watchParty.end);
   const streamsSection = el("section", {
     class: "live-channel-streams", "aria-labelledby": "live-channel-streams-heading", hidden: true,
   }, el("h3", { id: "live-channel-streams-heading" }, t("Streams", "Streams")),
@@ -681,6 +686,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
       liveTitle.title = nextTitle;
     }
     closeWatch.hidden = !watchingParty;
+    watchActions.hidden = closeWatch.hidden && watchParty.end.hidden;
     const previewMedia = sharingHere && sharing.phase === "live" && !selectedHere && !watchingParty ? sharing.media : null;
     reserve.hidden = !canStream || watchParty.canEnd() || Boolean(own || sharing || nativeBroadcast?.active());
     if (requestedShare && (requestedShare !== "screen" || streamsReady)) {
@@ -862,10 +868,10 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     class: "live-channel-queue", id: "live-channel-queue", role: "tabpanel", "aria-labelledby": queueButton.id,
     tabindex: 0, hidden: true,
   }, watchParty.queue);
-  const panels = [["people", peopleButton, people], ["chat", chatButton, chatPanel], ["queue", queueButton, queuePanel]];
+  const panels = [["chat", chatButton, chatPanel], ["queue", queueButton, queuePanel], ["people", peopleButton, people]];
   const tablist = el("div", { class: "live-channel-switch", role: "tablist",
     "aria-label": t("Live channel view", "Live-Channel-Ansicht"),
-  }, peopleButton, chatButton, queueButton);
+  }, chatButton, queueButton, peopleButton);
   tablist.addEventListener("keydown", event => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const available = panels.filter(([, tab]) => !tab.hidden);
@@ -886,11 +892,12 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     class: "panel live-channel", "aria-label": channel.title,
   }, el("header", { class: "live-channel-toolbar" },
     el("div", { class: "live-channel-title" }, liveTitle),
-    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, watchParty.end, finish, edit, closeWatch), feedback),
+    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish), feedback),
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint),
-    el("div", { class: "live-channel-support" }, tablist, people, chatPanel, queuePanel)));
+    el("div", { class: "live-channel-support" },
+      el("div", { class: "live-channel-support-toolbar" }, watchActions, tablist), people, chatPanel, queuePanel)));
   updatePanels();
   node.addEventListener("open-message", event => {
     if (event.detail?.messageId) showChatTarget(event.detail);

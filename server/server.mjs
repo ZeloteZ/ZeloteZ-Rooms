@@ -6,6 +6,7 @@ import { createAppearance } from './appearance.mjs'
 import { createAuth } from './auth.mjs'
 import { createCommunity } from './community.mjs'
 import { createChannelManagement } from './channel-management.mjs'
+import { createDesktopHandoff } from './desktop-handoff.mjs'
 import { createHistory } from './history.mjs'
 import { assertOrigin, json, readJson, RequestError } from './http.mjs'
 import { setResponseLocale } from './locale.mjs'
@@ -35,6 +36,7 @@ const db = new DatabaseSync(join(dataDir, 'community.sqlite'), { timeout: 5000 }
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 67108864')
 const appearance = createAppearance(db)
 const profileFor = appearance.profile
+const desktopHandoff = createDesktopHandoff()
 const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile,
   revokeBroadcasts: userId => streams.revokeUser(userId) })
 const { requireSession } = auth
@@ -107,8 +109,9 @@ const publicApi = service(async (request, response) => {
   if (request.method === 'GET' && path === '/api/desktop/instance') {
     const nonce = url.searchParams.get('nonce')
     if (!nonce || !/^[a-f0-9]{32}$/.test(nonce)) return json(response, 400, { error: 'Invalid nonce' })
-    return json(response, 200, { product: 'zelotez-rooms', protocol: 1, origin: origin.origin, nonce })
+    return json(response, 200, { product: 'zelotez-rooms', protocol: 1, origin: origin.origin, nonce, handoffReceipt: 1 })
   }
+  if (path === '/api/desktop/handoff') return desktopHandoff.handle(request, response)
   if (request.method === 'GET' && path === '/_internal/stream-view') return streams.checkViewer(request, response)
   if (request.method === 'GET' && path === '/_internal/guest-stream-view') return quickRooms.checkGuestViewer(request, response)
   if (path.startsWith('/api/')) {
@@ -167,7 +170,10 @@ function shutdown() {
   watchParties.close()
   let servers = 2
   const closed = () => {
-    if (--servers === 0) db.close()
+    if (--servers === 0) {
+      desktopHandoff.close()
+      db.close()
+    }
   }
   publicApi.close(closed)
   privateApi.close(closed)

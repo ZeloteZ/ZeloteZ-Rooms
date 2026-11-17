@@ -25,7 +25,7 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
   const removed = []
   const links = []
   let messageListener
-  let onRemoved
+  let onFocus
   let nextId = 0
   let staleTab
 
@@ -34,6 +34,13 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
       lastAccessed: nextId, url: origin + '/#/rooms', workspace: true, displayedAccount: account, sessionAccount: account, ...values }
     tabs.set(data.id, data)
     return data
+  }
+
+  function updateTab(current, changes) {
+    Object.assign(current, changes)
+    for (const listener of onUpdated) listener(current.id, changes)
+    if (changes.active) onFocus?.()
+    return { ...current }
   }
 
   const previousBrowser = globalThis.browser
@@ -56,7 +63,6 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
     storage: { local: { get: async () => ({ roomsInstance: { origin, target: 'browser' } }) } },
     runtime: { id: 'rooms-test', getURL: () => panel, onMessage: { addListener(listener) { messageListener = listener } } },
     tabs: {
-      onRemoved: { addListener(listener) { onRemoved = listener } },
       onUpdated: { addListener: listener => onUpdated.add(listener), removeListener: listener => onUpdated.delete(listener) },
       create: async ({ url, windowId }) => tab({ url, windowId, workspace: false }),
       get: async id => {
@@ -73,11 +79,9 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
       update: async (id, changes) => {
         const current = tabs.get(id)
         if (reportOldPanelOnce && current.url === source && changes.url === origin + '/') staleTab = { ...current }
-        Object.assign(current, changes)
-        for (const listener of onUpdated) listener(id, changes)
-        return { ...current }
+        return updateTab(current, changes)
       },
-      remove: async id => { removed.push(id); tabs.delete(id); onRemoved(id) },
+      remove: async id => { removed.push(id); tabs.delete(id) },
     },
     scripting: {
       async executeScript({ target, func, args }) {
@@ -127,7 +131,8 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
       },
     },
   }
-  await import(`../background.js?fixture=${fixtureId++}`)
+  const startWorker = () => import(`../background.js?fixture=${fixtureId++}`)
+  await startWorker()
 
   function message(type, tab, url = tab.url, values = {}) {
     return new Promise(resolve => assert.equal(messageListener({ type, ...values }, { id: 'rooms-test', frameId: 0, tab, url }, resolve), true))
@@ -138,7 +143,7 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
     return [...tabs.values()].find(tab => tab.url === source)
   }
   return { tab, openHandoff, launch: (tab, audience = defaultAudience) => message('rooms-browser-handoff', tab, source, { origin, ...audience }),
-    attempts, requests, removed, links }
+    startWorker, updateTab, onFocus: action => { onFocus = action }, attempts, requests, removed, links }
 }
 
 test('reuses an open same-account workspace and closes only the managed handoff tab', async t => {
@@ -166,6 +171,31 @@ test('reuses an open same-account workspace and closes only the managed handoff 
   assert.deepEqual(JSON.parse(requests[3].body), { source: 'youtube', ...defaultAudience })
   assert.deepEqual(JSON.parse(requests[4].body), { source: 'youtube', videoId: video })
   assert.deepEqual(links, [[ready.id, { accountId: account, publicId: topic, secret: guestSecret }]])
+})
+
+test('a fresh background worker closes the handoff tab after reuse', async t => {
+  const { tab, openHandoff, launch, startWorker, removed } = await fixture(t)
+  const ready = tab()
+  const handoff = await openHandoff()
+  await startWorker()
+  assert.deepEqual(await launch(handoff), { ok: true })
+  assert.equal(ready.url, roomUrl)
+  assert.equal(ready.active, true)
+  assert.deepEqual(removed, [handoff.id])
+})
+
+test('reuse leaves the handoff tab open if it was navigated again', async t => {
+  const { tab, openHandoff, launch, updateTab, onFocus, removed } = await fixture(t)
+  const ready = tab()
+  const handoff = await openHandoff()
+  onFocus(() => {
+    updateTab(handoff, { url: 'https://other.example.test/' })
+    updateTab(handoff, { url: origin + '/' })
+  })
+  assert.deepEqual(await launch(handoff), { ok: true })
+  assert.equal(ready.url, roomUrl)
+  assert.equal(handoff.url, origin + '/')
+  assert.deepEqual(removed, [])
 })
 
 test('a signed-in cookie alone routes the new tab to confirmation without creating a room', async t => {

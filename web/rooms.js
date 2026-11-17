@@ -247,7 +247,7 @@ export async function renderTopics(context) {
   return dashboard;
 }
 
-function topicSettings(context, topic, onDelete) {
+function topicSettings(context, topic, onDelete, openChannels) {
   const endpoint = "topics/" + identifier(topic.id);
   const title = el("input", { required: true, value: topic.title, name: "title", maxlength: "72", autocomplete: "off" });
   const visibility = select(visibilityOptions, topic.visibility);
@@ -263,7 +263,9 @@ function topicSettings(context, topic, onDelete) {
     refreshAfter(context, t("Room saved.", "Raum gespeichert."));
   });
   const removeRoom = button(t("Delete room", "Raum löschen"), confirmDelete, { class: "danger" });
-  const panel = el("div", { class: "stack" }, settings, el("div", { class: "inline room-settings-delete" }, removeRoom));
+  const panel = el("div", { class: "stack" }, settings,
+    el("div", { class: "inline" }, button(t("Manage channels", "Channels verwalten"), openChannels, { "aria-haspopup": "dialog" })),
+    el("div", { class: "inline room-settings-delete" }, removeRoom));
 
   function open() {
     showDialog(t("Edit room", "Raum bearbeiten"), panel);
@@ -428,6 +430,10 @@ function manageChannels(context, topic, channels, updateChannels) {
         class: "icon-button", disabled: busy, "aria-disabled": index === draft.length - 1 ? "true" : undefined,
         "aria-label": t("Move “{name}” down", "„{name}“ nach unten verschieben", { name: channel.title }), title: t("Move down", "Nach unten verschieben"),
       });
+      const edit = button(t("Edit", "Bearbeiten"), () => channelDialog(context, topic, channel), {
+        disabled: busy, "aria-haspopup": "dialog",
+        "aria-label": t("Edit “{name}”", "„{name}“ bearbeiten", { name: channel.title }),
+      });
       const remove = button(t("Delete", "Löschen"), () => confirmDelete(channel), {
         class: "danger", disabled: busy, "aria-label": t("Delete “{name}”", "„{name}“ löschen", { name: channel.title }),
       });
@@ -439,7 +445,7 @@ function manageChannels(context, topic, channels, updateChannels) {
         el("div", { class: "channel-manager-title" },
           el("strong", {}, channel.title),
           el("span", { class: "subtle" }, channel.type === "live" ? t("Live channel", "Live-Channel") : "Chat")),
-        el("div", { class: "inline channel-manager-controls" }, up, down, remove));
+        el("div", { class: "inline channel-manager-controls" }, up, down, edit, remove));
     }));
     list.hidden = draft.length === 0;
     empty.hidden = draft.length > 0;
@@ -645,8 +651,8 @@ export async function renderTopic(context, topicId, selectedId, target) {
   applyTopicDesign(room, topic.appearance);
   const hero = el("div", { class: "panel room-hero section-heading", "data-tutorial": "room-hero" },
     el("div", { class: "room-title" },
-      el("div", { class: "inline" }, el("a", { href: "#/rooms", class: "subtle" }, t("All rooms", "Alle Räume")), tag(topic)),
-      el("h1", { title: topic.title }, topic.title)),
+      el("h1", { title: topic.title }, topic.title),
+      el("div", { class: "inline room-title-meta" }, el("a", { href: "#/rooms", class: "subtle" }, t("All rooms", "Alle Räume")), tag(topic))),
     topic.joined && el("div", { class: "inline room-actions" }, favoriteControl(topic, context),
       button(t("Members", "Mitglieder"), () => membersDialog(context, topic, members)),
       topic.canDesign && button("Design", () => editTopicDesign(context, topic, appearance => {
@@ -656,7 +662,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
       owner ? button([
         el("span", { class: "room-action-label" }, t("Settings", "Einstellungen")),
         el("span", { class: "room-action-icon", "aria-hidden": "true" }, "⚙"),
-      ], () => topicSettings(context, topic, stopRoomCapture), { "aria-label": t("Settings", "Einstellungen"), title: t("Settings", "Einstellungen") })
+      ], () => topicSettings(context, topic, stopRoomCapture, openChannelManagement), { "aria-label": t("Settings", "Einstellungen"), title: t("Settings", "Einstellungen") })
         : button(t("Leave", "Verlassen"), () => leaveDialog(context, topic))));
   room.append(hero);
   if (!topic.joined) {
@@ -667,6 +673,10 @@ export async function renderTopic(context, topicId, selectedId, target) {
   }
 
   let channels = initialChannels;
+
+  function openChannelManagement() {
+    manageChannels(context, topic, channels, updateChannels);
+  }
 
   function stopRoomCapture() {
     if (sameId(context.screenShare.active()?.room.id, topic.id)) context.screenShare.stop();
@@ -696,7 +706,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
       picker,
       manager && el("div", { class: "room-channel-manage" },
         button("+", () => channelDialog(context, topic), { "aria-label": t("Create channel", "Channel erstellen"), class: "icon-button", title: t("Create channel", "Channel erstellen") }),
-        button("⋯", () => manageChannels(context, topic, channels, updateChannels), {
+        button("⋯", openChannelManagement, {
           "aria-label": t("Manage channels", "Channels verwalten"), "aria-haspopup": "dialog", class: "icon-button", title: t("Manage channels", "Channels verwalten"),
         }))),
     channelList);
@@ -780,11 +790,10 @@ export async function renderTopic(context, topicId, selectedId, target) {
     }
     const childContext = { ...context, room: topic, signal: channelView.signal,
       messageId: message?.messageId, streamId: message?.streamId, watchId: message?.watchId, shareSource: message?.shareSource };
-    const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
     if (channel.type === "live") {
       const voiceMount = el("div", { class: "voice-inline" });
       livePlayerMount = el("div", { class: "live-channel-player" });
-      liveView = renderLive(childContext, channel, edit, context.player, voiceMount, livePlayerMount);
+      liveView = renderLive(childContext, channel, context.player, voiceMount, livePlayerMount);
       channelNode = liveView.node;
       liveSupportAnchor = document.createComment("Voice and streams position in compact layout");
       liveView.people.before(liveSupportAnchor);
@@ -795,6 +804,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
       context.videoDock?.refreshPlacement();
       context.voice.setLocation(channel, topic, voiceMount);
     } else {
+      const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
       const moveDestinations = manager ? () => channels.filter(candidate =>
         candidate.type === "chat" && !sameId(candidate.id, channel.id)) : undefined;
       channelNode = renderChat({ ...childContext, moveDestinations }, channel, edit);

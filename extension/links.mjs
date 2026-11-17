@@ -1,6 +1,11 @@
 export const configKey = "roomsInstance";
 export const videoIdPattern = /^[A-Za-z0-9_-]{11}$/u;
 export const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+const validHandoff = value => typeof value === "string" && value.length === 32 && /^[a-f0-9]{32}$/u.test(value);
+
+export function handoffId() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 export function instanceOrigin(address) {
   if (typeof address !== "string" || !/^https?:\/\/[^\s\\/%?#@]+\/?$/iu.test(address.trim())) return null;
@@ -54,12 +59,37 @@ export function browserHandoff(origin, id, audience) {
   return new URL("/#/share/youtube/" + id + "?" + audienceQuery(audience), origin).href;
 }
 
-export function desktopHandoff(origin, id, audience) {
+export function desktopHandoff(origin, id, audience, receipt) {
   endpointArguments(origin, id);
   const url = new URL("zelotez-rooms://share/youtube/" + id);
   url.searchParams.set("instance", origin);
   for (const [key, value] of audienceQuery(audience)) url.searchParams.set(key, value);
+  if (receipt !== undefined) {
+    if (!validHandoff(receipt)) throw new Error("Invalid handoff receipt");
+    url.searchParams.set("handoff", receipt);
+  }
   return url.href;
+}
+
+export async function waitForDesktopReceipt(origin, id, signal) {
+  if (instanceOrigin(origin) !== origin || !validHandoff(id)) throw new Error("Invalid handoff receipt");
+  const url = new URL("/api/desktop/handoff", origin);
+  for (const deadline = Date.now() + 60000; !signal.aborted && Date.now() < deadline;) {
+    try {
+      const response = await fetch(url, {
+        method: "POST", body: JSON.stringify({ id, action: "status" }),
+        headers: { "Content-Type": "application/json" }, credentials: "omit", redirect: "error", cache: "no-store",
+        referrerPolicy: "no-referrer", signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]),
+      });
+      await response.body?.cancel();
+      if (response.status === 204) return !signal.aborted;
+      if (response.status !== 202 && response.status !== 429 && response.status < 500) return false;
+    } catch {
+      if (signal.aborted) return false;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return false;
 }
 
 function mediaType(response) {
@@ -92,7 +122,7 @@ async function descriptor(response) {
 
 export async function verifyInstance(origin) {
   if (!origin || instanceOrigin(origin) !== origin) throw new Error("invalidAddress");
-  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+  const nonce = handoffId();
   const target = new URL("/api/desktop/instance", origin);
   target.searchParams.set("nonce", nonce);
   const request = { redirect: "error", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer",
@@ -106,4 +136,5 @@ export async function verifyInstance(origin) {
   if (page.status !== 200 || mediaType(page) !== "text/html" || page.headers.get("x-zelotez-rooms-client") !== "1") {
     throw new Error("invalidInstance");
   }
+  return { handoffReceipt: marker.handoffReceipt === 1 };
 }

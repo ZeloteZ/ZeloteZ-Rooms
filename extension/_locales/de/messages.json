@@ -18,6 +18,8 @@
   "save": { "message": "Einstellungen speichern" },
   "desktopNote": { "message": "Öffne die Desktop-App oder fahre hier im Browser fort, wenn die App nicht verfügbar ist." },
   "openDesktop": { "message": "Desktop-App öffnen" },
+  "openOlderDesktop": { "message": "Ältere Desktop-App öffnen" },
+  "waitingDesktop": { "message": "Warte auf die Bestätigung der Desktop-App …" },
   "openBrowser": { "message": "Im Browser fortfahren" },
   "openInBrowser": { "message": "Im Browser öffnen" },
   "editSettings": { "message": "Einstellungen bearbeiten" },

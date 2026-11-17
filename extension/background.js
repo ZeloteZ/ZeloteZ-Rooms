@@ -3,11 +3,9 @@ import { createSignedInRoom, readRoomsAccount } from "./create-room.mjs";
 
 const api = globalThis.browser ?? globalThis.chrome;
 const panel = api.runtime.getURL("panel.html");
-const handoffTabs = new Map();
 const launching = new Set();
 
 api.action.onClicked.addListener(() => void api.runtime.openOptionsPage().catch(() => {}));
-api.tabs.onRemoved.addListener(tabId => handoffTabs.delete(tabId));
 
 function onInstance(address, origin) {
   try {
@@ -42,7 +40,7 @@ async function execute(tabId, func, args) {
   return result?.result;
 }
 
-async function reuseOpenRoom(handoff, origin, videoId, audience) {
+async function reuseOpenRoom(handoff, origin, videoId, audience, stillOnHandoff) {
   const account = await execute(handoff.id, readRoomsAccount, [origin]);
   if (typeof account !== "string" || !uuid.test(account)) return false;
   const tabs = await api.tabs.query({ windowId: handoff.windowId });
@@ -50,7 +48,8 @@ async function reuseOpenRoom(handoff, origin, videoId, audience) {
     atAddress(tab, tab.url) && tab.status === "complete" && onInstance(tab.url, origin))
     .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0)).slice(0, 6);
   for (const candidate of candidates) {
-    if (!atAddress(await api.tabs.get(handoff.id), origin + "/")) return false;
+    const current = await api.tabs.get(handoff.id);
+    if (!stillOnHandoff() || !atAddress(current, origin + "/") || !sameContext(current, handoff)) return false;
     const result = await execute(candidate.id, createSignedInRoom, [origin, videoId, account, candidate.url, audience])
       .catch(() => ({ handled: false }));
     if (!result) continue;
@@ -60,10 +59,9 @@ async function reuseOpenRoom(handoff, origin, videoId, audience) {
     const opened = await waitForTab(candidate.id, destination, candidate.url);
     if (!opened || !sameContext(opened, handoff)) return false;
     await api.tabs.update(opened.id, { active: true });
-    if (handoffTabs.get(handoff.id) === videoId) {
-      const temporaryTab = await api.tabs.get(handoff.id).catch(() => null);
-      if (atAddress(temporaryTab, origin + "/") && temporaryTab.status === "complete") await api.tabs.remove(handoff.id).catch(() => {});
-    }
+    const temporaryTab = await api.tabs.get(handoff.id).catch(() => null);
+    if (stillOnHandoff() && atAddress(temporaryTab, origin + "/") && temporaryTab.status === "complete" &&
+        !temporaryTab.pendingUrl && sameContext(temporaryTab, handoff)) await api.tabs.remove(handoff.id).catch(() => {});
     return true;
   }
   return false;
@@ -71,9 +69,13 @@ async function reuseOpenRoom(handoff, origin, videoId, audience) {
 
 async function launchInBrowser(tabId, videoId, origin, audience) {
   const source = panel + "#" + videoId;
+  const landing = origin + "/";
+  let expectedAddress = source;
+  let loadingLanding = false;
   let moved = false;
   const trackNavigation = (id, change) => {
-    if (id === tabId && (change.status === "loading" || (change.url && change.url !== source))) moved = true;
+    if (id !== tabId) return;
+    if ((!loadingLanding && change.status === "loading") || (change.url && change.url !== expectedAddress)) moved = true;
   };
   api.tabs.onUpdated.addListener(trackNavigation);
   try {
@@ -84,13 +86,22 @@ async function launchInBrowser(tabId, videoId, origin, audience) {
     const tab = await api.tabs.get(tabId);
     // Some browsers omit the URL of the sender's own extension page from tabs.get().
     if (moved || tab.discarded || (tab.pendingUrl && tab.pendingUrl !== source) || (tab.url !== undefined && tab.url !== source)) return;
+
+    // The verified video panel's sender tab is the handoff, even after a background worker restart.
+    expectedAddress = landing;
+    loadingLanding = true;
+    await api.tabs.update(tabId, { url: landing });
+    const loaded = await waitForTab(tabId, landing, source);
+    loadingLanding = false;
+    if (moved || (loaded && !sameContext(loaded, tab))) return;
+    if (loaded && await reuseOpenRoom(loaded, origin, videoId, audience, () => !moved).catch(() => false)) return;
+    const current = await api.tabs.get(tabId);
+    if (!moved && atAddress(current, landing) && sameContext(current, tab)) {
+      await api.tabs.update(tabId, { url: browserHandoff(origin, videoId, audience) });
+    }
   } finally {
     api.tabs.onUpdated.removeListener(trackNavigation);
   }
-  await api.tabs.update(tabId, { url: origin + "/" });
-  const tab = await waitForTab(tabId, origin + "/", source);
-  if (tab && await reuseOpenRoom(tab, origin, videoId, audience).catch(() => false)) return;
-  if (atAddress(await api.tabs.get(tabId), origin + "/")) await api.tabs.update(tabId, { url: browserHandoff(origin, videoId, audience) });
 }
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -99,10 +110,7 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const id = youtubeVideoId(sender.url);
     if (!id) return;
     api.tabs.create({ url: panel + "#" + id, openerTabId: sender.tab.id, windowId: sender.tab.windowId })
-      .then(tab => {
-        if (Number.isInteger(tab.id)) handoffTabs.set(tab.id, id);
-        sendResponse({ ok: true });
-      }, () => sendResponse({ ok: false }));
+      .then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "rooms-browser-handoff" && sender.url?.startsWith(panel + "#")) {
@@ -115,7 +123,7 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     launching.add(tabId);
     launchInBrowser(tabId, id, origin, { guestAccess, memberVisibility })
       .then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, code: error.message }))
-      .finally(() => { launching.delete(tabId); handoffTabs.delete(tabId); });
+      .finally(() => launching.delete(tabId));
     return true;
   }
 });

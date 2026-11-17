@@ -14,6 +14,8 @@ function parseShareLink(value, serverOrigin) {
     if (typeof raw !== "string" || extra !== undefined || fields.has(name)) return null;
     if (name === "instance") {
       if (!/^[A-Za-z0-9._~%-]+$/u.test(raw)) return null;
+    } else if (name === "handoff") {
+      if (!/^[a-f0-9]{32}$/u.test(raw)) return null;
     } else if (!options.includes(name) || (raw !== "0" && raw !== "1")) return null;
     fields.set(name, raw);
   }
@@ -23,7 +25,9 @@ function parseShareLink(value, serverOrigin) {
     const origin = serverOrigin(address);
     if (!origin || origin !== address) return null;
     const search = options.filter(name => fields.has(name)).map(name => name + "=" + fields.get(name));
-    return { origin, fragment: "#/share/youtube/" + match[1] + (search.length ? "?" + search.join("&") : "") };
+    const share = { origin, fragment: "#/share/youtube/" + match[1] + (search.length ? "?" + search.join("&") : "") };
+    if (fields.has("handoff")) share.handoffId = fields.get("handoff");
+    return share;
   } catch {
     return null;
   }
