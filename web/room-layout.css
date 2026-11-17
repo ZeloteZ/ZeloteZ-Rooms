@@ -44,6 +44,7 @@
 
 .room-header .room-breadcrumb,
 .room-header .room-breadcrumb-list { min-inline-size: 0; }
+.room-header .room-breadcrumb { flex: 1 1 auto; }
 .room-header .room-breadcrumb-list {
   display: flex;
   align-items: center;
