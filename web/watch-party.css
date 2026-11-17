@@ -65,6 +65,7 @@
 .watch-timeline { display: grid; grid-template-columns: 4ch minmax(0, 1fr) 4ch; align-items: center; gap: 10px; }
 .watch-duration { text-align: end; }
 .watch-party-transport { display: flex; align-items: center; gap: 6px; }
+.watch-actions { display: flex; align-items: center; justify-content: end; flex-wrap: wrap; gap: 5px; min-inline-size: 0; margin-inline-start: auto; }
 .watch-party-controls input[type="range"] {
   min-block-size: 22px;
   min-inline-size: 0;
@@ -74,8 +75,17 @@
   accent-color: var(--accent);
 }
 .watch-party-time { color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
-.watch-audio { display: flex; align-items: center; gap: 5px; margin-inline-start: auto; min-inline-size: 0; }
+.watch-audio { display: flex; align-items: center; gap: 5px; min-inline-size: 0; }
 .watch-audio input { inline-size: clamp(45px, 11vw, 102px); }
+.watch-captions-icon { padding: 1px 3px; border: 1px solid currentColor; border-radius: 4px; font-size: .72rem; font-weight: 750; }
+.watch-actions .button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.live-channel-watch .watch-party-heading { display: none; }
+.live-channel-watch .watch-party-player:not(:fullscreen):not([data-watch-cinema]) {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.live-channel-watch .watch-party-player:has(.watch-youtube-frame):not(:fullscreen):not([data-watch-cinema]) {
+  grid-template-rows: minmax(200px, 1fr) auto;
+}
 .watch-party-controls .watch-play-button { display: grid; place-items: center; inline-size: 42px; }
 .watch-play-icon {
   display: block;

@@ -32,23 +32,14 @@
 }
 
 .room-layout {
-  grid-template-columns: clamp(9rem, 15vi, 14rem) minmax(0, 1fr) clamp(11rem, 20vi, 18rem);
-  grid-template-areas: "channels content activity";
+  grid-template-columns: clamp(9rem, 15vi, 14rem) minmax(0, 1fr);
+  grid-template-areas: "channels content";
   grid-template-rows: minmax(0, 1fr);
   gap: 11px;
   align-items: stretch;
   min-block-size: 0;
   min-inline-size: 0;
 }
-
-.room-layout:is([data-live-channel], [data-activity-view]) {
-  grid-template-columns: clamp(9rem, 15vi, 14rem) minmax(0, 1fr);
-  grid-template-areas: "channels content";
-}
-
-.room-layout[data-activity-view] { grid-template-areas: "channels activity"; }
-.room-layout[data-live-channel]:not([data-activity-view]) .room-activity,
-.room-layout[data-activity-view] .channel-content { display: none; }
 
 .room-layout .channel-sidebar {
   position: static;
@@ -135,30 +126,6 @@
 .room-layout .chat-title { min-inline-size: 0; }
 .room-layout .chat-title .tag { white-space: normal; overflow-wrap: anywhere; }
 
-.room-layout .room-activity {
-  display: flex;
-  flex-direction: column;
-  min-block-size: 0;
-}
-
-.room-layout .topic-activity {
-  display: flex;
-  flex-direction: column;
-  min-block-size: 0;
-}
-
-.room-layout .activity-list {
-  min-block-size: 0;
-  max-block-size: none;
-}
-
-.room-layout .room-activity-toggle { white-space: nowrap; }
-.room-layout .room-activity-toggle[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--raised);
-}
-
 .live-channel {
   container: live-channel / inline-size;
   display: grid;
@@ -172,7 +139,6 @@
 .live-channel-toolbar { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 9px; }
 .live-channel-title { flex: 1 1 10rem; min-inline-size: 0; }
 .live-channel-title h2 { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-channel-count { flex: none; }
 .live-channel-tools { gap: 5px; }
 .live-channel-tools .button { min-block-size: 34px; padding-block: 5px; }
 .live-channel-toolbar > .status:not([hidden]) { flex-basis: 100%; }
@@ -320,13 +286,11 @@
 .desktop-crop-selection { position: absolute; border: 2px solid #93a2ff; box-shadow: 0 0 0 200vmax #08090da6; pointer-events: none; }
 
 @media (max-width: 900px), (max-height: 500px) {
-  .room-layout, .room-layout:is([data-live-channel], [data-activity-view]) {
+  .room-layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "channels" "content";
     grid-template-rows: auto minmax(0, 1fr);
   }
-
-  .room-layout[data-activity-view] { grid-template-areas: "channels" "activity"; }
 
   .room-layout .channel-sidebar { padding: 6px; border-radius: 13px; }
   .room-layout .room-channel-tools {
@@ -339,8 +303,7 @@
   }
 
   .room-layout .room-channel-tools > h2,
-  .room-layout .channel-list,
-  .room-layout:not([data-activity-view]) .room-activity { display: none; }
+  .room-layout .channel-list { display: none; }
 
   .room-layout select.room-channel-picker {
     display: block;

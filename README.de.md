@@ -60,7 +60,7 @@ Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 
 Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer und Linux-AppImage.
 
-Updatehinweise sind optional. In den Desktop-Einstellungen kannst du sie einschalten und das Prüfintervall festlegen. Für das private GitHub-Repo braucht die Prüfung einen fein abgestuften GitHub-Token mit Lesezugriff auf den Repo-Inhalt. Die App speichert ihn im sicheren Systemspeicher.
+Updatehinweise sind optional. In den Desktop-Einstellungen kannst du sie einschalten und das Prüfintervall festlegen. Die App liest die Versionsnummer deiner geprüften Rooms-Instanz. Den Release öffnet sie in deinem Browser auf GitHub.
 
 Die optionale Browsererweiterung ergänzt **Create ZeloteZ Room** auf YouTube in Chromium-Browsern und Firefox. Wähle eine geprüfte Instanz und öffne das Video im Browser oder in deiner konfigurierten Desktop-App. [Anleitung zur Erweiterung](extension/README.md)
 

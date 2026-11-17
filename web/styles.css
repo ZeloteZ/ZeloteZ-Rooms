@@ -144,12 +144,7 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
 }
 .room-hero h1 { margin-top: 7px; font-size: clamp(2rem, 5vw, 3.6rem); }
 .room-hero p { margin-top: 8px; max-width: 60ch; overflow-wrap: anywhere; }
-.room-layout {
-  display: grid; grid-template-columns: minmax(170px, .8fr) minmax(0, 3fr) minmax(215px, 1fr);
-  grid-template-areas: "channels content activity"; align-items: start; gap: 17px;
-}
-.room-layout[data-player="full"] { grid-template-areas: "channels player activity" "channels content activity"; }
-.room-layout[data-player="mini"] { grid-template-areas: "channels content activity" "channels content player"; }
+.room-layout { display: grid; }
 .channel-sidebar { position: sticky; top: 15px; display: grid; gap: 11px; padding: 13px; }
 .channel-sidebar { grid-area: channels; }
 .channel-sidebar .section-heading { padding-left: 6px; }
@@ -160,7 +155,6 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
 .channel-link[aria-current] { background: #242947; border-color: #4c5694; color: #f7f7fd; }
 .channel-symbol { flex: none; width: 21px; text-align: center; color: #b4c1ff; font-weight: 700; }
 .channel-content { grid-area: content; min-width: 0; }
-.room-activity { grid-area: activity; min-width: 0; }
 .live-player { grid-area: player; min-width: 0; }
 .live-player[data-mode="mini"] { padding: 12px; gap: 10px; }
 .live-player[data-mode="mini"] h2 { font-size: .97rem; }
@@ -231,9 +225,6 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
   .page-width { width: calc(100% - 36px); }
   .bar { gap: 13px; }
   .profile-name { display: none; }
-  .room-layout { grid-template-columns: 155px minmax(0,1fr); grid-template-areas: "channels content" "channels activity"; }
-  .room-layout[data-player="full"] { grid-template-areas: "channels player" "channels content" "channels activity"; }
-  .room-layout[data-player="mini"] { grid-template-areas: "channels content" "channels player" "channels activity"; }
   .live-player[data-mode="mini"] { max-width: 355px; justify-self: end; }
 }
 @media (max-width: 650px) {
@@ -246,9 +237,6 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
   .auth-banner { min-height: 157px; }
   .topic-card, .topic-link { min-height: 146px; }
   .topic-link strong { font-size: 1.05rem; }
-  .room-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "channels" "content" "activity"; }
-  .room-layout[data-player="full"] { grid-template-areas: "channels" "player" "content" "activity"; }
-  .room-layout[data-player="mini"] { grid-template-areas: "channels" "content" "player" "activity"; }
   .credential-row { grid-template-columns: minmax(0, 1fr); }
   .channel-sidebar { position: static; padding: 9px; }
   .channel-list { display: flex; flex-wrap: wrap; }

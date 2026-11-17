@@ -37,7 +37,7 @@ If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the w
 
 ## Desktop app
 
-Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. Because the GitHub repository is private, the checker takes a fine-grained token with read access to the repository contents and stores it in the system credential store.
+Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. The app reads the version advertised by your verified Rooms instance. The release link opens GitHub in your browser.
 
 The optional browser extension adds **Create ZeloteZ Room** to YouTube in Chromium browsers and Firefox. Choose a verified instance and open the video in a browser tab or in your configured desktop app. [Extension setup](extension/README.md)
 

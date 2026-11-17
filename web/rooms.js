@@ -1,5 +1,4 @@
 import { t } from "./i18n.js";
-import { renderActivity } from "./activity.js";
 import { applyTopicCover, applyTopicDesign, editTopicDesign } from "./appearance.js";
 import { renderChat } from "./chat.js";
 import { renderHomeActivity } from "./home-activity.js";
@@ -691,12 +690,9 @@ export async function renderTopic(context, topicId, selectedId, target) {
   }
   drawChannels();
   picker.addEventListener("change", () => { location.hash = topicHref(topic.id, picker.value); });
-  const activityToggle = button(t("Activity", "Aktivität"), () => showActivity(!layout.hasAttribute("data-activity-view")), {
-    class: "room-activity-toggle", "aria-pressed": "false", "aria-controls": "room-activity", "data-tutorial": "room-activity",
-  });
   const sidebar = el("aside", { class: "panel channel-sidebar", "data-tutorial": "channel-picker" },
     el("div", { class: "section-heading room-channel-tools" }, el("h2", {}, "Channels"),
-      picker, activityToggle,
+      picker,
       manager && el("div", { class: "room-channel-manage" },
         button("+", () => channelDialog(context, topic), { "aria-label": t("Create channel", "Channel erstellen"), class: "icon-button", title: t("Create channel", "Channel erstellen") }),
         button("⋯", () => manageChannels(context, topic, channels, updateChannels), {
@@ -704,16 +700,9 @@ export async function renderTopic(context, topicId, selectedId, target) {
         }))),
     channelList);
   const content = el("div", { class: "channel-content" });
-  const activity = el("aside", { class: "room-activity", id: "room-activity", "aria-label": t("Recent activity in this room", "Letzte Aktivität im Raum") }, renderActivity(context, topic));
   const supportSlot = el("div", { class: "live-support-slot", hidden: true });
   const sidebarColumn = el("div", { class: "room-sidebar-column" }, sidebar, supportSlot);
-  const layout = el("div", { class: "room-layout" }, sidebarColumn, content, activity);
-  activity.addEventListener("click", event => {
-    if (layout.hasAttribute("data-activity-view") && event.target.closest(".activity-link")) {
-      showActivity(false);
-      if (event.detail === 0) activityToggle.focus({ preventScroll: true });
-    }
-  });
+  const layout = el("div", { class: "room-layout" }, sidebarColumn, content);
   let selected;
   let channelView;
   let channelNode;
@@ -757,13 +746,6 @@ export async function renderTopic(context, topicId, selectedId, target) {
     select(fallback?.id);
   }
 
-  function showActivity(visible) {
-    layout.toggleAttribute("data-activity-view", visible);
-    activityToggle.setAttribute("aria-pressed", String(visible));
-    if (livePlayerMount) context.player.setLocation(topic, selected, visible ? null : livePlayerMount);
-    context.videoDock?.refreshPlacement();
-  }
-
   function markSelected(channel) {
     if (channel) picker.value = channel.id;
     for (const link of links) {
@@ -775,7 +757,6 @@ export async function renderTopic(context, topicId, selectedId, target) {
   function select(requestedId, destination) {
     const channel = channels.find(candidate => sameId(candidate.id, requestedId)) ?? channels[0];
     const message = channel && sameId(channel.id, requestedId) ? destination : undefined;
-    showActivity(false);
     if (channelView && (selected === channel || sameId(selected?.id, channel?.id))) {
       if (message?.messageId || message?.streamId || message?.watchId || message?.shareSource) {
         channelNode?.dispatchEvent(new CustomEvent("open-message", { detail: message }));

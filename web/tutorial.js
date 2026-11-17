@@ -26,8 +26,6 @@ const pages = {
       "Room details, members, and settings are in the header.", "In der Kopfzeile findest du Raumdetails, Mitglieder und Einstellungen."),
     step('[data-tutorial="channel-picker"]', "Choose a channel", "Channel auswählen",
       "Text channels hold conversations. Live channels bring together voice chats, streams, and stream chat.", "In Textchannels schreibst du Nachrichten. Live-Channels vereinen Sprachchat, Streams und Streamchat."),
-    step('[data-tutorial="room-activity"]', "Find recent activity", "Aktivität finden",
-      "Open Activity to jump to recent posts in this room.", "Öffne die Aktivität, um zu den neuesten Beiträgen in diesem Raum zu springen."),
   ],
   chat: [
     step(".conversation-heading .tag", "Private conversations", "Private Unterhaltungen",

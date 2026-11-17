@@ -69,7 +69,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   const endpoint = "channels/" + identifier(channel.id) + "/watch";
   const playbackLabel = t("Watch party", "Watchparty");
   const sourceLimit = room?.temporary ? room.quickSource : null;
-  const share = button(t("Share video", "Video teilen"), () => chooseSource(false), { hidden: true });
+  const share = button(t("Share video", "Video teilen"), () => chooseSource(false), { class: "primary", hidden: true });
   const queue = watchQueue({ add: () => chooseSource(true), remove: removeQueuedVideo,
     next: () => void change("next", undefined, queue.feedback) });
   const cardName = el("strong");
@@ -79,6 +79,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   { class: "stream-pick watch-party-card", hidden: true, "aria-pressed": "false" });
   const title = el("h3");
   const statusNode = status();
+  const captionNotice = status();
   const media = el("div", { class: "watch-party-media", "data-watch-media": true });
   const enable = button(t("Enable playback on this device", "Wiedergabe auf diesem Gerät erlauben"), enablePlayback,
     { hidden: true });
@@ -94,15 +95,18 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     },
     onSeek: position => void change("seek", position),
     onVolume: level => surface?.setVolume(level),
+    onCaptions: enabled => surface?.setCaptions?.(enabled),
     fullscreenTarget: () => player,
   });
-  const stop = button(t("End watch party", "Watchparty beenden"), stopParty, { class: "danger", hidden: true });
+  const stopTitle = t("End watch party", "Watchparty beenden");
+  const stop = button(stopTitle, stopParty, { class: "danger watch-party-stop", hidden: true });
+  const end = button(stopTitle, stopParty, { class: "danger watch-party-end", hidden: true });
   const leave = button("×", leaveParty, { class: "ghost icon-button", title: t("Close player", "Player schließen"),
     "aria-label": t("Close player", "Player schließen") });
   const player = el("section", { class: "panel watch-party-player", hidden: true, "aria-label": playbackLabel },
     el("header", { class: "section-heading watch-party-heading" }, title, el("div", { class: "inline" }, stop, leave)),
     media,
-    el("div", { class: "watch-party-footer" }, controls.element, enable, statusNode));
+    el("div", { class: "watch-party-footer" }, controls.element, enable, statusNode, captionNotice));
 
   let sample;
   let hasSnapshot = false;
@@ -116,6 +120,8 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   let nativeIntent;
   let canShare = false;
   let canStop = false;
+  let captionsEnabled = false;
+  let captionsPending = false;
   let busy = false;
   let polling = false;
   let generation = 0;
@@ -157,10 +163,14 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     if (selectedId && ready) controls.setPosition(desiredPosition(), surface.getDuration());
   }
 
+  function canEnd() {
+    return !setupOnly && canStop && Boolean(sample?.party);
+  }
+
   function render() {
     const party = sample?.party;
     const isReady = party?.state === "ready";
-    share.hidden = !canShare || (setupOnly && Boolean(party));
+    share.hidden = !canShare || canEnd() || (setupOnly && Boolean(party));
     share.disabled = busy || Boolean(party);
     share.title = party ? t("A watch party is already shared in this channel.", "In diesem Kanal wird bereits ein Video geteilt.") : "";
     card.hidden = !isReady;
@@ -170,9 +180,15 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       cardSource.textContent = party.source === "youtube" ? "YouTube" : t("Room video", "Raumvideo");
       title.textContent = cardName.textContent;
     }
-    stop.hidden = !canStop;
-    stop.disabled = busy;
+    stop.hidden = end.hidden = !canEnd();
+    stop.disabled = end.disabled = busy;
     controls.setTransport({ isPlaying: party?.playing, enabled: !busy && ready });
+    const captionsVisible = Boolean(selectedId && party?.source === "youtube");
+    controls.setCaptions({ visible: captionsVisible, enabled: captionsEnabled, pending: captionsVisible && !ready });
+    tell(captionNotice, captionsVisible && (captionsPending || captionsEnabled)
+      ? captionsPending ? t("Loading captions preference…", "Untertiteleinstellung wird geladen …")
+        : t("Captions requested when available.", "Untertitel angefragt, sofern verfügbar.")
+      : "");
     queue.update(sample?.queue, { visible: isReady, manage: canShare, pending: busy });
     if (selectedId) dockEntry?.activate(title.textContent, topicHref(room.id, channel.id, { watchId: party?.sessionId ?? selectedId }));
     view?.onChange?.();
@@ -182,6 +198,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     const previous = surface;
     surface = null;
     ready = false;
+    captionsPending = false;
     controls.resetPosition();
     appliedRevision = undefined;
     nativeIntent = undefined;
@@ -249,6 +266,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   }
 
   function resetPlayer(party) {
+    captionsPending = false;
     tell(statusNode, t("Loading video…", "Video wird geladen …"));
     const current = () => selectedId === party.id && !signal.aborted;
     if (party.source === "youtube") {
@@ -256,6 +274,18 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       audience = createWatchViewerLease({ signal, report: options => reportWatchViewer(viewers, options, { accountId: user.id }) });
     }
     const handlers = {
+      captions: captionsEnabled,
+      onCaptionsChange({ enabled, pending }) {
+        if (!current()) return;
+        captionsEnabled = enabled;
+        captionsPending = pending;
+        if (pending) {
+          ready = false;
+          appliedRevision = undefined;
+          nativeIntent = undefined;
+        }
+        render();
+      },
       onReady() {
         if (!current()) return;
         ready = true;
@@ -543,8 +573,8 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     leaveParty();
   }, { once: true });
   if (sourceLimit !== "screen") schedule(0);
-  return { share, card, player, queue: queue.node, active: () => sample?.party.state === "ready", hasSnapshot: () => hasSnapshot,
-    selected: () => Boolean(selectedId), join, leave: leaveParty, open, prepareSource,
+  return { share, end, canEnd, card, player, queue: queue.node, active: () => sample?.party.state === "ready", hasSnapshot: () => hasSnapshot,
+    selected: () => Boolean(selectedId), currentTitle: () => selectedId ? title.textContent : "", join, leave: leaveParty, open, prepareSource,
     stopPlayback: leaveParty,
     connectView(options, id) {
       view = options;

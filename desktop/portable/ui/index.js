@@ -12,9 +12,6 @@ function settings(state) {
   const back = control("back");
   const status = control("address-status");
   const preferenceStatus = control("preferences-status");
-  const updateToken = control("update-token");
-  const saveToken = control("save-update-token");
-  const removeToken = control("remove-update-token");
   const checkUpdate = control("check-update");
   const openRelease = control("open-release");
   const updateStatus = control("update-status");
@@ -59,17 +56,10 @@ function settings(state) {
     control("keep-running-detail").textContent = t("Keep calls and streams active when you close the window", "Anrufe und Streams beim Schließen des Fensters fortsetzen");
     control("updates-heading").textContent = t("Desktop updates", "Desktop-Updates");
     control("update-checks-label").textContent = t("Notify me about updates", "Über Updates benachrichtigen");
-    control("update-checks-detail").textContent = t("Check official GitHub releases while Rooms is running.", "Offizielle GitHub-Releases prüfen, solange Rooms läuft.");
+    control("update-checks-detail").textContent = t("Ask your connected Rooms server about new desktop versions.", "Bei deinem verbundenen Rooms-Server nach neuen Desktop-Versionen fragen.");
     control("update-interval-label").textContent = t("Check frequency", "Prüfintervall");
     const intervals = [t("Hourly", "Stündlich"), t("Every 6 hours", "Alle 6 Stunden"), t("Daily", "Täglich"), t("Weekly", "Wöchentlich")];
     intervals.forEach((label, index) => { control("updateInterval").options[index].textContent = label; });
-    control("update-token-label").textContent = state.updateTokenSaved ? t("GitHub token saved", "GitHub-Token gespeichert") : t("GitHub access token", "GitHub-Zugriffstoken");
-    control("update-token-detail").textContent = t(
-      "Use a fine-grained token with read-only Contents access to ZeloteZ/ZeloteZ-Rooms.",
-      "Verwende einen Fine-grained-Token mit Leserechten für „Contents“ in ZeloteZ/ZeloteZ-Rooms.");
-    updateToken.placeholder = state.updateTokenSaved ? t("Replace saved token", "Gespeicherten Token ersetzen") : "github_pat_…";
-    saveToken.textContent = t("Save token", "Token speichern");
-    removeToken.textContent = t("Remove token", "Token entfernen");
     checkUpdate.textContent = t("Check now", "Jetzt prüfen");
     openRelease.textContent = t("View release on GitHub", "Release auf GitHub ansehen");
     renderUpdateControls();
@@ -124,22 +114,13 @@ function settings(state) {
   }
 
   function renderUpdateControls() {
-    updateToken.disabled = updating;
-    saveToken.disabled = updating || !updateToken.value.trim();
-    removeToken.hidden = !state.updateTokenSaved;
-    removeToken.disabled = updating;
-    checkUpdate.disabled = updating || !state.updateTokenSaved;
+    checkUpdate.disabled = updating;
     openRelease.hidden = updateResult?.status !== "available";
     const statuses = {
-      saved: t("The token was saved in your system’s secure storage.", "Der Token wurde im sicheren Speicher deines Systems abgelegt."),
-      removed: t("The saved token was removed.", "Der gespeicherte Token wurde entfernt."),
-      invalid: t("Enter a GitHub fine-grained personal access token.", "Gib einen persönlichen Fine-grained-Token von GitHub ein."),
-      secureStorage: t("Your system’s secure storage is unavailable. Check your keychain or credential manager.",
-        "Der sichere Systemspeicher ist nicht verfügbar. Prüfe deinen Schlüsselbund oder die Anmeldeinformationsverwaltung."),
-      access: t("GitHub denied access. Check the token’s repository permissions and expiry.",
-        "GitHub hat den Zugriff verweigert. Prüfe die Repository-Berechtigungen und das Ablaufdatum des Tokens."),
-      token: t("Unlock the system credential store or add a GitHub token.", "Entsperre den sicheren Systemspeicher oder füge einen GitHub-Token hinzu."),
-      unavailable: t("The update check couldn’t finish. Try again later.", "Die Update-Prüfung konnte nicht abgeschlossen werden. Versuch es später erneut."),
+      instance: t("Connect to your Rooms server under General, then check again.",
+        "Verbinde dich unter „Allgemein“ mit deinem Rooms-Server und prüfe erneut."),
+      unavailable: t("Your Rooms server didn’t provide update information. Try again later or ask your server administrator.",
+        "Dein Rooms-Server hat keine Update-Informationen geliefert. Versuch es später erneut oder frag beim Betreiber nach."),
       current: t("You’re using the latest version.", "Du verwendest die neueste Version."),
       available: (updateResult?.installer ? t("Version {version} is available.", "Version {version} ist verfügbar.")
         : t("Version {version} has been published. This release contains no installer for your platform.",
@@ -149,7 +130,7 @@ function settings(state) {
     const message = updating ? t("One moment…", "Einen Moment …") : statuses[updateResult?.status] ?? "";
     updateStatus.textContent = message;
     updateStatus.hidden = !message;
-    updateStatus.classList.toggle("error", ["invalid", "access", "secureStorage", "unavailable"].includes(updateResult?.status));
+    updateStatus.classList.toggle("error", updateResult?.status === "unavailable");
   }
 
   address.value = state.address;
@@ -204,29 +185,20 @@ function settings(state) {
   bridge.onFocusUpdates(focusUpdateSettings);
   control("general-settings-tab").addEventListener("click", () => { updatesTab = false; render(); });
   control("update-settings-tab").addEventListener("click", () => { updatesTab = true; render(); });
-  updateToken.addEventListener("input", renderUpdateControls);
-  async function updateOperation(operation) {
+  checkUpdate.addEventListener("click", async () => {
     if (updating) return;
     updating = true;
     updateResult = undefined;
     renderUpdateControls();
     try {
-      updateResult = await operation();
-      if (typeof updateResult?.tokenSaved === "boolean") state.updateTokenSaved = updateResult.tokenSaved;
+      updateResult = await bridge.checkUpdate();
     } catch {
       updateResult = { status: "unavailable" };
     } finally {
       updating = false;
       render();
     }
-  }
-  saveToken.addEventListener("click", () => {
-    const token = updateToken.value.trim();
-    updateToken.value = "";
-    if (token) void updateOperation(() => bridge.updateToken("save", token));
   });
-  removeToken.addEventListener("click", () => void updateOperation(() => bridge.updateToken("remove")));
-  checkUpdate.addEventListener("click", () => void updateOperation(bridge.checkUpdate));
   openRelease.addEventListener("click", () => void bridge.openRelease());
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape" || phase === "connecting") return;
@@ -294,10 +266,10 @@ async function setup() {
   if (state.mode === "update-intro") {
     document.body.dataset.settingsView = "update-intro";
     control("heading").textContent = t("Desktop update notifications", "Desktop-Update-Hinweise");
-    control("description").textContent = t("Choose whether Rooms checks GitHub for new versions.", "Du entscheidest, ob Rooms auf GitHub nach neuen Versionen sucht.");
+    control("description").textContent = t("Choose whether to check for new desktop versions.", "Du entscheidest, ob Rooms nach neuen Desktop-Versionen sucht.");
     control("update-intro-details").textContent = t(
-      "Update checks are off by default. In Desktop settings, you can turn them on, change the frequency and set up access to the private release page.",
-      "Die Update-Prüfung ist standardmäßig aus. In den Desktop-Einstellungen kannst du sie einschalten, das Prüfintervall wählen und den Zugriff auf die private Release-Seite einrichten.");
+      "Update checks are off by default. Turn them on in Desktop settings to check for new versions through your connected Rooms server.",
+      "Die Update-Prüfung ist standardmäßig aus. Schalte sie in den Desktop-Einstellungen ein, um über deinen verbundenen Rooms-Server nach neuen Versionen zu suchen.");
     const dismiss = control("dismiss-update-intro");
     const settings = control("open-update-settings");
     dismiss.textContent = t("Not now", "Jetzt nicht");

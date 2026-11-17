@@ -116,19 +116,11 @@ body[data-settings-view="preferences"] .note { margin-bottom: 16px; }
 #server-form .actions { margin-top: 19px; }
 #back { margin-inline-end: auto; }
 
-#preferences .github-access {
+#preferences .desktop-update-check {
   display: grid;
   align-items: start;
   gap: 8px;
 }
-.github-access > label { display: grid; gap: 3px; }
-.update-token-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 7px;
-}
-.update-token-form input { min-inline-size: 0; }
-.update-token-form input:not([hidden]) ~ button#remove-update-token { grid-column: 2; }
 .update-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 #update-status { margin-top: 0; }
 .update-intro { padding: 15px; }
@@ -138,8 +130,6 @@ body[data-settings-view="update-intro"] main { padding-block: 20px; }
 @media (max-width: 360px) {
   #preferences .settings-row { gap: 8px; }
   #preferences .settings-row select { padding-inline: 6px; }
-  .update-token-form { grid-template-columns: minmax(0, 1fr); }
-  .update-token-form input:not([hidden]) ~ button#remove-update-token { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

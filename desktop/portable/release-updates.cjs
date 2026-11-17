@@ -1,15 +1,9 @@
 "use strict";
 
-const { randomUUID } = require("node:crypto");
-const { mkdir, open, rename, rm, writeFile } = require("node:fs/promises");
-const path = require("node:path");
-
 const repository = "ZeloteZ/ZeloteZ-Rooms";
-const endpoint = "https://api.github.com/repos/" + repository + "/releases/latest";
 const versionPattern = /^(?:0|[1-9]\d{0,8})(?:\.(?:0|[1-9]\d{0,8})){2}$/u;
-const tokenPattern = /^github_pat_[A-Za-z0-9_]{30,200}$/u;
-const maxResponse = 512 * 1024;
-const maxCredential = 1024;
+const artifactPattern = /^[a-z0-9]{1,12}(?:-[a-z0-9]{1,12}){1,2}$/u;
+const maxResponse = 2048;
 const checkIntervals = ["1", "6", "24", "168"];
 
 function releasePage(version) {
@@ -25,15 +19,29 @@ function newerVersion(candidate, installed) {
   return difference > 0;
 }
 
-function installerName(version, platform, arch) {
-  if (arch !== "x64") return null;
-  if (platform === "linux") return "ZeloteZ-Rooms-" + version + "-x86_64.AppImage";
-  if (platform === "win32") return "ZeloteZ-Rooms-" + version + "-x64.exe";
-  return null;
+function artifactFor(platform, arch) {
+  if (platform === "linux") return "linux-" + arch;
+  if (platform === "win32") return "windows-" + arch;
+  if (platform === "darwin") return "macos-" + arch;
+  return "";
+}
+
+function releaseEndpoint(origin) {
+  if (typeof origin !== "string" || !origin) return null;
+  try {
+    const url = new URL(origin);
+    const loopback = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (url.origin !== origin || url.port === "0" || (url.protocol !== "https:" && !loopback)) return null;
+    return url.origin + "/api/desktop/release";
+  } catch {
+    return null;
+  }
 }
 
 async function readMetadata(response) {
-  if (!response.body || Number(response.headers.get("content-length")) > maxResponse) {
+  if (!response.ok || !response.body ||
+      response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json" ||
+      Number(response.headers.get("content-length")) > maxResponse) {
     void response.body?.cancel().catch(() => {});
     throw new Error("Invalid release metadata");
   }
@@ -44,108 +52,31 @@ async function readMetadata(response) {
     if (size > maxResponse) throw new Error("Release metadata is too large");
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)));
 }
 
-async function findUpdate({ token, installed, platform, arch, signal, fetchRelease = fetch }) {
-  if (typeof token !== "string" || !tokenPattern.test(token)) return { status: "token" };
-  const deadline = AbortSignal.timeout(10000);
+async function findUpdate({ origin, installed, platform, arch, signal, fetchRelease = fetch }) {
+  const endpoint = releaseEndpoint(origin);
+  if (!endpoint) return { status: "instance" };
+  const deadline = AbortSignal.timeout(8000);
   try {
     const response = await fetchRelease(endpoint, {
       method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-      headers: {
-        Accept: "application/vnd.github+json", Authorization: "Bearer " + token,
-        "X-GitHub-Api-Version": "2026-03-10", "User-Agent": "ZeloteZ-Rooms-Desktop",
-      },
+      headers: { Accept: "application/json" },
     });
-    if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
-      return { status: [401, 403, 404].includes(response.status) ? "access" : "unavailable" };
-    }
     const release = await readMetadata(response);
-    const version = typeof release?.tag_name === "string" && release.tag_name.startsWith("v") ? release.tag_name.slice(1) : "";
-    if (!releasePage(version) || release.draft !== false || release.prerelease !== false) {
+    if (!release || Object.keys(release).length !== 4 || release.product !== "zelotez-rooms" || release.protocol !== 1 ||
+        !releasePage(release.version) || !Array.isArray(release.artifacts) || release.artifacts.length > 16 ||
+        new Set(release.artifacts).size !== release.artifacts.length ||
+        release.artifacts.some(artifact => typeof artifact !== "string" || !artifactPattern.test(artifact))) {
       return { status: "unavailable" };
     }
-    if (!newerVersion(version, installed)) return { status: "current" };
-    const asset = installerName(version, platform, arch);
-    const installer = Boolean(asset && Array.isArray(release.assets) &&
-      release.assets.some(item => item?.name === asset && item.state === "uploaded"));
-    return { status: "available", version, installer };
+    if (!newerVersion(release.version, installed)) return { status: "current" };
+    return { status: "available", version: release.version, installer: release.artifacts.includes(artifactFor(platform, arch)) };
   } catch {
     return { status: signal?.aborted ? "cancelled" : "unavailable" };
   }
 }
 
-function bounded(operation) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("System credential storage did not finish")), 8000);
-    timer.unref();
-  });
-  return Promise.race([operation, timeout]).finally(() => clearTimeout(timer));
-}
-
-function releaseCredential(file, safeStorage, platform) {
-  let queue = Promise.resolve();
-  function serialized(operation) {
-    const result = queue.then(operation);
-    queue = result.catch(() => {});
-    return result;
-  }
-  function protectedBytes(bytes) {
-    return Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= maxCredential &&
-      (platform !== "linux" || ["v11", "v12"].includes(bytes.toString("ascii", 0, 3)));
-  }
-  async function read() {
-    try {
-      const handle = await open(file, "r");
-      try {
-        const stat = await handle.stat();
-        if (!stat.isFile() || stat.size > maxCredential) return null;
-        const buffer = Buffer.alloc(maxCredential + 1);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        const bytes = buffer.subarray(0, bytesRead);
-        return protectedBytes(bytes) ? bytes : null;
-      } finally {
-        await handle.close();
-      }
-    } catch {
-      return null;
-    }
-  }
-  async function save(token) {
-    if (typeof token !== "string" || !tokenPattern.test(token)) return "invalid";
-    try {
-      if (!await bounded(safeStorage.isAsyncEncryptionAvailable())) return "secureStorage";
-      const encrypted = await bounded(safeStorage.encryptStringAsync(token));
-      if (!protectedBytes(encrypted)) return "secureStorage";
-      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-      const temporary = file + "." + randomUUID() + ".new";
-      try {
-        await writeFile(temporary, encrypted, { mode: 0o600, flag: "wx" });
-        await rename(temporary, file);
-      } finally {
-        await rm(temporary, { force: true });
-      }
-      return "saved";
-    } catch {
-      return "secureStorage";
-    }
-  }
-  return {
-    has: () => serialized(async () => Boolean(await read())),
-    get: () => serialized(async () => {
-      const bytes = await read();
-      if (!bytes) return null;
-      const { result } = await bounded(safeStorage.decryptStringAsync(bytes));
-      return typeof result === "string" && tokenPattern.test(result) ? result : null;
-    }).catch(() => null),
-    save: token => serialized(() => save(token)),
-    remove: () => serialized(async () => { await rm(file, { force: true }); return "removed"; })
-      .catch(() => "secureStorage"),
-  };
-}
-
-module.exports = { checkIntervals, findUpdate, releaseCredential, releasePage };
+module.exports = { checkIntervals, findUpdate, releasePage };

@@ -1,7 +1,7 @@
 "use strict";
 
 const { app, BrowserWindow, Menu, Notification, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, session, shell } = require("electron");
-const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
+const { mkdir, readFile, rename, rm, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { installAudio } = require("./audio.cjs");
@@ -9,7 +9,7 @@ const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
 const { createRememberedLogin } = require("./remembered-login.cjs");
-const { checkIntervals, findUpdate, releaseCredential, releasePage } = require("./release-updates.cjs");
+const { checkIntervals, findUpdate, releasePage } = require("./release-updates.cjs");
 const { parseShareLink, scheme: shareScheme, shareLinkFromArguments } = require("./share-link.cjs");
 const { trayHostAvailable, trayUsable } = require("./tray.cjs");
 
@@ -30,8 +30,6 @@ let roomsDocumentIsActive;
 let settingsWindow;
 let closeConfirmation;
 let updateIntro;
-let updateCredential;
-let updateTokenSaved = false;
 let updateTimer;
 let updateCheck;
 let updateToast;
@@ -151,7 +149,7 @@ function applyPreferences() {
 
 function scheduleUpdateCheck() {
   clearTimeout(updateTimer);
-  if (quitting || !desktopSettings.updateChecks || !updateTokenSaved || updateCheck) return;
+  if (quitting || !desktopSettings.updateChecks || !currentOrigin || !roomsDocumentIsActive?.() || updateCheck) return;
   const interval = Number(desktopSettings.updateInterval) * 60 * 60 * 1000;
   const last = Math.max(lastUpdateAttempt, desktopSettings.updateLastCheckedAt);
   updateTimer = setTimeout(() => { void checkForUpdates(true); }, Math.max(0, last + interval - Date.now()));
@@ -190,19 +188,18 @@ function cancelUpdateCheck() {
 
 function checkForUpdates(automatic) {
   if (quitting || (automatic && !desktopSettings.updateChecks)) return Promise.resolve({ status: "cancelled" });
+  const origin = currentOrigin;
+  if (!origin || !roomsDocumentIsActive?.()) return Promise.resolve({ status: "instance" });
   if (updateCheck) return updateCheck.result;
-  if (!updateTokenSaved) return Promise.resolve({ status: "token" });
   clearTimeout(updateTimer);
   const controller = new AbortController();
   const attempt = Date.now();
   lastUpdateAttempt = attempt;
   const result = (async () => {
     try {
-      const token = await updateCredential.get();
-      if (controller.signal.aborted) return { status: "cancelled" };
-      const result = await findUpdate({ token, installed: app.getVersion(), platform: process.platform,
+      const result = await findUpdate({ origin, installed: app.getVersion(), platform: process.platform,
         arch: process.arch, signal: controller.signal });
-      if (controller.signal.aborted) return { status: "cancelled" };
+      if (controller.signal.aborted || origin !== currentOrigin || !roomsDocumentIsActive?.()) return { status: "cancelled" };
       const changes = { updateLastCheckedAt: attempt };
       if (automatic && desktopSettings.updateChecks && result.status === "available" && result.version !== desktopSettings.updateNotified &&
           showUpdateNotification(result.version, result.installer)) changes.updateNotified = result.version;
@@ -335,23 +332,6 @@ ipcMain.handle("rooms:local-update-intro", (event, action) => {
   if (action === "settings") showSettings(false, "", true);
 });
 
-ipcMain.handle("rooms:local-update-token", async (event, action, token) => {
-  const local = settingsSender(event);
-  if (!local || !updateCredential || !["save", "remove"].includes(action)) return { status: "unavailable" };
-  if (action === "remove") cancelUpdateCheck();
-  const status = action === "save" ? await updateCredential.save(token) : await updateCredential.remove();
-  if (["saved", "removed"].includes(status)) {
-    cancelUpdateCheck();
-    updateTokenSaved = status === "saved";
-    local.state.updateTokenSaved = updateTokenSaved;
-    local.availableUpdate = null;
-    lastUpdateAttempt = 0;
-    await saveSettings({ updateLastCheckedAt: 0 }).catch(() => {});
-  }
-  scheduleUpdateCheck();
-  return { status, tokenSaved: updateTokenSaved };
-});
-
 ipcMain.handle("rooms:local-update-check", async event => {
   const local = settingsSender(event);
   if (!local) return { status: "unavailable" };
@@ -421,7 +401,6 @@ function showSettings(error = false, suggested = "", focusUpdates = false) {
     currentOrigin,
     error,
     focusUpdates,
-    updateTokenSaved,
     preferences: Object.fromEntries(Object.keys(preferenceOptions).map(name => [name, desktopSettings[name]])),
   }, parent);
   settingsWindow = local.window;
@@ -719,7 +698,10 @@ function prepareRoomsWindow(origin) {
   window.on("restore", () => windowVisibility(true));
   window.on("hide", () => windowVisibility(false));
   window.on("minimize", () => windowVisibility(false));
-  contents.on("did-finish-load", () => windowVisibility(window.isVisible() && !window.isMinimized()));
+  contents.on("did-finish-load", () => {
+    windowVisibility(window.isVisible() && !window.isMinimized());
+    if (roomsWindow === window) scheduleUpdateCheck();
+  });
   let htmlFullScreen = false;
   const layout = () => {
     const [width, height] = window.getContentSize();
@@ -796,6 +778,7 @@ function prepareRoomsWindow(origin) {
       roomsContents = null;
       roomsDocumentIsActive = null;
       currentOrigin = "";
+      cancelUpdateCheck();
       notifications.clear();
       updateTray();
     }
@@ -838,6 +821,7 @@ async function connect(origin, { signal, local } = {}) {
     const previous = roomsWindow;
     if (!prepared.verified()) return { error: "load" };
     notifications.clear();
+    cancelUpdateCheck();
     roomsWindow = window;
     roomsContents = prepared.contents;
     roomsDocumentIsActive = prepared.isActive;
@@ -845,6 +829,7 @@ async function connect(origin, { signal, local } = {}) {
     local?.window.close();
     window.show();
     roomsContents.focus();
+    scheduleUpdateCheck();
     const share = pendingShare;
     pendingShare = null;
     receiveShare(share);
@@ -894,9 +879,7 @@ if (!app.requestSingleInstanceLock()) {
     nativeTheme.on("updated", () => { if (roomsWindow) updateTitlebar(roomsWindow); });
     const legacyLinuxAddress = await loadSettings();
     applyPreferences();
-    updateCredential = releaseCredential(path.join(app.getPath("userData"), "desktop-release-token.bin"), safeStorage, process.platform);
-    updateTokenSaved = await updateCredential.has();
-    scheduleUpdateCheck();
+    await rm(path.join(app.getPath("userData"), "desktop-release-token.bin"), { force: true }).catch(() => {});
     captureProgram = await nativeHelper();
     const supplied = process.env.ZELOTEZ_ROOMS_ORIGIN;
     const origin = supplied === undefined ? desktopSettings.origin : serverOrigin(supplied);

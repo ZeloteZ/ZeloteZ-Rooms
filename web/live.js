@@ -457,7 +457,7 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const { signal, user, room, screenShare, nativeBroadcast } = context;
   const endpoint = streamsPath(channel);
   const cards = el("div", { class: "screen-stream-cards" });
-  const living = el("span", { class: "tag live live-channel-count", role: "status", hidden: true });
+  const liveTitle = el("h2", { id: "live-channel-heading", title: channel.title }, channel.title);
   const empty = el("p", { class: "muted", role: "status" }, t("Loading streams…", "Streams werden geladen …"));
   const watchHint = el("div", { class: "live-channel-placeholder", "aria-label": t("Stream player", "Stream-Player") }, empty);
   const channelChat = renderChat({ ...context, liveChat: true, messageId: undefined }, channel);
@@ -509,6 +509,10 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     },
     onUnavailable: () => tell(feedback, unavailableWatch),
     onShareUnavailable: () => tell(feedback, t("Video sharing is unavailable in this channel.", "In diesem Kanal kannst du gerade kein Video teilen.")),
+  });
+  const closeWatchTitle = t("Close player", "Player schließen");
+  const closeWatch = button("×", () => watchParty.leave(), {
+    class: "ghost icon-button", title: closeWatchTitle, "aria-label": closeWatchTitle, hidden: true,
   });
   watchParty.queue.id = "live-channel-queue";
   const streamsSection = el("section", {
@@ -622,8 +626,14 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     const selection = player.activeId();
     const selectedHere = streams.find(stream => sameId(stream.id, selection));
     const watchingParty = watchParty.selected();
+    const nextTitle = watchParty.currentTitle() || channel.title;
+    if (liveTitle.textContent !== nextTitle) {
+      liveTitle.textContent = nextTitle;
+      liveTitle.title = nextTitle;
+    }
+    closeWatch.hidden = !watchingParty;
     const previewMedia = sharingHere && sharing.phase === "live" && !selectedHere && !watchingParty ? sharing.media : null;
-    reserve.hidden = !canStream || Boolean(own || sharing || nativeBroadcast?.active());
+    reserve.hidden = !canStream || watchParty.canEnd() || Boolean(own || sharing || nativeBroadcast?.active());
     if (requestedShare && (requestedShare !== "screen" || streamsReady)) {
       const source = requestedShare;
       requestedShare = null;
@@ -636,13 +646,10 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
     finish.hidden = (!own && !sharingHere) || Boolean(nativeHere && !selectedHere);
     finish.textContent = sharingHere && sharing.phase !== "live"
       ? t("Cancel screen sharing", "Bildschirmfreigabe abbrechen") : t("End my stream", "Meinen Stream beenden");
-    const liveCount = streams.filter(stream => stream.live).length + Number(watchParty.active());
-    const nextStatus = liveCount ? t("{count} live", "{count} live", { count: liveCount }) : "";
-    living.hidden = !liveCount;
-    if (living.textContent !== nextStatus) living.textContent = nextStatus;
+    const hasLive = streams.some(stream => stream.live) || watchParty.active();
     const watchNote = watchParty.active() && !streams.length
       ? t("Select the watch party to watch together.", "Öffne die Watchparty, um gemeinsam zuzuschauen.")
-      : liveCount ? t("Choose a stream to watch.", "Wähle einen Stream zum Zuschauen.")
+      : hasLive ? t("Choose a stream to watch.", "Wähle einen Stream zum Zuschauen.")
       : streams.length ? t("Waiting for the first stream to go live.", "Der erste Stream wird vorbereitet.")
         : t("Nobody is live here right now.", "Hier ist gerade niemand live.");
     if ((streamsReady || watchParty.active()) && empty.textContent !== watchNote) empty.textContent = watchNote;
@@ -802,8 +809,8 @@ export function renderLive(context, channel, edit, player, voiceMount, playerMou
   const node = el("section", {
     class: "panel live-channel", "aria-labelledby": "live-channel-heading", "data-panel": "people",
   }, el("header", { class: "live-channel-toolbar" },
-    el("div", { class: "inline live-channel-title" }, el("h2", { id: "live-channel-heading", title: channel.title }, channel.title), living),
-    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish, edit), feedback),
+    el("div", { class: "live-channel-title" }, liveTitle),
+    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, watchParty.end, finish, edit, closeWatch), feedback),
   el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint),

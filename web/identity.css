@@ -35,22 +35,6 @@
   color: var(--profile-name-color, #d8daea);
 }
 
-.activity-author.person-name {
-  color: var(--profile-name-color, var(--muted));
-  font-weight: 600;
-}
-
-.activity-meta {
-  align-items: center;
-}
-
-.activity-meta .avatar {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  font-size: .58rem;
-}
-
 .stream-heading,
 .stream-identity {
   display: flex;

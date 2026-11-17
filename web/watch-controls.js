@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { createWatchCinema } from "./watch-cinema.js";
 
 const fullscreenIdleDelay = 3000;
 
@@ -32,7 +33,7 @@ function timeLabel(seconds) {
   return minutes + ":" + String(whole % 60).padStart(2, "0");
 }
 
-export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullscreenTarget, muted = false }) {
+export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCaptions, fullscreenTarget, muted = false }) {
   let scrubbing = false;
   let position = 0;
   let duration;
@@ -41,6 +42,8 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
   let shell;
   let media;
   let inFullscreen = false;
+  let inCinema = false;
+  let captionsEnabled = false;
   let idleTimer;
   const dragging = new Set();
   const icon = item("span", "watch-play-icon");
@@ -57,17 +60,33 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     volumeChanged();
   }, signal);
   const audio = item("div", "watch-audio", [mute, level]);
+  const captions = button("ghost watch-captions-button", () => onCaptions?.(!captionsEnabled), signal);
+  const cc = item("span", "watch-captions-icon", ["CC"]);
+  cc.setAttribute("aria-hidden", "true");
+  captions.append(cc);
+  captions.hidden = true;
+  const cinemaButton = button("ghost watch-cinema-button", () => cinema.toggle(), signal);
+  cinemaButton.hidden = true;
   const fullscreen = button("ghost icon-button watch-fullscreen", toggleFullscreen, signal);
   fullscreen.hidden = true;
   const expand = item("span", "watch-fullscreen-icon", ["⛶"]);
   expand.setAttribute("aria-hidden", "true");
   fullscreen.append(expand);
-  const transport = item("div", "watch-party-transport", [toggle, audio, fullscreen]);
+  const transport = item("div", "watch-party-transport", [toggle,
+    item("div", "watch-actions", [cinemaButton, captions, audio, fullscreen]),
+  ]);
   const reveal = button("watch-fullscreen-reveal", event => {
     wake();
-    if (event.detail === 0) (toggle.disabled || toggle.hidden ? fullscreen : toggle).focus({ preventScroll: true });
+    if (event.detail === 0) (toggle.disabled || toggle.hidden ? inCinema ? cinemaButton : fullscreen : toggle).focus({ preventScroll: true });
   }, signal);
   const element = item("div", "watch-party-controls", [timeline, transport, reveal]);
+  const cinema = createWatchCinema({ signal, target: fullscreenTarget, trigger: () => cinemaButton, onChange(open) {
+    inCinema = open;
+    dragging.clear();
+    clearIdle();
+    refreshLabels();
+    wake();
+  } });
 
   function refreshLabels() {
     const action = playing ? t("Pause together", "Gemeinsam pausieren") : t("Play together", "Gemeinsam abspielen");
@@ -77,6 +96,13 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     progress.setAttribute("aria-label", t("Playback position for everyone", "Wiedergabeposition für alle"));
     level.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
     mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
+    captions.title = captionsEnabled ? t("Turn subtitles off", "Untertitel ausschalten") : t("Turn subtitles on", "Untertitel einschalten");
+    captions.setAttribute("aria-label", captions.title);
+    captions.setAttribute("aria-pressed", String(captionsEnabled));
+    cinemaButton.textContent = t("Cinema", "Kino");
+    cinemaButton.title = inCinema ? t("Exit cinema mode", "Kinomodus verlassen") : t("Cinema mode", "Kinomodus");
+    cinemaButton.setAttribute("aria-label", cinemaButton.title);
+    cinemaButton.setAttribute("aria-pressed", String(inCinema));
     fullscreen.title = inFullscreen ? t("Exit full screen", "Vollbild verlassen") : t("Full screen", "Vollbild");
     fullscreen.setAttribute("aria-label", fullscreen.title);
     reveal.setAttribute("aria-label", t("Show playback controls", "Wiedergabesteuerung einblenden"));
@@ -88,7 +114,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
   }
 
   function wake() {
-    if (!inFullscreen || !media) return;
+    if (!(inFullscreen || inCinema) || !media) return;
     clearIdle();
     idleTimer = setTimeout(() => {
       if (dragging.size || element.querySelector(":focus-visible")) return;
@@ -113,6 +139,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
 
   function toggleFullscreen() {
     if (!media) return;
+    cinema.close(false);
     if (inFullscreen) void document.exitFullscreen().catch(() => {});
     else if (document.fullscreenEnabled && shell?.requestFullscreen) void shell.requestFullscreen().catch(() => {});
     else media.webkitEnterFullscreen?.();
@@ -129,7 +156,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
         }, passive);
         shell.addEventListener("pointerdown", event => {
           if (event.target === reveal) return;
-          if (inFullscreen && element.contains(event.target)) dragging.add(event.pointerId);
+          if ((inFullscreen || inCinema) && element.contains(event.target)) dragging.add(event.pointerId);
           wake();
         }, passive);
         const wakeFromControl = event => {
@@ -152,11 +179,13 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     media = surface;
     if (media && shell) shell.dataset.watchFullscreen = media.localName === "iframe" ? "embed" : "overlay";
     if (!media) {
+      cinema.close(false);
       clearIdle();
       shell?.removeAttribute("data-watch-fullscreen");
       if (inFullscreen) void document.exitFullscreen().catch(() => {});
     }
     fullscreen.hidden = !media || !(document.fullscreenEnabled && shell?.requestFullscreen || media.webkitEnterFullscreen);
+    cinemaButton.hidden = !media || !shell;
   }
 
   function paintTimeline() {
@@ -188,6 +217,12 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullsc
     element, audio, setFullscreenSurface,
     refreshLabels,
     volume: () => Number(level.value) / 100,
+    setCaptions({ visible = false, enabled = false, pending = false } = {}) {
+      captionsEnabled = enabled;
+      captions.hidden = !visible;
+      captions.disabled = pending;
+      refreshLabels();
+    },
     setTransport({ isPlaying = false, enabled = false, shared = true } = {}) {
       playing = isPlaying;
       toggle.disabled = !enabled;

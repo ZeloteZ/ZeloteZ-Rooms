@@ -9,16 +9,110 @@
 
 .room-sidebar-column > .channel-sidebar { inline-size: 100%; }
 .live-support-slot {
+  container: live-sidebar / inline-size;
   display: grid;
   grid-template-rows: minmax(0, auto);
   margin-block-start: auto;
-  max-block-size: min(66%, 56dvh);
+  max-block-size: min(56%, 46dvh);
   min-block-size: 0;
   min-inline-size: 0;
 }
 
-.live-support-slot .live-channel-people { grid-area: auto; }
-.live-support-slot .live-channel-streams .stream-list { grid-template-columns: minmax(0, 1fr); }
+.live-support-slot .live-channel-people {
+  --people-inset: 7px;
+  grid-area: auto;
+  border-color: var(--line);
+  border-radius: 11px;
+  background: var(--panel);
+}
+
+.live-support-slot .live-channel-people h3 { color: var(--muted); font-size: .77rem; font-weight: 650; }
+.live-support-slot .voice-panel[data-mode="inline"] { gap: 4px; }
+.live-support-slot .voice-heading { align-items: center; gap: 3px 5px; }
+.live-support-slot .voice-actions { gap: 4px; }
+.live-support-slot .voice-panel .voice-actions .button {
+  max-inline-size: 100%;
+  min-block-size: 31px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font-size: .74rem;
+  overflow-wrap: anywhere;
+}
+.live-support-slot .voice-actions .button.primary {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 29%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+.live-support-slot .voice-actions .button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 17%, var(--panel));
+}
+.live-support-slot .voice-panel .status { font-size: .76rem; line-height: 1.32; }
+.live-support-slot .voice-roster {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  max-block-size: 6rem;
+  scrollbar-width: thin;
+}
+.live-support-slot .voice-person { gap: 5px; padding: 3px; }
+.live-support-slot :is(.voice-person, .stream-identity) .avatar {
+  inline-size: 19px;
+  block-size: 19px;
+  border-radius: 6px;
+  font-size: .59rem;
+}
+
+.live-support-slot .live-channel-streams:not([hidden]) { gap: 3px; }
+.live-support-slot .stream-list { grid-template-columns: minmax(0, 1fr); gap: 3px; padding: 1px; }
+.live-support-slot .stream-pick {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-items: start;
+  align-items: center;
+  gap: 3px 5px;
+  min-block-size: 32px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  border-color: var(--line);
+  background: var(--raised);
+  font-size: .79rem;
+}
+.live-support-slot .stream-pick:hover:not(:disabled) { border-color: var(--line-strong); background: #2b2c3b; }
+.live-support-slot .stream-pick[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+}
+.live-support-slot :is(.stream-pick, .voice-actions .button):focus-visible { outline-offset: -2px; }
+.live-support-slot .stream-identity {
+  display: flow-root;
+  grid-column: 1 / -1;
+  inline-size: 100%;
+}
+.live-support-slot .stream-identity .avatar {
+  float: inline-start;
+  margin-inline-end: 5px;
+}
+.live-support-slot .watch-party-card-title { display: contents; }
+.live-support-slot .watch-party-card-title strong {
+  grid-column: 1 / -1;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.live-support-slot .watch-party-card-title small { font-size: .69rem; line-height: 1.25; }
+.live-support-slot .stream-pick[data-stream-id] .tag { margin-inline-start: 24px; }
+.live-support-slot .tag { padding: 1px 4px; gap: 4px; border-color: var(--line); font-size: .63rem; }
+.live-support-slot .tag.live { background: color-mix(in srgb, #fe8797 12%, var(--panel)); }
+.live-support-slot .tag.live::before { inline-size: 4px; block-size: 4px; }
+
+@container live-sidebar (width < 10rem) {
+  .live-support-slot .watch-party-card-title small { grid-column: 1 / -1; }
+  .live-support-slot .watch-party-tag { grid-column: 2; }
+}
+
+@media (pointer: coarse) {
+  .live-support-slot :is(.stream-pick, .voice-panel .voice-actions .button) { min-block-size: 40px; }
+}
 
 @container live-channel (width < 50rem) {
   .live-channel[data-support-sidebar][data-panel="people"] .live-channel-body {
