@@ -129,6 +129,7 @@
 .live-channel {
   container: live-channel / inline-size;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: clamp(7px, 1.35dvh, 13px);
   block-size: 100%;
