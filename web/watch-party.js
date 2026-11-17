@@ -79,7 +79,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   { class: "stream-pick watch-party-card", hidden: true, "aria-pressed": "false" });
   const title = el("h3");
   const statusNode = status();
-  const captionNotice = status();
   const media = el("div", { class: "watch-party-media", "data-watch-media": true });
   const enable = button(t("Enable playback on this device", "Wiedergabe auf diesem Gerät erlauben"), enablePlayback,
     { hidden: true });
@@ -95,7 +94,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     },
     onSeek: position => void change("seek", position),
     onVolume: level => surface?.setVolume(level),
-    onCaptions: enabled => surface?.setCaptions?.(enabled),
     fullscreenTarget: () => player,
   });
   const stopTitle = t("End watch party", "Watchparty beenden");
@@ -106,7 +104,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   const player = el("section", { class: "panel watch-party-player", hidden: true, "aria-label": playbackLabel },
     el("header", { class: "section-heading watch-party-heading" }, title, el("div", { class: "inline" }, stop, leave)),
     media,
-    el("div", { class: "watch-party-footer" }, controls.element, enable, statusNode, captionNotice));
+    el("div", { class: "watch-party-footer" }, controls.element, enable, statusNode));
 
   let sample;
   let hasSnapshot = false;
@@ -120,8 +118,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   let nativeIntent;
   let canShare = false;
   let canStop = false;
-  let captionsEnabled = false;
-  let captionsPending = false;
   let busy = false;
   let polling = false;
   let generation = 0;
@@ -183,12 +179,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     stop.hidden = end.hidden = !canEnd();
     stop.disabled = end.disabled = busy;
     controls.setTransport({ isPlaying: party?.playing, enabled: !busy && ready });
-    const captionsVisible = Boolean(selectedId && party?.source === "youtube");
-    controls.setCaptions({ visible: captionsVisible, enabled: captionsEnabled, pending: captionsVisible && !ready });
-    tell(captionNotice, captionsVisible && (captionsPending || captionsEnabled)
-      ? captionsPending ? t("Loading captions preference…", "Untertiteleinstellung wird geladen …")
-        : t("Captions requested when available.", "Untertitel angefragt, sofern verfügbar.")
-      : "");
     queue.update(sample?.queue, { visible: isReady, manage: canShare, pending: busy });
     if (selectedId) dockEntry?.activate(title.textContent, topicHref(room.id, channel.id, { watchId: party?.sessionId ?? selectedId }));
     view?.onChange?.();
@@ -198,7 +188,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     const previous = surface;
     surface = null;
     ready = false;
-    captionsPending = false;
     controls.resetPosition();
     appliedRevision = undefined;
     nativeIntent = undefined;
@@ -266,7 +255,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
   }
 
   function resetPlayer(party) {
-    captionsPending = false;
     tell(statusNode, t("Loading video…", "Video wird geladen …"));
     const current = () => selectedId === party.id && !signal.aborted;
     if (party.source === "youtube") {
@@ -274,18 +262,6 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       audience = createWatchViewerLease({ signal, report: options => reportWatchViewer(viewers, options, { accountId: user.id }) });
     }
     const handlers = {
-      captions: captionsEnabled,
-      onCaptionsChange({ enabled, pending }) {
-        if (!current()) return;
-        captionsEnabled = enabled;
-        captionsPending = pending;
-        if (pending) {
-          ready = false;
-          appliedRevision = undefined;
-          nativeIntent = undefined;
-        }
-        render();
-      },
       onReady() {
         if (!current()) return;
         ready = true;

@@ -4,12 +4,11 @@ const connectionInterval = 250;
 const connectionTimeout = 18_000;
 const numeric = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-export function createYoutubePlayer(videoId, {
-  captions = false, onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onTitle, onVisibility, onCaptionsChange,
-} = {}) {
+export function createYoutubePlayer(videoId, { onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onTitle, onVisibility } = {}) {
   if (typeof videoId !== "string" || !videoIdPattern.test(videoId)) throw new Error("Invalid YouTube video ID");
 
   const element = document.createElement("iframe");
+  element.id = "rooms-youtube-" + crypto.randomUUID();
   element.className = "watch-youtube-frame";
   element.title = "YouTube";
   element.width = "560";
@@ -18,7 +17,8 @@ export function createYoutubePlayer(videoId, {
   element.setAttribute("allow", "autoplay; encrypted-media; fullscreen");
   element.setAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox");
   const url = new URL("/embed/" + videoId, youtube);
-  url.search = new URLSearchParams({ enablejsapi: 1, origin: location.origin, playsinline: 1, controls: 0 });
+  // Keep YouTube's native subtitle toggle available to each viewer.
+  url.search = new URLSearchParams({ enablejsapi: 1, origin: location.origin, playsinline: 1, controls: 1 });
 
   let ready = false;
   let destroyed = false;
@@ -34,10 +34,6 @@ export function createYoutubePlayer(videoId, {
   let expectedTransport;
   let ignoreSeekUntil = 0;
   let reportedTitle = false;
-  let captionsEnabled = Boolean(captions);
-  let reloadingCaptions = false;
-  let connecting;
-  let failed;
 
   // Keep the provider's JavaScript in its own origin, outside the Rooms renderer.
   function send(message) {
@@ -86,9 +82,7 @@ export function createYoutubePlayer(videoId, {
   observer.observe(element);
 
   function updateVisibility() {
-    // A local captions reload does not leave the party. Still release the lease
-    // if the viewer actually hides the player or stops loading it.
-    const next = (ready || reloadingCaptions) && visible && nativeVisible && !document.hidden;
+    const next = ready && visible && nativeVisible && !document.hidden;
     if (next === presenting) return;
     presenting = next;
     wantsPlayback = false;
@@ -141,10 +135,6 @@ export function createYoutubePlayer(videoId, {
         applySeek();
         updateVisibility();
         onReady?.();
-        if (reloadingCaptions) {
-          reloadingCaptions = false;
-          onCaptionsChange?.({ enabled: captionsEnabled, pending: false });
-        }
         applyPlayback();
         break;
       case "initialDelivery":
@@ -172,46 +162,12 @@ export function createYoutubePlayer(videoId, {
   }
 
   window.addEventListener("message", receive);
-
-  function loadFrame() {
+  element.src = url.href;
+  const connecting = setInterval(() => send({ event: "listening" }), connectionInterval);
+  const failed = setTimeout(() => {
     clearInterval(connecting);
-    clearTimeout(failed);
-    element.id = "rooms-youtube-" + crypto.randomUUID();
-    // The public IFrame API can change captions font size or reload caption data.
-    // For requesting captions, use YouTube's documented embed parameter.
-    if (captionsEnabled) url.searchParams.set("cc_load_policy", "1");
-    else url.searchParams.delete("cc_load_policy");
-    element.src = url.href;
-    connecting = setInterval(() => send({ event: "listening" }), connectionInterval);
-    failed = setTimeout(() => {
-      clearInterval(connecting);
-      if (reloadingCaptions) {
-        reloadingCaptions = false;
-        updateVisibility();
-        onCaptionsChange?.({ enabled: captionsEnabled, pending: false });
-      }
-      onError?.(null);
-    }, connectionTimeout);
-  }
-
-  function setCaptions(enabled) {
-    if (destroyed || !ready || reloadingCaptions || Boolean(enabled) === captionsEnabled) return false;
-    captionsEnabled = Boolean(enabled);
-    reloadingCaptions = true;
-    ready = false;
-    state = -1;
-    position = 0;
-    duration = 0;
-    pendingSeek = undefined;
-    expectedTransport = null;
-    ignoreSeekUntil = 0;
-    wantsPlayback = false;
-    onCaptionsChange?.({ enabled: captionsEnabled, pending: true });
-    loadFrame();
-    return true;
-  }
-
-  loadFrame();
+    onError?.(null);
+  }, connectionTimeout);
 
   return {
     element,
@@ -238,7 +194,6 @@ export function createYoutubePlayer(videoId, {
       volume = Math.min(value, 1);
       applyVolume();
     },
-    setCaptions,
     getTime: () => position,
     getDuration: () => duration,
     isPaused: () => state !== 1 && state !== 3,

@@ -77,7 +77,6 @@
 .watch-party-time { color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
 .watch-audio { display: flex; align-items: center; gap: 5px; min-inline-size: 0; }
 .watch-audio input { inline-size: clamp(45px, 11vw, 102px); }
-.watch-captions-icon { padding: 1px 3px; border: 1px solid currentColor; border-radius: 4px; font-size: .72rem; font-weight: 750; }
 .watch-actions .button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .live-channel-watch .watch-party-heading { display: none; }
 .live-channel-watch .watch-party-player:not(:fullscreen):not([data-watch-cinema]) {

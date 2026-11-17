@@ -33,7 +33,7 @@ function timeLabel(seconds) {
   return minutes + ":" + String(whole % 60).padStart(2, "0");
 }
 
-export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCaptions, fullscreenTarget, muted = false }) {
+export function createWatchControls({ signal, onToggle, onSeek, onVolume, fullscreenTarget, muted = false }) {
   let scrubbing = false;
   let position = 0;
   let duration;
@@ -43,7 +43,6 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCapt
   let media;
   let inFullscreen = false;
   let inCinema = false;
-  let captionsEnabled = false;
   let idleTimer;
   const dragging = new Set();
   const icon = item("span", "watch-play-icon");
@@ -60,11 +59,6 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCapt
     volumeChanged();
   }, signal);
   const audio = item("div", "watch-audio", [mute, level]);
-  const captions = button("ghost watch-captions-button", () => onCaptions?.(!captionsEnabled), signal);
-  const cc = item("span", "watch-captions-icon", ["CC"]);
-  cc.setAttribute("aria-hidden", "true");
-  captions.append(cc);
-  captions.hidden = true;
   const cinemaButton = button("ghost watch-cinema-button", () => cinema.toggle(), signal);
   cinemaButton.hidden = true;
   const fullscreen = button("ghost icon-button watch-fullscreen", toggleFullscreen, signal);
@@ -73,7 +67,7 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCapt
   expand.setAttribute("aria-hidden", "true");
   fullscreen.append(expand);
   const transport = item("div", "watch-party-transport", [toggle,
-    item("div", "watch-actions", [cinemaButton, captions, audio, fullscreen]),
+    item("div", "watch-actions", [cinemaButton, audio, fullscreen]),
   ]);
   const reveal = button("watch-fullscreen-reveal", event => {
     wake();
@@ -96,11 +90,6 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCapt
     progress.setAttribute("aria-label", t("Playback position for everyone", "Wiedergabeposition für alle"));
     level.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
     mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
-    captions.title = captionsEnabled
-      ? t("Use YouTube’s subtitle preference", "YouTubes Untertiteleinstellung verwenden")
-      : t("Show subtitles when available", "Untertitel anzeigen, wenn verfügbar");
-    captions.setAttribute("aria-label", t("Request YouTube subtitles", "YouTube-Untertitel anfordern"));
-    captions.setAttribute("aria-pressed", String(captionsEnabled));
     cinemaButton.textContent = t("Cinema", "Kino");
     cinemaButton.title = inCinema ? t("Exit cinema mode", "Kinomodus verlassen") : t("Cinema mode", "Kinomodus");
     cinemaButton.setAttribute("aria-label", cinemaButton.title);
@@ -219,12 +208,6 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCapt
     element, audio, setFullscreenSurface,
     refreshLabels,
     volume: () => Number(level.value) / 100,
-    setCaptions({ visible = false, enabled = false, pending = false } = {}) {
-      captionsEnabled = enabled;
-      captions.hidden = !visible;
-      captions.disabled = pending;
-      refreshLabels();
-    },
     setTransport({ isPlaying = false, enabled = false, shared = true } = {}) {
       playing = isPlaying;
       toggle.disabled = !enabled;

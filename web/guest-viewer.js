@@ -75,7 +75,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
           <div class="watch-party-footer">
             <p class="status guest-playback-status" role="status" hidden></p>
             <p class="status guest-command-status" role="status" hidden></p>
-            <p class="status guest-caption-status" role="status" hidden></p>
             <button class="button primary guest-play" type="button" hidden></button>
           </div>
         </section></div>
@@ -114,7 +113,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   const waiting = find(".guest-waiting");
   const playbackStatus = find(".guest-playback-status");
   const commandStatus = find(".guest-command-status");
-  const captionNotice = find(".guest-caption-status");
   const play = find(".guest-play");
   const controls = createWatchControls({
     signal, muted: true,
@@ -130,7 +128,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     },
     onSeek: position => void change("seek", position),
     onVolume: level => playing?.surface.setVolume(level),
-    onCaptions: enabled => playing?.surface.setCaptions?.(enabled),
     fullscreenTarget: () => player,
   });
   find(".watch-party-footer").prepend(controls.element);
@@ -147,8 +144,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   queueTab.addEventListener("click", () => showPane("queue"), { signal });
 
   let gateState = "opening";
-  let captionsEnabled = false;
-  let captionsPending = false;
   let playbackState;
   let commandState;
   let timer;
@@ -182,7 +177,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     setText(waiting, copy("waiting"));
     setText(playbackStatus, copy(playbackState));
     setText(commandStatus, copy(commandState));
-    renderCaptions();
     play.textContent = playbackState === "playbackError" ? t("Retry playback", "Wiedergabe erneut versuchen")
       : t("Enable playback", "Wiedergabe erlauben");
   }
@@ -216,13 +210,11 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   function discardMedia(keepFullscreen = false) {
     const old = playing;
     playing = undefined;
-    captionsPending = false;
     old?.audience?.stop();
     old?.surface.destroy();
     if (!keepFullscreen) controls.setFullscreenSurface(null);
     clearInterval(clock);
     controls.resetPosition();
-    renderCaptions();
     controls.element.hidden = true;
     waiting.hidden = false;
     live.hidden = true;
@@ -297,15 +289,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       shared: watch?.source.kind !== "screen",
     });
     controls.audio.hidden = !watch?.source.hasAudio;
-    renderCaptions();
-  }
-
-  function renderCaptions() {
-    const visible = playing?.kind === "youtube";
-    controls.setCaptions({ visible, enabled: captionsEnabled, pending: visible && !playing.ready });
-    captionNotice.hidden = !(visible && (captionsPending || captionsEnabled));
-    setText(captionNotice, captionsPending ? t("Loading captions preference…", "Untertiteleinstellung wird geladen …")
-      : t("Captions requested when available.", "Untertitel angefragt, sofern verfügbar."));
   }
 
   function startPlayback() {
@@ -320,20 +303,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     }
     const active = () => playing === current && !signal.aborted;
     current.surface = openGuestMedia(source, {
-      captions: captionsEnabled,
-      onCaptionsChange({ enabled, pending }) {
-        if (!active()) return;
-        captionsEnabled = enabled;
-        captionsPending = pending;
-        if (pending) {
-          current.ready = false;
-          current.started = false;
-          current.revision = undefined;
-          nativeIntent = undefined;
-          setPlayback("loading");
-        }
-        renderTransport();
-      },
       onReady() {
         if (!active()) return;
         current.ready = true;
