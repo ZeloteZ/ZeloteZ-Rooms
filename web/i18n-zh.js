@@ -3,6 +3,7 @@ import account from "./i18n-zh-account.js";
 // English source text is the shared message key. Keep named placeholders unchanged.
 export default Object.freeze({
   ...account,
+  "Get the Client": "获取客户端",
   "Downloads": "下载",
   "Make the AppImage executable, then open it.": "为 AppImage 添加执行权限，然后打开它。",
   "Run the installer to install Rooms.": "运行安装程序以安装 Rooms。",

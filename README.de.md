@@ -68,7 +68,7 @@ Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 
 Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer und Linux-AppImage.
 
-Melde dich im Browser bei Rooms an und wähle **Downloads** neben deinem Profilbild. Die Seite schlägt einen Installer für dein System vor. Für x64 stehen ein Linux-AppImage und ein Windows-Installer zur Auswahl.
+Melde dich im Browser bei Rooms an und wähle **Get the Client** neben deinem Profilbild. Die Seite schlägt einen Installer für dein System vor. Für x64 stehen ein Linux-AppImage und ein Windows-Installer zur Auswahl.
 
 Updatehinweise sind optional. In den Desktop-Einstellungen kannst du sie einschalten und das Prüfintervall festlegen. Die App fragt deine geprüfte Rooms-Instanz nach der bereitgestellten Version und öffnet deren Downloadseite im Browser.
 

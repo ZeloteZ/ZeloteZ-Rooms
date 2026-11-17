@@ -13,16 +13,22 @@
 .download-card > .button { margin-block-start: auto; inline-size: 100%; }
 .download-card > p { overflow-wrap: anywhere; }
 
-.downloads-link { gap: 6px; margin-inline-end: -4px; }
-.download-glyph { font-size: 1.1rem; line-height: 1; }
+.downloads-link {
+  flex: none;
+  min-block-size: 30px;
+  margin-inline-end: -4px;
+  padding: 4px 8px;
+  border-color: var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: .76rem;
+  white-space: nowrap;
+}
 
 @media (max-width: 740px) {
   .download-cards { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .download-card { padding: 16px; gap: 10px; }
-}
-@media (max-width: 1120px) {
-  .downloads-link .download-label { display: none; }
-  .downloads-link { min-inline-size: 34px; min-block-size: 34px; padding: 4px 7px; }
 }
 @media (max-width: 445px) {
   .downloads-link { margin-inline-end: 0; }
