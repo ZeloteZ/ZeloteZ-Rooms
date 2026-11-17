@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, Notification, Tray, WebContentsView, desktopCa
 const { mkdir, readFile, rename, rm, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { installAudio } = require("./audio.cjs");
+const { installAudio, audioArguments } = require("./audio.cjs");
 const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { detachedVideo } = require("./detached-video.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
@@ -724,7 +724,7 @@ function prepareRoomsWindow(origin) {
     webPreferences: {
       session: media, preload: path.join(__dirname, "rooms-preload.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false,
-      additionalArguments: [...(login ? ["--rooms-remember-login"] : []), ...(captureProgram ? ["--rooms-native-capture",
+      additionalArguments: [...audioArguments(), ...(login ? ["--rooms-remember-login"] : []), ...(captureProgram ? ["--rooms-native-capture",
         ...(captureProgram.embedded ? ["--rooms-embedded-preview"] : [])] : [])],
     },
   });

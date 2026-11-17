@@ -52,6 +52,10 @@ export function prepareDesktopAudio(signal) {
       throw new Error(t("Desktop audio needs the running PipeWire service and the pw-record and pw-dump tools.",
         "Für Desktop-Ton müssen PipeWire laufen und die Programme pw-record und pw-dump installiert sein."));
     }
+    if (result === "windows") {
+      throw new Error(t("Windows audio capture could not start. Try another audio source or share without audio.",
+        "Die Windows-Tonaufnahme konnte nicht starten. Wähle eine andere Tonquelle oder teile ohne Ton."));
+    }
     throw new Error(t("The selected audio output is unavailable.", "Die ausgewählte Tonquelle ist offline."));
   };
 }

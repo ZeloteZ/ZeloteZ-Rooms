@@ -58,7 +58,8 @@ if (process.isMainFrame && process.argv.includes("--rooms-native-capture")) {
   contextBridge.exposeInMainWorld("roomsNativeCapture", capture);
 }
 
-if (process.isMainFrame && process.platform === "linux") {
+if (process.isMainFrame && (process.platform === "linux" ||
+    (process.platform === "win32" && process.argv.includes("--rooms-windows-audio")))) {
   const callbacks = new Map();
   ipcRenderer.on("rooms:audio-data", (_event, id, pcm) => callbacks.get(id)?.data(pcm));
   ipcRenderer.on("rooms:audio-ended", (_event, id) => {
@@ -67,6 +68,8 @@ if (process.isMainFrame && process.platform === "linux") {
     active?.end();
   });
   contextBridge.exposeInMainWorld("roomsDesktopAudio", {
+    supportedModes: Object.freeze(process.platform === "linux" || process.argv.includes("--rooms-windows-application-audio")
+      ? ["application", "system"] : ["system"]),
     async open(id, mode, data, end) {
       callbacks.set(id, { data, end });
       try {

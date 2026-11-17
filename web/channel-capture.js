@@ -7,10 +7,14 @@ export function createChannelCapture({ room, screenShare, nativeBroadcast }, cha
   const native = window.roomsNativeCapture;
   const browser = !legacy && !native;
   const portable = browser && window.roomsDesktop === true ? desktopShareControls() : null;
-  const portableAudio = portable && window.roomsDesktopAudio ? select([
+  const audioBridge = window.roomsDesktopAudio;
+  const audioModes = Array.isArray(audioBridge?.supportedModes) ? audioBridge.supportedModes : ["application", "system"];
+  const portableAudio = portable && audioBridge ? select([
     ["none", t("No audio", "Kein Ton")],
-    ["application", t("Application audio", "Anwendungston")],
-    ["system", t("System audio", "Systemton")],
+    ...[
+      ["application", t("Application audio", "Anwendungston")],
+      ["system", t("System audio", "Systemton")],
+    ].filter(([mode]) => audioModes.includes(mode)),
   ], "none") : null;
   if (portable) portable.element.hidden = false;
   if (portableAudio) portable.element.append(field(t("Stream audio", "Streamton"), portableAudio));

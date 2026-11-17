@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const { readFileSync, readdirSync } = require("node:fs");
 const { createRequire } = require("node:module");
@@ -12,6 +13,13 @@ const { extractFile, getRawHeader } = projectRequire("@electron/asar");
 const { getCurrentFuseWire, FuseV1Options } = projectRequire("@electron/fuses");
 const manifest = projectRequire("./package.json");
 const [platform, unpacked] = process.argv.slice(2);
+
+function verifyWindowsExecutable(binary, description) {
+  assert.equal(binary.toString("ascii", 0, 2), "MZ");
+  const offset = binary.readUInt32LE(0x3c);
+  assert.equal(binary.toString("ascii", offset, offset + 4), "PE\0\0");
+  assert.equal(binary.readUInt16LE(offset + 4), 0x8664, `${description} must be Windows x64`);
+}
 
 async function verify() {
   assert(["linux", "win32"].includes(platform), "Specify linux or win32 and the unpacked application directory");
@@ -40,10 +48,16 @@ async function verify() {
   }
 
   if (platform === "win32") {
-    assert.equal(binary.toString("ascii", 0, 2), "MZ");
-    const offset = binary.readUInt32LE(0x3c);
-    assert.equal(binary.toString("ascii", offset, offset + 4), "PE\0\0");
-    assert.equal(binary.readUInt16LE(offset + 4), 0x8664, "The application must be Windows x64");
+    verifyWindowsExecutable(binary, "The application");
+    const helper = path.resolve(unpacked, "resources/windows-audio/rooms-windows-audio.exe");
+    const helperBinary = readFileSync(helper);
+    verifyWindowsExecutable(helperBinary, "The audio helper");
+    assert.deepEqual(helperBinary, readFileSync(path.join(portable, "windows-audio/rooms-windows-audio.exe")));
+    if (process.platform === "win32") {
+      assert.equal(execFileSync(helper, ["--version"], {
+        encoding: "utf8", timeout: 5000, windowsHide: true,
+      }).trim(), "rooms-windows-audio 1");
+    }
     const { NtExecutable, NtExecutableResource } = projectRequire("resedit");
     const resources = NtExecutableResource.from(NtExecutable.from(binary));
     const integrity = resources.entries.find(entry => entry.type === "INTEGRITY" && entry.id === "ELECTRONASAR");

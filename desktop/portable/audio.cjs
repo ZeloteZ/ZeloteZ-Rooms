@@ -3,11 +3,13 @@
 const { execFile, spawn } = require("node:child_process");
 const { promisify } = require("node:util");
 const { ipcMain } = require("electron");
+const { createWindowsAudio } = require("./windows-audio.cjs");
 
 const run = promisify(execFile);
 const sessions = new Map();
 const modes = { application: "Stream/Output/Audio", system: "Audio/Sink" };
 const token = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
+const windowsAudio = createWindowsAudio();
 
 async function outputs(mode) {
   const { stdout } = await run("pw-dump", [], { timeout: 3000, maxBuffer: 8 * 1024 * 1024 });
@@ -46,6 +48,21 @@ function requestSession(event) {
   return { session, frame };
 }
 
+const linuxAudio = {
+  modes: ["application", "system"],
+  error: "pipewire",
+  outputs,
+  record(mode, selected) {
+    return spawn("pw-record", [
+      "--raw", "--format", "s16", "--channels", "2", "--rate", "48000", "--latency", "20ms", "--target", selected.serial,
+      "--properties", JSON.stringify({
+        "node.dont-fallback": true, "node.dont-move": true, "node.dont-reconnect": true, "stream.restore-target": false,
+        "stream.capture.sink": mode === "system",
+      }), "-",
+    ], { stdio: ["ignore", "pipe", "ignore"] });
+  },
+};
+
 function recordAudio(session, recording, frame, mode, selected) {
   return new Promise(resolve => {
     let pending = true;
@@ -57,13 +74,7 @@ function recordAudio(session, recording, frame, mode, selected) {
       clearTimeout(timer);
       resolve(result);
     };
-    const child = spawn("pw-record", [
-      "--raw", "--format", "s16", "--channels", "2", "--rate", "48000", "--latency", "20ms", "--target", selected.serial,
-      "--properties", JSON.stringify({
-        "node.dont-fallback": true, "node.dont-move": true, "node.dont-reconnect": true, "stream.restore-target": false,
-        "stream.capture.sink": mode === "system",
-      }), "-",
-    ], { stdio: ["ignore", "pipe", "ignore"] });
+    const child = session.backend.record(mode, selected);
     recording.child = child;
     function send(channel, ...payload) {
       if (frame.detached || !session.allowed(frame.url)) return false;
@@ -81,7 +92,7 @@ function recordAudio(session, recording, frame, mode, selected) {
       dispose(session);
     }
     timer = setTimeout(() => end("unavailable"), 4500);
-    child.once("error", () => end("pipewire"));
+    child.once("error", () => end(session.backend.error));
     child.once("close", () => end("unavailable"));
     child.stdout.on("data", packet => {
       if (session.recording !== recording) return;
@@ -101,7 +112,7 @@ function recordAudio(session, recording, frame, mode, selected) {
 
 ipcMain.handle("rooms:audio-open", async (event, id, mode) => {
   const request = requestSession(event);
-  if (!request || typeof id !== "string" || !token.test(id) || typeof mode !== "string" || !Object.hasOwn(modes, mode)) {
+  if (!request || typeof id !== "string" || id.length !== 36 || !token.test(id) || typeof mode !== "string" || !request.session.backend.modes.includes(mode)) {
     return "unavailable";
   }
   const { session, frame } = request;
@@ -111,20 +122,20 @@ ipcMain.handle("rooms:audio-open", async (event, id, mode) => {
   session.recording = recording;
   const current = () => session.recording === recording && requestSession(event)?.frame === frame;
   try {
-    const choices = await outputs(mode);
+    const choices = await session.backend.outputs(mode);
     if (!current()) return "cancelled";
     if (!choices.length) return "empty";
     const picker = session.choose(mode, choices);
     recording.picker = picker.window;
     const selected = await picker.result;
     if (!current() || !selected) return "cancelled";
-    const fresh = (await outputs(mode)).some(candidate =>
+    const fresh = (await session.backend.outputs(mode)).some(candidate =>
       candidate.serial === selected.serial && candidate.identity === selected.identity);
     if (!current()) return "cancelled";
     if (!fresh) return "unavailable";
     return await recordAudio(session, recording, frame, mode, selected);
   } catch {
-    return "pipewire";
+    return session.backend.error;
   } finally {
     if (session.recording === recording && !recording.child) dispose(session);
   }
@@ -137,8 +148,9 @@ ipcMain.handle("rooms:audio-close", (event, id) => {
 
 function installAudio(web, allowed, choose) {
   const id = web.id;
-  const session = { allowed, choose, approvedUntil: 0, recording: null };
-  if (process.platform === "linux") sessions.set(id, session);
+  const backend = process.platform === "linux" ? linuxAudio : windowsAudio;
+  const session = { allowed, choose, backend, approvedUntil: 0, recording: null };
+  if (backend) sessions.set(id, session);
   function revoke() {
     session.approvedUntil = 0;
     dispose(session);
@@ -154,4 +166,9 @@ function installAudio(web, allowed, choose) {
   return () => { session.approvedUntil = Date.now() + 180_000; };
 }
 
-module.exports = { installAudio };
+function audioArguments() {
+  if (!windowsAudio) return [];
+  return ["--rooms-windows-audio", ...(windowsAudio.modes.includes("application") ? ["--rooms-windows-application-audio"] : [])];
+}
+
+module.exports = { installAudio, audioArguments };
