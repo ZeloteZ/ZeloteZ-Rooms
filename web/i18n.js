@@ -1,23 +1,28 @@
+import chinese from "./i18n-zh.js";
+
 const preference = "zelotez-rooms-language";
 
 export const languages = Object.freeze([
   Object.freeze({ id: "en", label: "English", tag: "en-US" }),
   Object.freeze({ id: "de", label: "Deutsch", tag: "de-DE" }),
+  Object.freeze({ id: "zh-CN", label: "简体中文", tag: "zh-CN" }),
 ]);
 
-// A completed locale can be registered above and supply a catalog keyed by the English source text.
-const catalogs = Object.freeze({ zh: Object.freeze({}) });
+const catalogs = Object.freeze({ "zh-CN": chinese });
 
 function supported(id) {
-  return languages.some(language => language.id === id);
+  if (typeof id !== "string") return null;
+  const value = id.toLowerCase().replaceAll("_", "-");
+  if (["zh", "zh-cn", "zh-hans", "zh-sg", "zh-hans-cn", "zh-hans-sg"].includes(value)) return "zh-CN";
+  return languages.find(language => language.id === value)?.id ?? null;
 }
 
 export function language() {
-  const override = new URL(location.href).searchParams.get("lang");
-  if (supported(override)) return override;
+  const override = supported(new URL(location.href).searchParams.get("lang"));
+  if (override) return override;
   try {
-    const saved = localStorage.getItem(preference);
-    if (supported(saved)) return saved;
+    const saved = supported(localStorage.getItem(preference));
+    if (saved) return saved;
   } catch {
     // Storage can be disabled.
   }
@@ -29,17 +34,18 @@ export function locale() {
 }
 
 export function setLanguage(id) {
-  if (!supported(id)) return;
+  const selected = supported(id);
+  if (!selected) return;
   const url = new URL(location.href);
   let stored = false;
   try {
-    localStorage.setItem(preference, id);
+    localStorage.setItem(preference, selected);
     stored = true;
   } catch {
     // Fall back to the URL when the browser does not allow persistent preferences.
   }
   if (!stored || url.searchParams.has("lang")) {
-    url.searchParams.set("lang", id);
+    url.searchParams.set("lang", selected);
     history.replaceState(history.state, "", url);
   }
 }

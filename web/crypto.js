@@ -5,7 +5,11 @@ window.ClubCrypto = (() => {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const subtle = crypto.subtle;
   const suite = "zelotez-live/1";
-  const errorText = (en, de) => globalThis.document?.documentElement?.lang === "de" ? de : en;
+  const errorText = (en, de, zh) => {
+    const language = globalThis.document?.documentElement?.lang;
+    if (language === "de") return de;
+    return language === "zh-CN" ? zh : en;
+  };
   const curve = { name: "ECDH", namedCurve: "P-256" };
   const cacheName = `${suite}/vault`;
   const pinnedKeys = new Map();
@@ -23,7 +27,7 @@ window.ClubCrypto = (() => {
   }
 
   function binary(value) {
-    if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error(errorText("Invalid key or content.", "Ungültiger Schlüssel oder Inhalt."));
+    if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error(errorText("Invalid key or content.", "Ungültiger Schlüssel oder Inhalt.", "密钥或内容无效。"));
     return Uint8Array.from(atob(value.replaceAll("-", "+").replaceAll("_", "/")), char => char.charCodeAt(0));
   }
 
@@ -53,7 +57,7 @@ window.ClubCrypto = (() => {
 
   function publicPoint({ kty, crv, x, y }) {
     if (kty !== "EC" || crv !== "P-256" || binary(x).length !== 32 || binary(y).length !== 32) {
-      throw new Error(errorText("The public key is invalid.", "Der öffentliche Schlüssel ist ungültig."));
+      throw new Error(errorText("The public key is invalid.", "Der öffentliche Schlüssel ist ungültig.", "公钥无效。"));
     }
     return { kty, crv, x, y };
   }
@@ -68,7 +72,7 @@ window.ClubCrypto = (() => {
     } catch {
       // Browsers with disabled storage keep keys only for the current tab.
     }
-    if (previous && previous !== fingerprint) throw new Error(errorText("A member’s key has changed.", "Der Schlüssel eines Mitglieds hat sich geändert."));
+    if (previous && previous !== fingerprint) throw new Error(errorText("A member’s key has changed.", "Der Schlüssel eines Mitglieds hat sich geändert.", "一位成员的密钥已更改。"));
     pinnedKeys.set(userId, fingerprint);
   }
 
@@ -91,12 +95,12 @@ window.ClubCrypto = (() => {
   }
 
   async function unwrapIdentity(user, pub, vault) {
-    if (user.identity?.v !== 1) throw new Error(errorText("Unknown key.", "Unbekannter Schlüssel."));
+    if (user.identity?.v !== 1) throw new Error(errorText("Unknown key.", "Unbekannter Schlüssel.", "未知密钥。"));
     const secret = new Uint8Array(await subtle.decrypt(aead(binary(user.identity.nonce), aad("identity", pub.x, pub.y)),
       await aesKey(vault), binary(user.identity.blob)));
     try {
       const jwk = JSON.parse(decoder.decode(secret));
-      if (jwk.x !== pub.x || jwk.y !== pub.y) throw new Error(errorText("Wrong key.", "Falscher Schlüssel."));
+      if (jwk.x !== pub.x || jwk.y !== pub.y) throw new Error(errorText("Wrong key.", "Falscher Schlüssel.", "密钥错误。"));
       return jwk;
     } finally {
       secret.fill(0);
@@ -110,7 +114,7 @@ window.ClubCrypto = (() => {
     try {
       secret = await unwrapIdentity(user, pub, await expand(previous.material, previous.salt, "identity"));
     } catch {
-      throw new Error(errorText("The previous password could not unlock the chat key.", "Das bisherige Passwort konnte den Chatschlüssel nicht entsperren."));
+      throw new Error(errorText("The previous password could not unlock the chat key.", "Das bisherige Passwort konnte den Chatschlüssel nicht entsperren.", "原密码无法解锁聊天密钥。"));
     }
     const next = await accountMaterial(user.username, newPassword);
     const [login, vault] = await Promise.all([
@@ -168,7 +172,7 @@ window.ClubCrypto = (() => {
   }
 
   async function sealMessage(channelId, messageId, content, recipients) {
-    if (!active || !recipients.some(({ id }) => id === active.id)) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+    if (!active || !recipients.some(({ id }) => id === active.id)) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
     const pair = await subtle.generateKey(curve, true, ["deriveBits"]);
     const ephemeral = publicPoint(await subtle.exportKey("jwk", pair.publicKey));
     const rawKey = crypto.getRandomValues(new Uint8Array(32));
@@ -190,7 +194,7 @@ window.ClubCrypto = (() => {
 
   async function wrapHistoryKey(channelId, entry, recipient, routeChannelId) {
     const identity = active;
-    if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+    if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
     const pub = publicPoint(recipient.publicKey);
     const link = aad("history recipient", channelId, entry.id, recipient.id, identity.id);
     const source = entry.grantorId ? aad("history recipient", channelId, entry.id, identity.id, entry.grantorId)
@@ -204,14 +208,14 @@ window.ClubCrypto = (() => {
         reportHistoryFailure(identity, channelId, entry.id, entry.grantRevision, error, routeChannelId);
         throw error;
       }
-      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
       pin(recipient.id, pub);
       const pair = await subtle.generateKey(curve, true, ["deriveBits"]);
       const ephemeral = publicPoint(await subtle.exportKey("jwk", pair.publicKey));
       const wrap = await recipientKey(pair.privateKey, pub, link);
       const iv = nonce();
       const blob = await subtle.encrypt(aead(iv, link), wrap, rawKey);
-      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
       return { v: 1, ephemeral, nonce: base64(iv), blob: base64(blob) };
     } finally {
       rawKey?.fill(0);
@@ -239,11 +243,11 @@ window.ClubCrypto = (() => {
 
   async function openMessage(channelId, messageId, envelope, routeChannelId) {
     const identity = active;
-    if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+    if (!identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
     const original = envelope?.keys?.[identity.id];
     const grant = envelope?.historyGrant;
     if (!original && !grant) return null;
-    if (envelope.v !== 1 || (!original && grant.v !== 1)) throw new Error(errorText("Unknown message format.", "Unbekanntes Nachrichtenformat."));
+    if (envelope.v !== 1 || (!original && grant.v !== 1)) throw new Error(errorText("Unknown message format.", "Unbekanntes Nachrichtenformat.", "未知消息格式。"));
     const link = original ? aad("recipient", channelId, messageId, identity.id)
       : aad("history recipient", channelId, messageId, identity.id, grant.grantorId);
     let rawKey;
@@ -253,7 +257,7 @@ window.ClubCrypto = (() => {
         aesKey(rawKey), subtle.importKey("raw", rawKey, "HKDF", false, ["deriveKey"]),
       ]);
       const content = await subtle.decrypt(aead(binary(envelope.nonce), aad("message", channelId, messageId)), key, binary(envelope.body));
-      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut."));
+      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
       reactionKeys.set(key, reactionKey);
       return { content: JSON.parse(decoder.decode(content)), key };
     } catch (error) {
@@ -281,7 +285,7 @@ window.ClubCrypto = (() => {
   async function sealReaction(key, scope, messageId, userId, emoji) {
     const text = encoder.encode(emoji);
     const padded = new Uint8Array(32);
-    if (!text.length || text.length > padded.length) throw new Error(errorText("Invalid reaction.", "Ungültige Reaktion."));
+    if (!text.length || text.length > padded.length) throw new Error(errorText("Invalid reaction.", "Ungültige Reaktion.", "回应无效。"));
     padded.set(text);
     const signer = await subtle.deriveKey({
       name: "HKDF", hash: "SHA-256", salt: aad("reaction ids", scope, messageId), info: aad("reaction id"),

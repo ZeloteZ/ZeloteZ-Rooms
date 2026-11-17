@@ -65,7 +65,7 @@ export function createLivePlayer(context, dock) {
   const node = el("section", { class: "panel live-player stack", hidden: true, "aria-label": t("Stream player", "Stream-Player") },
     el("div", { class: "section-heading player-heading" }, heading, el("div", { class: "inline" }, playbackMode, sound, returnLink, close)),
     el("div", { class: "stage" }, video, overlay));
-  const dockLabel = el("span", {}, "Stream");
+  const dockLabel = el("span", {}, t("Stream", "Stream"));
   const summary = el("summary", { class: "button" }, dockLabel);
   const popover = el("div", { class: "stream-popover" }, node);
   const details = el("details", { class: "stream-dock", name: "header-media" }, summary, popover);
@@ -156,7 +156,7 @@ export function createLivePlayer(context, dock) {
       const person = streamer(selected.stream);
       heading.replaceChildren(personMark(person), el("span", {}, personName(person), t(" is streaming", " streamt")));
       returnLink.href = topicHref(selected.topic.id, selected.channel.id);
-      dockLabel.textContent = "Stream · " + person.displayName;
+      dockLabel.textContent = t("Stream", "Stream") + " · " + person.displayName;
       summary.title = person.displayName + " · " + selected.topic.title + " · " + selected.channel.title;
       summary.setAttribute("aria-label", t("Stream by {name} · {channel}", "Stream von {name} · {channel}",
         { name: person.displayName, channel: selected.channel.title }));
@@ -738,7 +738,7 @@ export function renderLive(context, channel, player, voiceMount, playerMount = e
       const person = streamer(stream);
       return button([
         el("span", { class: "stream-identity" }, personMark(person), personName(person)),
-        el("span", { class: className }, stream.live ? "Live" : t("Waiting", "Wartet")),
+        el("span", { class: className }, stream.live ? t("Live", "Live") : t("Waiting", "Wartet")),
       ], () => {
         destination = null;
         if (feedback.textContent === unavailableNote) tell(feedback, "");

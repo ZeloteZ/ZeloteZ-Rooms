@@ -47,11 +47,11 @@ let currentOrigin = "";
 let desktopSettings = { language: "system", appearance: "dark", notifications: true, keepRunning: true, suppressCloseHint: false,
   origin: "", updateChecks: false, updateInterval: "24", updateIntroSeen: false, updateLastCheckedAt: 0, updateNotified: "" };
 let settingsWrites = Promise.resolve();
-let german = false;
+let language = "en";
 let captureProgram;
 let pendingShare = shareLinkFromArguments(process.argv, serverOrigin);
-const text = (en, de) => german ? de : en;
-const preferenceOptions = { language: ["system", "en", "de"], appearance: ["dark", "system", "light"],
+const text = (en, de, zh) => language === "zh-CN" ? zh : language === "de" ? de : en;
+const preferenceOptions = { language: ["system", "en", "de", "zh-CN"], appearance: ["dark", "system", "light"],
   notifications: [true, false], keepRunning: [true, false], updateChecks: [true, false], updateInterval: checkIntervals };
 const verificationErrors = new Set(["invalid", "unreachable", "not_rooms", "incompatible"]);
 
@@ -142,12 +142,18 @@ function saveSettings(changes) {
 }
 
 function applyPreferences() {
-  german = desktopSettings.language === "system" ? app.getLocale().toLowerCase().startsWith("de") : desktopSettings.language === "de";
+  language = desktopSettings.language === "system" ? systemLanguage() : desktopSettings.language;
   nativeTheme.themeSource = desktopSettings.appearance;
   if (roomsWindow) updateTitlebar(roomsWindow);
   menus();
   updateTray();
   if (!desktopSettings.notifications) notifications.clear();
+}
+
+function systemLanguage() {
+  const locale = app.getLocale().toLowerCase();
+  if (["zh", "zh-cn", "zh-hans", "zh-sg", "zh-hans-cn", "zh-hans-sg"].includes(locale)) return "zh-CN";
+  return locale.startsWith("de") ? "de" : "en";
 }
 
 function scheduleUpdateCheck() {
@@ -165,9 +171,9 @@ function showUpdateNotification(version, installer) {
   try {
     updateToast?.close();
     const toast = new Notification({
-      title: text("ZeloteZ Rooms update available", "Update für ZeloteZ Rooms verfügbar"),
-      body: (installer ? text("Version {version} is ready on GitHub.", "Version {version} ist auf GitHub verfügbar.")
-        : text("Release notes for version {version} are on GitHub.", "Die Release-Hinweise für Version {version} sind auf GitHub."))
+      title: text("ZeloteZ Rooms update available", "Update für ZeloteZ Rooms verfügbar", "ZeloteZ Rooms 有可用更新"),
+      body: (installer ? text("Version {version} is ready on GitHub.", "Version {version} ist auf GitHub verfügbar.", "GitHub 上已提供 {version} 版本。")
+        : text("Release notes for version {version} are on GitHub.", "Die Release-Hinweise für Version {version} sind auf GitHub.", "GitHub 上提供了 {version} 版本的发行说明。"))
         .replace("{version}", version),
       icon: appIcon,
     });
@@ -228,7 +234,7 @@ function titlebarOverlay() {
 function updateTitlebar(window) {
   if (window.isDestroyed()) return;
   if (process.platform !== "darwin") window.setTitleBarOverlay(titlebarOverlay());
-  window.webContents.send("rooms:titlebar-language", german ? "de" : "en");
+  window.webContents.send("rooms:titlebar-language", language);
 }
 
 ipcMain.handle("rooms:titlebar-settings", event => {
@@ -242,10 +248,10 @@ function localWindow(mode, state, parent) {
   const settings = mode === "settings";
   const introduction = mode === "update-intro";
   const titles = {
-    audio: text("Choose audio", "Tonquelle auswählen"),
-    picker: text("Share your screen", "Bildschirm teilen"),
-    settings: state.currentOrigin ? text("Desktop settings", "Desktop-Einstellungen") : "ZeloteZ Rooms",
-    "update-intro": text("Desktop updates", "Desktop-Updates"),
+    audio: text("Choose audio", "Tonquelle auswählen", "选择音频"),
+    picker: text("Share your screen", "Bildschirm teilen", "共享屏幕"),
+    settings: state.currentOrigin ? text("Desktop settings", "Desktop-Einstellungen", "桌面设置") : "ZeloteZ Rooms",
+    "update-intro": text("Desktop updates", "Desktop-Updates", "桌面版更新"),
   };
   const window = new BrowserWindow({
     parent, modal: Boolean(parent) && !settings, show: false, icon: appIcon, autoHideMenuBar: true,
@@ -262,7 +268,7 @@ function localWindow(mode, state, parent) {
   });
   const contents = window.webContents;
   const id = contents.id;
-  const local = { window, contents, state: { mode, language: german ? "de" : "en", ...state } };
+  const local = { window, contents, state: { mode, language, ...state } };
   localWindows.set(id, local);
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-frame-navigate", event => event.preventDefault());
@@ -322,7 +328,7 @@ ipcMain.handle("rooms:local-preference", async (event, name, value) => {
   }
   applyPreferences();
   local.state.preferences[name] = value;
-  local.state.language = german ? "de" : "en";
+  local.state.language = language;
   if (name === "updateChecks" && !value) cancelUpdateCheck();
   if (name === "updateChecks" || name === "updateInterval") scheduleUpdateCheck();
   return { language: local.state.language };
@@ -511,10 +517,10 @@ function configureTray() {
       tray.on("double-click", () => restoreWindow(roomsWindow));
     }
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: text("Open ZeloteZ Rooms", "ZeloteZ Rooms öffnen"), click: () => restoreWindow(roomsWindow) },
-      { label: text("Desktop settings…", "Desktop-Einstellungen …"), click: () => { restoreWindow(roomsWindow); showSettings(); } },
+      { label: text("Open ZeloteZ Rooms", "ZeloteZ Rooms öffnen", "打开 ZeloteZ Rooms"), click: () => restoreWindow(roomsWindow) },
+      { label: text("Desktop settings…", "Desktop-Einstellungen …", "桌面设置…"), click: () => { restoreWindow(roomsWindow); showSettings(); } },
       { type: "separator" },
-      { label: text("Quit ZeloteZ Rooms", "ZeloteZ Rooms beenden"), click: () => app.quit() },
+      { label: text("Quit ZeloteZ Rooms", "ZeloteZ Rooms beenden", "退出 ZeloteZ Rooms"), click: () => app.quit() },
     ]));
   } catch {
     tray?.destroy();
@@ -526,7 +532,7 @@ function confirmClose(window, hasTray) {
   const hint = new BrowserWindow({
     parent: window, modal: true, show: false, frame: false, useContentSize: true, skipTaskbar: true,
     width: 460, height: 335, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
-    icon: appIcon, title: text("Minimize ZeloteZ Rooms", "ZeloteZ Rooms minimieren"),
+    icon: appIcon, title: text("Minimize ZeloteZ Rooms", "ZeloteZ Rooms minimieren", "最小化 ZeloteZ Rooms"),
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#141419" : "#fff",
     webPreferences: {
       preload: path.join(__dirname, "close-preload.cjs"), sandbox: true, contextIsolation: true,
@@ -534,7 +540,7 @@ function confirmClose(window, hasTray) {
     },
   });
   const contents = hint.webContents;
-  const confirmation = closeConfirmation = { window: hint, contents, state: { hasTray, language: german ? "de" : "en" } };
+  const confirmation = closeConfirmation = { window: hint, contents, state: { hasTray, language } };
   const result = new Promise(resolve => {
     hint.once("closed", () => {
       if (closeConfirmation === confirmation) closeConfirmation = null;
@@ -644,9 +650,9 @@ function installPermissions(window, web, origin, media, isActive) {
     }
     microphonePrompt ??= microphone ? Promise.resolve(true) : dialog.showMessageBox(window, {
       type: "question",
-      message: text("Allow microphone access?", "Mikrofonzugriff erlauben?"),
-      detail: text("ZeloteZ Rooms uses the microphone for voice chat.", "ZeloteZ Rooms nutzt das Mikrofon für den Sprachchat."),
-      buttons: [text("Cancel", "Abbrechen"), text("Allow", "Erlauben")], defaultId: 0, cancelId: 0,
+      message: text("Allow microphone access?", "Mikrofonzugriff erlauben?", "允许使用麦克风？"),
+      detail: text("ZeloteZ Rooms uses the microphone for voice chat.", "ZeloteZ Rooms nutzt das Mikrofon für den Sprachchat.", "ZeloteZ Rooms 使用麦克风进行语音聊天。"),
+      buttons: [text("Cancel", "Abbrechen", "取消"), text("Allow", "Erlauben", "允许")], defaultId: 0, cancelId: 0,
     }).then(result => result.response === 1);
     microphonePrompt.then(result => {
       microphone = result && requestAllowed();
@@ -883,11 +889,27 @@ async function connect(origin, { signal, local } = {}) {
 function menus() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: "ZeloteZ Rooms", submenu: [
-      { label: text("Desktop settings…", "Desktop-Einstellungen …"), accelerator: "CmdOrCtrl+,", click: () => showSettings() },
-      { role: "quit" },
+      { label: text("Desktop settings…", "Desktop-Einstellungen …", "桌面设置…"), accelerator: "CmdOrCtrl+,", click: () => showSettings() },
+      { role: "quit", label: language === "zh-CN" ? "退出 ZeloteZ Rooms" : undefined },
     ] },
-    { role: "editMenu" },
-    { label: text("View", "Ansicht"), submenu: [{ role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { role: "togglefullscreen" }] },
+    language === "zh-CN" ? { label: "编辑", submenu: [
+      { role: "undo", label: "撤销" },
+      { role: "redo", label: "重做" },
+      { type: "separator" },
+      { role: "cut", label: "剪切" },
+      { role: "copy", label: "复制" },
+      { role: "paste", label: "粘贴" },
+      { role: "pasteAndMatchStyle", label: "粘贴并匹配样式" },
+      { role: "delete", label: "删除" },
+      { type: "separator" },
+      { role: "selectAll", label: "全选" },
+    ] } : { role: "editMenu" },
+    { label: text("View", "Ansicht", "视图"), submenu: [
+      { role: "resetZoom", label: language === "zh-CN" ? "实际大小" : undefined },
+      { role: "zoomIn", label: language === "zh-CN" ? "放大" : undefined },
+      { role: "zoomOut", label: language === "zh-CN" ? "缩小" : undefined },
+      { role: "togglefullscreen", label: language === "zh-CN" ? "切换全屏" : undefined },
+    ] },
   ]));
 }
 
@@ -895,10 +917,11 @@ function menus() {
 if (process.platform === "linux" && app.commandLine.hasSwitch("no-sandbox")) {
   void app.whenReady().then(() => {
     try {
-      const german = app.getLocale().toLowerCase().startsWith("de");
-      dialog.showErrorBox("ZeloteZ Rooms", german
-        ? "Die Chromium-Sandbox ist deaktiviert. Entferne --no-sandbox aus dem Starter und prüfe anhand der Dokumentation deiner Linux-Distribution, ob die App unprivilegierte User Namespaces verwenden darf."
-        : "The Chromium sandbox is disabled. Remove --no-sandbox from the launcher and check your Linux distribution’s documentation for how to allow unprivileged user namespaces for this app.");
+      language = systemLanguage();
+      dialog.showErrorBox("ZeloteZ Rooms", text(
+        "The Chromium sandbox is disabled. Remove --no-sandbox from the launcher and check your Linux distribution’s documentation for how to allow unprivileged user namespaces for this app.",
+        "Die Chromium-Sandbox ist deaktiviert. Entferne --no-sandbox aus dem Starter und prüfe anhand der Dokumentation deiner Linux-Distribution, ob die App unprivilegierte User Namespaces verwenden darf.",
+        "Chromium 沙盒已被禁用。请从启动命令中移除 --no-sandbox，并参阅 Linux 发行版文档，确认如何允许此应用使用非特权用户命名空间。"));
     } finally {
       app.exit(1);
     }

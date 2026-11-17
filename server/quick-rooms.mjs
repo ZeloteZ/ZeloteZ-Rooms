@@ -24,8 +24,8 @@ const digest = value => createHash('sha256').update(value).digest()
 
 function roomTitle(value, source, language) {
   if (value === undefined) return source === 'screen'
-    ? language === 'de' ? 'Temporärer Stream' : 'Temporary stream'
-    : language === 'de' ? 'Temporäre Watchparty' : 'Temporary watch party'
+    ? language === 'zh-CN' ? '临时直播' : language === 'de' ? 'Temporärer Stream' : 'Temporary stream'
+    : language === 'zh-CN' ? '临时观影派对' : language === 'de' ? 'Temporäre Watchparty' : 'Temporary watch party'
   const title = typeof value === 'string' ? value.normalize('NFC').trim() : ''
   if (!title || [...title].length > 72 || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(title)) throw invalid()
   return title
@@ -138,7 +138,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
     transaction(db, () => {
       insertTopic.run(topicId, actor.id, title, createdAt)
       insertOwner.run(topicId, actor.id, createdAt)
-      insertChannel.run(channelId, topicId, 'Live')
+      insertChannel.run(channelId, topicId, responseLocale(response) === 'zh-CN' ? '直播' : 'Live')
       insert.run(topicId, channelId, actor.id, session, source, Number(memberVisibility), secret ? digest(secret) : null,
         time, time + draftLifetime, time + roomLifetime)
     })

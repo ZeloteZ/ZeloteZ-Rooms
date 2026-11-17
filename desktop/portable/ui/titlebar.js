@@ -7,7 +7,7 @@ desktopSettings.addEventListener("click", event => {
 });
 
 window.roomsTitlebar.onLanguage(language => {
-  const label = language === "de" ? "Desktop-Einstellungen" : "Desktop settings";
+  const label = language === "zh-CN" ? "桌面设置" : language === "de" ? "Desktop-Einstellungen" : "Desktop settings";
   document.documentElement.lang = language;
   desktopSettings.setAttribute("aria-label", label);
   desktopSettings.title = label;

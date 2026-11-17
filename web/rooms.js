@@ -10,10 +10,10 @@ import { createWatchParty } from "./watch-party.js";
 import { api, button, closeDialog, el, field, form, identifier, notify, personRow, sameId, select, showDialog, status, tell, topicHref } from "./ui.js";
 
 const visibilityOptions = [["public", t("Everyone in the group", "Für alle im Freundeskreis")], ["private", t("Private · invite only", "Privat · nur auf Einladung")]];
-const channelOptions = [["chat", "Chat"], ["live", "Live"]];
+const channelOptions = [["chat", t("Chat", "Chat")], ["live", t("Live", "Live")]];
 const streamPolicies = [["all", t("All room members", "Alle Raummitglieder")], ["admins", t("Room owner and admins", "Raumersteller und Raum-Admins")]];
 const topicPolicies = [...streamPolicies, ["disabled", t("Streaming disabled in this room", "Streaming in diesem Raum aus")]];
-const roleNames = { owner: t("Owner", "Ersteller"), admin: "Admin", member: t("Member", "Mitglied") };
+const roleNames = { owner: t("Owner", "Ersteller"), admin: t("Admin", "Admin"), member: t("Member", "Mitglied") };
 
 function timeOrder(key) {
   return (first, second) => (Date.parse(second[key]) || 0) - (Date.parse(first[key]) || 0);
@@ -444,7 +444,7 @@ function manageChannels(context, topic, channels, updateChannels) {
       return el("li", { class: "channel-manager-row" },
         el("div", { class: "channel-manager-title" },
           el("strong", {}, channel.title),
-          el("span", { class: "subtle" }, channel.type === "live" ? t("Live channel", "Live-Channel") : "Chat")),
+          el("span", { class: "subtle" }, channel.type === "live" ? t("Live channel", "Live-Channel") : t("Chat", "Chat"))),
         el("div", { class: "inline channel-manager-controls" }, up, down, edit, remove));
     }));
     list.hidden = draft.length === 0;
@@ -631,7 +631,7 @@ function roomHeading(topic, title = topic.title) {
 }
 
 function quickRoomTitle(title, source) {
-  if (title && !["Temporary stream", "Temporärer Stream", "Temporary watch party", "Temporäre Watchparty"].includes(title)) return title;
+  if (title && !["Temporary stream", "Temporärer Stream", "临时直播", "Temporary watch party", "Temporäre Watchparty", "临时观影派对"].includes(title)) return title;
   if (source === "screen") return t("Live stream", "Livestream");
   if (source === "local" || source === "youtube") return t("Watch party", "Watchparty");
   return t("Live room", "Live-Raum");
@@ -693,7 +693,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
   applyTopicDesign(room, topic.appearance);
   if (topic.joined) header.append(el("div", { class: "inline room-actions" }, favoriteControl(topic, context),
       button(t("Members", "Mitglieder"), () => membersDialog(context, topic, members)),
-      topic.canDesign && button("Design", () => editTopicDesign(context, topic, appearance => {
+      topic.canDesign && button(t("Design", "Design"), () => editTopicDesign(context, topic, appearance => {
         topic.appearance = appearance;
         applyTopicDesign(room, appearance);
         applyTopicDesign(header, appearance);
@@ -722,7 +722,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
     if (channels.some(channel => sameId(channel.id, nativeChannel))) context.nativeBroadcast.stop().catch(() => {});
   }
 
-  const channelList = el("nav", { "aria-label": "Channels", class: "channel-list" });
+  const channelList = el("nav", { "aria-label": t("Channels", "Channels"), class: "channel-list" });
   const picker = el("select", { class: "room-channel-picker", "aria-label": t("Switch channel", "Channel wechseln") });
   let links;
   function drawChannels() {
@@ -740,7 +740,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
   drawChannels();
   picker.addEventListener("change", () => { location.hash = topicHref(topic.id, picker.value); });
   const sidebar = el("aside", { class: "panel channel-sidebar", "data-tutorial": "channel-picker" },
-    el("div", { class: "section-heading room-channel-tools" }, el("h2", {}, "Channels"),
+    el("div", { class: "section-heading room-channel-tools" }, el("h2", {}, t("Channels", "Channels")),
       picker,
       manager && el("div", { class: "room-channel-manage" },
         button("+", () => channelDialog(context, topic), { "aria-label": t("Create channel", "Channel erstellen"), class: "icon-button", title: t("Create channel", "Channel erstellen") }),

@@ -23,7 +23,7 @@ function streamLink(stream) {
     el("span", { class: "home-activity-copy" },
       personName(person, { class: "home-live-person" }),
       el("span", { class: "home-activity-location" }, stream.topicTitle + " · " + stream.channelTitle)),
-    el("span", { class: "tag live" }, "Live")));
+    el("span", { class: "tag live" }, t("Live", "Live"))));
 }
 
 function watchLink(party) {

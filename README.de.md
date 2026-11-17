@@ -4,7 +4,7 @@
 
 ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In euren Räumen könnt ihr schreiben, miteinander sprechen und euren Bildschirm teilen. Ihr nutzt Rooms im Browser oder in der Desktop-App für Windows und Linux. Neue Konten entstehen über Einladungslinks des Betreibers.
 
-[English](README.md) · [Selbst hosten](#selbst-hosten) · [Desktop-App](desktop/README.md) · [YouTube-Erweiterung](#youtube-erweiterung)
+[English](README.md) · [简体中文](README.zh-CN.md) · [Selbst hosten](#selbst-hosten) · [Desktop-App](desktop/README.md) · [YouTube-Erweiterung](#youtube-erweiterung)
 
 ## Auf einen Blick
 
@@ -16,7 +16,7 @@ ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In
 - **Gemeinsam Videos schauen.** Über **Video teilen** kannst du YouTube einbetten oder eine MP4- oder WebM-Datei bis 256 MiB hochladen. Wer teilen darf, kann Videos zur Warteschlange hinzufügen und entfernen. Abspielen, Pausieren und Spulen wirken für alle. Die Lautstärke stellt jede Person selbst ein. Beim Seitenwechsel wandert das Video in den Mini-Player. YouTube pausiert, sobald die letzte Person ihren Player schließt oder ausblendet.
 - **Jetzt streamen.** Wähle in der Rooms-Übersicht Bildschirm, YouTube oder eine lokale Datei und nutze einen bestehenden Live-Kanal oder einen temporären Raum. Temporäre Räume können für angemeldete Mitglieder unter **Gerade live** erscheinen und einen passwortgeschützten Zuschauerlink für Gäste anbieten.
 - **Ein eigener Look.** Lege Profilbild und Namensfarbe fest. Berechtigte Mitglieder können Räume mit Titelbild, Banner, Chat-Hintergrund und eigenen Farben gestalten. Für Bilder stehen Vorlagen und eigene JPEG-, PNG- und WebP-Dateien bis 8 MiB zur Auswahl.
-- **Orientierung beim ersten Besuch.** Die Rundgänge erklären die wichtigsten Bedienelemente. Du kannst sie im Profil zurücksetzen. Rooms startet auf Englisch. Beim Anmelden und im Profil kannst du **Deutsch** wählen.
+- **Orientierung beim ersten Besuch.** Die Rundgänge erklären die wichtigsten Bedienelemente. Du kannst sie im Profil zurücksetzen. Rooms startet auf Englisch. Beim Anmelden und im Profil kannst du **Deutsch** oder **简体中文** wählen.
 
 ## So funktioniert die Verschlüsselung
 

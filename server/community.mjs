@@ -404,8 +404,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       db.prepare("INSERT INTO topic_members(topic_id,user_id,role,approved,joined_at,visited_at) VALUES (?,?,'owner',1,?,?)")
         .run(topicId, user.id, now, now)
       const channel = db.prepare("INSERT INTO channels(id,topic_id,title,type,stream_policy) VALUES (?,?,?,?,'all')")
-      channel.run(randomUUID(), topicId, language === 'de' ? 'Allgemein' : 'General', 'chat')
-      channel.run(randomUUID(), topicId, 'Live', 'live')
+      channel.run(randomUUID(), topicId, language === 'zh-CN' ? '常规' : language === 'de' ? 'Allgemein' : 'General', 'chat')
+      channel.run(randomUUID(), topicId, language === 'zh-CN' ? '直播' : 'Live', 'live')
     })
     return showTopic(getTopic(user.id, topicId))
   }

@@ -90,7 +90,7 @@ export function createNativeBroadcast(signal, dock) {
     const stats = el("div", { class: "inline native-broadcast-metrics", hidden: true });
     const node = el("section", { class: "native-broadcast stack", hidden: true, "aria-label": heading },
       !previewOnly && el("header", { class: "section-heading" },
-        el("div", { class: "inline" }, el("span", { class: "tag live" }, "Live"), el("h3", {}, heading)), end()),
+        el("div", { class: "inline" }, el("span", { class: "tag live" }, t("Live", "Live")), el("h3", {}, heading)), end()),
       stage, !previewOnly && stats);
     let drawing = false;
     let mountedId;

@@ -99,8 +99,8 @@ function close(state, task = state.task) {
 }
 
 async function reserve(state, task, requestId) {
-  const unavailable = () => send(task, { action: "reservation", requestId, error: task.language === "de"
-    ? "Der Live-Kanal konnte den Stream nicht vorbereiten." : "The live channel couldn’t prepare the stream." });
+  const unavailable = () => send(task, { action: "reservation", requestId, error: task.language === "zh-CN"
+    ? "直播频道无法准备直播。" : task.language === "de" ? "Der Live-Kanal konnte den Stream nicht vorbereiten." : "The live channel couldn’t prepare the stream." });
   let id;
   try {
     const response = await request(state, "/api/channels/" + task.channel + "/streams", "POST", task.language);
@@ -199,7 +199,7 @@ ipcMain.handle("rooms:native-capture-open", (event, channel, language, embedded)
   const state = senderSession(event);
   if (!state || typeof channel !== "string" || !channels.test(channel)) return "unavailable";
   if (state.task) return "busy";
-  return startCapture(state, channel, language === "de" ? "de" : "en", embedded === true && state.program.embedded);
+  return startCapture(state, channel, ["de", "zh-CN"].includes(language) ? language : "en", embedded === true && state.program.embedded);
 });
 
 ipcMain.handle("rooms:native-capture-status", event => {

@@ -226,7 +226,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host, o
     const videoTitle = watchParty && watch?.source.title;
     setText(title, videoTitle || roomTitle || t("Live room", "Live-Raum"));
     title.classList.toggle("sr-only", !videoTitle && (member || (watchParty &&
-      (!roomTitle || roomTitle === "Temporary watch party" || roomTitle === "Temporäre Watchparty"))));
+      (!roomTitle || ["Temporary watch party", "Temporäre Watchparty", "临时观影派对"].includes(roomTitle)))));
     chatTab.textContent = t("Live chat", "Livechat");
     queueTab.textContent = t("Queue", "Warteschlange");
     supportTabs.setAttribute("aria-label", t("Watch party panels", "Bereiche der Watchparty"));

@@ -1,10 +1,16 @@
-import { language, setLanguage, t } from "./i18n.js";
+import { language, languages as supportedLanguages, setLanguage, t } from "./i18n.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 
 const publicId = /^\/guest\/([a-f0-9-]+)\/?$/u.exec(location.pathname)?.[1];
 const mount = document.querySelector("#guest-view");
 const languages = document.querySelector("#guest-language");
 const languageLabel = document.querySelector("#guest-language-label");
+languages.replaceChildren(...supportedLanguages.map(({ id, label }) => {
+  const option = document.createElement("option");
+  option.value = id;
+  option.textContent = label;
+  return option;
+}));
 let lifetime;
 let viewer;
 

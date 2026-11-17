@@ -2,7 +2,12 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { bootstrapOwnerInvite, initializeAuthSchema } from './auth.mjs'
+import { preferredLanguage, translateError } from './locale.mjs'
 import { issueOwnerRecovery, provisionOwnerMfa } from './owner-access.mjs'
+
+const locale = (process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '').split('.')[0].replaceAll('_', '-')
+const language = preferredLanguage(locale)
+const message = text => translateError(text, language)
 
 function terminalQr(qrcode, uri) {
   const qr = qrcode(0, 'L')
@@ -30,7 +35,7 @@ const dataDir = process.env.APP_DATA_DIR ?? '/data'
 const origin = new URL(process.env.PUBLIC_ORIGIN ?? 'http://127.0.0.1:8080')
 const localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
 if ((origin.protocol !== 'https:' && !localHttp) || origin.href !== `${origin.origin}/`) {
-  throw new Error('PUBLIC_ORIGIN must be an HTTPS address or a local test address.')
+  throw new Error(message('PUBLIC_ORIGIN must be an HTTPS address or a local test address.'))
 }
 
 process.umask(0o077)
@@ -48,22 +53,22 @@ try {
     const { key, uri } = provisionOwnerMfa(db, origin.origin, setup => {
       qr = terminalQr(qrcode, setup.uri)
     })
-    console.log('Add this time-based secret to your authenticator (six digits, 30 seconds). All owner sessions were revoked.')
+    console.log(message('Add this time-based secret to your authenticator (six digits, 30 seconds). All owner sessions were revoked.'))
     console.log(key)
     console.log(uri)
-    console.log('Scan the QR code below. Enlarge the terminal or reduce its font size if needed.')
+    console.log(message('Scan the QR code below. Enlarge the terminal or reduce its font size if needed.'))
     console.log(qr)
   } else if (option === '--recover-owner') {
     const link = issueOwnerRecovery(db, origin.origin)
-    console.log('Owner sign-in is paused and existing owner sessions and unused invites were revoked.')
-    console.log('Open the one-time recovery link within 20 minutes. Run the command again if it expires.')
+    console.log(message('Owner sign-in is paused and existing owner sessions and unused invites were revoked.'))
+    console.log(message('Open the one-time recovery link within 20 minutes. Run the command again if it expires.'))
     console.log(link)
   } else if (option !== '--if-needed' || !db.prepare('SELECT 1 FROM users WHERE admin = 1').get()) {
     const invite = bootstrapOwnerInvite(db, origin.origin)
     console.log(invite.url)
   }
 } catch (error) {
-  console.error(error.message)
+  console.error(message(error.message))
   process.exitCode = 1
 } finally {
   db.close()

@@ -81,7 +81,7 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
   const isImage = imageTypes.has(file.type);
   const isVideo = videoTypes.has(file.type);
   const isAudio = audioTypes.has(file.type);
-  const format = isImage ? t("Image", "Bild") : isVideo ? "Video" : isAudio ? "Audio" : t("File", "Datei");
+  const format = isImage ? t("Image", "Bild") : isVideo ? t("Video", "Video") : isAudio ? t("Audio", "Audio") : t("File", "Datei");
   const size = sizeLabel(file.size);
   const feedback = status();
   const view = el("div", { class: "attached-file stack" }, feedback);

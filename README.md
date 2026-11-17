@@ -4,7 +4,7 @@
 
 A private place for friends to chat, talk, and share their screens. Host an invite-only instance, set up rooms around whatever brings your group together, and join from a browser or the desktop app.
 
-[Deutsch](README.de.md) · [Self-hosting](#self-hosting) · [Desktop app](desktop/README.md) · [YouTube extension](#youtube-browser-extension)
+[Deutsch](README.de.md) · [简体中文](README.zh-CN.md) · [Self-hosting](#self-hosting) · [Desktop app](desktop/README.md) · [YouTube extension](#youtube-browser-extension)
 
 ## What you can do
 
@@ -17,7 +17,7 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 - **Start a watch party.** Use **Share video** to share a YouTube embed or upload an MP4 or WebM up to 256 MiB. People with permission to share can add or remove upcoming videos in the queue. Viewers share play, pause and seek controls while keeping their own volume. The video moves to the mini player as you browse. YouTube pauses when the last viewer closes or hides their player.
 - **Stream now.** Choose a screen, YouTube video, or local file from the Rooms overview. Use an existing live channel or open a temporary room. Temporary rooms can appear in **Live now** for signed-in members or offer a password-protected viewer link for guests.
 - **Change the look.** Choose a profile picture and name color. Give a room its own cover, banner, colors, and chat background. Built-in image presets are available for profile pictures and room images. You can also upload JPEG, PNG, or WebP images up to 8 MiB.
-- **Find your way around.** First-visit guides introduce the main views and can be reset in your profile. The interface is available in English and German.
+- **Find your way around.** First-visit guides introduce the main views and can be reset in your profile. The interface is available in English, German, and Simplified Chinese.
 
 ## Self-hosting
 
