@@ -96,8 +96,10 @@ export function createWatchControls({ signal, onToggle, onSeek, onVolume, onCapt
     progress.setAttribute("aria-label", t("Playback position for everyone", "Wiedergabeposition für alle"));
     level.setAttribute("aria-label", t("Your volume", "Deine Lautstärke"));
     mute.textContent = Number(level.value) === 0 ? t("Unmute", "Ton an") : t("Mute", "Ton aus");
-    captions.title = captionsEnabled ? t("Turn subtitles off", "Untertitel ausschalten") : t("Turn subtitles on", "Untertitel einschalten");
-    captions.setAttribute("aria-label", captions.title);
+    captions.title = captionsEnabled
+      ? t("Use YouTube’s subtitle preference", "YouTubes Untertiteleinstellung verwenden")
+      : t("Show subtitles when available", "Untertitel anzeigen, wenn verfügbar");
+    captions.setAttribute("aria-label", t("Request YouTube subtitles", "YouTube-Untertitel anfordern"));
     captions.setAttribute("aria-pressed", String(captionsEnabled));
     cinemaButton.textContent = t("Cinema", "Kino");
     cinemaButton.title = inCinema ? t("Exit cinema mode", "Kinomodus verlassen") : t("Cinema mode", "Kinomodus");
