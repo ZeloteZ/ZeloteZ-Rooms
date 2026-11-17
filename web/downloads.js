@@ -70,11 +70,20 @@ export function renderDownloads({ signal }) {
   const cards = el("div", { class: "download-cards" });
   const feedback = status();
   const retry = button(t("Try again", "Erneut laden"), () => void load(), { hidden: true });
+  const intro = el("div", { class: "download-intro" },
+    el("h2", {}, t("Get more with the ZeloteZ Rooms client:", "Mit dem ZeloteZ Rooms Client hast du viele Vorteile:")),
+    el("ul", { class: "muted" },
+      el("li", {}, t("Stream individual apps with just their audio (on Linux with PipeWire)",
+        "Streame einzelne Anwendungen mit ausschließlich deren Audiospur (unter Linux mit PipeWire)")),
+      el("li", {}, t("Stream an entire monitor or just a selected area. It’s up to you",
+        "Streame ganze Monitore oder nur einzelne Bereiche - Du entscheidest")),
+      el("li", {}, t("Get system notifications for new livestreams, direct messages, and more.",
+        "Erhalte Systembenachrichtigungen bei Starts von Livestreams, Direktnachrichten und vielem mehr."))));
   const node = el("section", { class: "secondary-page downloads-page", "aria-labelledby": "downloads-heading" },
     el("header", { class: "page-heading" }, el("div", { class: "stack download-heading" },
       el("h1", { id: "downloads-heading", tabindex: -1 }, t("Downloads", "Downloads")),
       version)),
-    el("div", { class: "download-content" }, feedback, retry, cards));
+    el("div", { class: "download-content" }, intro, feedback, retry, cards));
   let loading = false;
 
   async function load() {

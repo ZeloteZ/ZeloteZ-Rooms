@@ -1,12 +1,30 @@
 .downloads-page {
   max-inline-size: 1080px;
   inline-size: 100%;
+  block-size: auto;
+  grid-template-rows: auto auto;
+  gap: clamp(20px, 3.5dvh, 30px);
   margin-inline: auto;
 }
 .download-heading { gap: 7px; }
-.download-content { min-block-size: 0; overflow: auto; padding: 2px; }
+.download-content { min-inline-size: 0; }
 .download-content > .status { margin-block-end: 10px; }
-.download-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 14px; }
+.download-intro {
+  display: grid;
+  gap: 12px;
+  max-inline-size: 78ch;
+  margin-block-end: clamp(24px, 4dvh, 34px);
+}
+.download-intro h2 { font-size: 1.08rem; line-height: 1.35; }
+.download-intro ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 1.15em;
+  font-size: .9rem;
+  line-height: 1.6;
+}
+.download-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 18px; }
 .download-card { display: flex; flex-direction: column; align-items: start; gap: 14px; min-inline-size: 0; }
 .download-card .section-heading { inline-size: 100%; gap: 8px; }
 .download-card .tag { white-space: normal; }
@@ -27,8 +45,8 @@
 }
 
 @media (max-width: 740px) {
-  .download-cards { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .download-card { padding: 16px; gap: 10px; }
+  .download-cards { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .download-card { padding: 18px; gap: 12px; }
 }
 @media (max-width: 445px) {
   .downloads-link { margin-inline-end: 0; }
