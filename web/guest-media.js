@@ -53,10 +53,11 @@ export function guestSource(snapshot, base) {
   return party.source === "local" && matchesPath(party.mediaUrl, path) ? { ...party, kind: "local", path, hasAudio: true } : null;
 }
 
-export function openGuestMedia(source, callbacks) {
-  if (source.kind === "youtube") return createYoutubePlayer(source.videoId, callbacks);
+export function openGuestMedia(source, callbacks, ownerDocument = document) {
+  if (source.kind === "youtube") return createYoutubePlayer(source.videoId, callbacks, ownerDocument);
 
-  const video = document.createElement("video");
+  const video = ownerDocument.createElement("video");
+  const url = new URL(source.path, location.origin).href;
   video.playsInline = true;
   video.preload = "auto";
   video.muted = true;
@@ -69,7 +70,7 @@ export function openGuestMedia(source, callbacks) {
   let hls;
 
   if (source.kind !== "screen") {
-    video.src = source.path;
+    video.src = url;
   } else {
     const native = Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
     void loadHls().then(Hls => {
@@ -78,12 +79,12 @@ export function openGuestMedia(source, callbacks) {
       hls = new Hls({ preferManagedMediaSource: true, maxBufferLength: 18, backBufferLength: 24 });
       hls.on(Hls.Events.ERROR, (_, data) => { if (!signal.aborted && data.fatal) callbacks.onError(); });
       hls.attachMedia(video);
-      hls.loadSource(source.path);
+      hls.loadSource(url);
     }).catch(() => {
       if (signal.aborted) return;
       hls?.destroy();
       hls = undefined;
-      if (native) video.src = source.path;
+      if (native) video.src = url;
       else callbacks.onError();
     });
   }

@@ -31,12 +31,15 @@ function localVideoType(file) {
   return null;
 }
 
-function localPlayer(url, { onReady, onError, onEnded, onBlocked }) {
-  const element = el("video", { playsinline: true, preload: "auto", "aria-label": t("Shared video", "Geteiltes Video") });
+function localPlayer(url, { onReady, onError, onEnded, onBlocked }, ownerDocument) {
+  const element = ownerDocument.createElement("video");
+  element.playsInline = true;
+  element.preload = "auto";
+  element.setAttribute("aria-label", t("Shared video", "Geteiltes Video"));
   element.addEventListener("loadedmetadata", onReady, { once: true });
   element.addEventListener("ended", onEnded);
   element.addEventListener("error", onError);
-  element.src = url;
+  element.src = new URL(url, location.origin).href;
   return {
     element,
     play: () => element.play().catch(error => { if (error.name === "NotAllowedError") onBlocked(); }),
@@ -254,12 +257,16 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     else if (source === "local") localForm();
   }
 
-  function resetPlayer(party) {
+  function resetPlayer(party, transferredAudience) {
     tell(statusNode, t("Loading video…", "Video wird geladen …"));
     const current = () => selectedId === party.id && !signal.aborted;
+    const ownerDocument = media.ownerDocument;
     if (party.source === "youtube") {
       const viewers = "/api/" + endpoint + "/" + identifier(party.id) + "/viewers";
-      audience = createWatchViewerLease({ signal, report: options => reportWatchViewer(viewers, options, { accountId: user.id }) });
+      audience = transferredAudience ?? createWatchViewerLease({
+        signal, ownerDocument, report: options => reportWatchViewer(viewers, options, { accountId: user.id }),
+      });
+      transferredAudience?.moveTo(ownerDocument);
     }
     const handlers = {
       onReady() {
@@ -314,8 +321,8 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
           .then(() => schedule(0), () => {});
       },
     };
-    surface = party.source === "youtube" ? createYoutubePlayer(party.videoId, handlers)
-      : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers);
+    surface = party.source === "youtube" ? createYoutubePlayer(party.videoId, handlers, ownerDocument)
+      : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers, ownerDocument);
     media.replaceChildren(surface.element);
     controls.setFullscreenSurface(surface.element);
     clockTimer = setInterval(tick, 250);
@@ -570,12 +577,15 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       if (!selectedId || !surface) return;
       if (sample.party.source === "youtube") {
         ready = false;
-        audience?.stop();
+        const transferredAudience = audience;
         audience = undefined;
         surface.destroy();
         clearInterval(clockTimer);
-        resetPlayer(sample.party);
-      } else if (sample.party.playing) surface.play();
+        resetPlayer(sample.party, transferredAudience);
+      } else {
+        controls.setFullscreenSurface(surface.element);
+        if (sample.party.playing) surface.play();
+      }
     },
   };
 }

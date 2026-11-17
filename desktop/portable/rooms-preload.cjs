@@ -6,6 +6,10 @@ if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktop", true);
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktopNotifications", {
   notify: input => ipcRenderer.invoke("rooms:desktop-notify", input),
 });
+if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktopVideo", {
+  authorize: () => navigator.userActivation.isActive
+    ? ipcRenderer.invoke("rooms:authorize-detached-video") : Promise.resolve(null),
+});
 
 if (process.isMainFrame) {
   let visible = false;

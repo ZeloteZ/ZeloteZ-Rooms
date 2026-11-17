@@ -35,6 +35,8 @@ function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
+let supportId = 0;
+
 export function renderGuestViewer(options) {
   const { publicId, videoDock, signal, member, host } = options;
   if (!member || !videoDock) return createGuestViewer(options).viewer;
@@ -61,10 +63,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     </section>
     <section class="guest-room" hidden>
       <header class="guest-heading">
-        <div class="guest-title-group">
-          <h1 class="guest-room-title"></h1>
-          <span class="guest-video-title muted" hidden></span>
-        </div>
+        <h1 class="guest-room-title"></h1>
         <span class="tag live" hidden></span>
       </header>
       <div class="quick-view-layout">
@@ -79,12 +78,14 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
           </div>
         </section></div>
         <aside class="quick-view-support" data-pane="chat">
-          <div class="quick-view-support-tabs inline" hidden>
-            <button type="button" class="button" data-pane="chat" aria-pressed="true"></button>
-            <button type="button" class="button" data-pane="queue" aria-pressed="false"></button>
+          <div class="quick-view-support-tabs" role="tablist" hidden>
+            <button type="button" class="button" role="tab" data-pane="chat" aria-selected="true"></button>
+            <button type="button" class="button" role="tab" data-pane="queue" aria-selected="false" tabindex="-1"></button>
           </div>
-          <div class="quick-view-chat-slot"></div>
-          <div class="quick-view-queue-slot"></div>
+          <div class="quick-view-support-panels">
+            <div class="quick-view-chat-slot" tabindex="-1"></div>
+            <div class="quick-view-queue-slot" role="tabpanel" tabindex="0" inert></div>
+          </div>
         </aside>
       </div>
     </section>`;
@@ -98,7 +99,6 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   const enter = find("button[type=submit]");
   const room = find(".guest-room");
   const title = find(".guest-room-title");
-  const videoTitle = find(".guest-video-title");
   const live = find(".guest-heading .tag");
   const support = find(".quick-view-support");
   const supportTabs = find(".quick-view-support-tabs");
@@ -132,16 +132,63 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   });
   find(".watch-party-footer").prepend(controls.element);
   if (host?.actions) find(".guest-heading").append(host.actions);
-  queueSlot.append(host?.queue ?? viewerQueue.node);
+  mountQueue();
+
+  const supportPrefix = "quick-view-" + ++supportId;
+  for (const [tab, panel] of [[chatTab, chatSlot], [queueTab, queueSlot]]) {
+    tab.id = supportPrefix + "-tab-" + tab.dataset.pane;
+    panel.id = supportPrefix + "-panel-" + tab.dataset.pane;
+    tab.setAttribute("aria-controls", panel.id);
+  }
+  queueSlot.setAttribute("aria-labelledby", queueTab.id);
+
+  function mountQueue() {
+    // The shared snapshot is ready before the host's controls may have finished loading.
+    queueSlot.replaceChildren(...[host?.queue, viewerQueue.node].filter(Boolean));
+  }
 
   function showPane(pane) {
+    const showChat = pane === "chat";
     support.dataset.pane = pane;
-    chatTab.setAttribute("aria-pressed", String(pane === "chat"));
-    queueTab.setAttribute("aria-pressed", String(pane === "queue"));
+    chatSlot.inert = !showChat;
+    queueSlot.inert = showChat;
+    chatTab.setAttribute("aria-selected", String(showChat));
+    queueTab.setAttribute("aria-selected", String(!showChat));
+    chatTab.tabIndex = showChat ? 0 : -1;
+    queueTab.tabIndex = showChat ? -1 : 0;
+  }
+
+  function setQueueAvailable(available) {
+    if (supportTabs.hidden === !available) return;
+    const restoreFocus = !available && (supportTabs.contains(document.activeElement) || queueSlot.contains(document.activeElement));
+    supportTabs.hidden = !available;
+    support.toggleAttribute("data-has-queue", available);
+    if (available) {
+      chatSlot.setAttribute("role", "tabpanel");
+      chatSlot.setAttribute("aria-labelledby", chatTab.id);
+      chatSlot.tabIndex = 0;
+    } else {
+      chatSlot.removeAttribute("role");
+      chatSlot.removeAttribute("aria-labelledby");
+      chatSlot.tabIndex = -1;
+      showPane("chat");
+      if (restoreFocus) chatSlot.focus({ preventScroll: true });
+    }
   }
 
   chatTab.addEventListener("click", () => showPane("chat"), { signal });
   queueTab.addEventListener("click", () => showPane("queue"), { signal });
+  supportTabs.addEventListener("keydown", event => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    let pane;
+    if (event.key === "Home") pane = "chat";
+    else if (event.key === "End") pane = "queue";
+    else if (event.key === "ArrowLeft" || event.key === "ArrowRight") pane = support.dataset.pane === "chat" ? "queue" : "chat";
+    else return;
+    event.preventDefault();
+    showPane(pane);
+    (pane === "chat" ? chatTab : queueTab).focus();
+  }, { signal });
 
   let gateState = "opening";
   let playbackState;
@@ -168,12 +215,15 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     setText(gateStatus, copy(gateState));
     passwordLabel.textContent = t("Password", "Passwort");
     enter.textContent = t("Open live room", "Live-Raum öffnen");
-    setText(title, roomTitle || t("Live room", "Live-Raum"));
-    setText(videoTitle, watch?.source.title || "");
-    videoTitle.hidden = !videoTitle.textContent;
+    const watchParty = room.hasAttribute("data-watch-party");
+    const videoTitle = watchParty && watch?.source.title;
+    setText(title, videoTitle || roomTitle || t("Live room", "Live-Raum"));
+    title.classList.toggle("sr-only", watchParty && !videoTitle &&
+      (!roomTitle || roomTitle === "Temporary watch party" || roomTitle === "Temporäre Watchparty"));
     live.textContent = t("Live", "Live");
     chatTab.textContent = t("Live chat", "Livechat");
     queueTab.textContent = t("Queue", "Warteschlange");
+    supportTabs.setAttribute("aria-label", t("Watch party panels", "Bereiche der Watchparty"));
     setText(waiting, copy("waiting"));
     setText(playbackStatus, copy(playbackState));
     setText(commandStatus, copy(commandState));
@@ -291,15 +341,19 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     controls.audio.hidden = !watch?.source.hasAudio;
   }
 
-  function startPlayback() {
+  function startPlayback(transfer = false) {
+    const audience = transfer && playing?.kind === "youtube" && playing.id === watch?.source.id ? playing.audience : undefined;
+    if (audience) playing.audience = undefined;
     discardMedia(Boolean(playing && watch && playing.kind !== "screen" && watch.source.kind !== "screen"));
     if (!watch) return;
     const { source } = watch;
+    const ownerDocument = stage.ownerDocument;
     const current = { id: source.id, kind: source.kind, ready: false, started: false };
     if (source.kind === "youtube") {
-      current.audience = createWatchViewerLease({ signal,
+      current.audience = audience ?? createWatchViewerLease({ signal, ownerDocument,
         report: options => reportWatchViewer(base + "/viewers", options, { partyId: source.id }),
       });
+      audience?.moveTo(ownerDocument);
     }
     const active = () => playing === current && !signal.aborted;
     current.surface = openGuestMedia(source, {
@@ -353,7 +407,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
         const path = "/api/channels/" + host.channelId + "/watch/" + source.id + "/metadata";
         void request(path, "PATCH", { title }, true).catch(() => {});
       },
-    });
+    }, ownerDocument);
     playing = current;
     if (current.surface.element.tagName === "VIDEO") current.surface.element.setAttribute("aria-label", title.textContent);
     stage.insertBefore(current.surface.element, preview?.element ?? null);
@@ -395,15 +449,14 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     authorized = true;
     const heading = snapshot.roomTitle ?? snapshot.title;
     roomTitle = typeof heading === "string" ? heading.slice(0, 120) : "";
+    room.toggleAttribute("data-watch-party", snapshot.source === "youtube" || snapshot.source === "local");
     room.hidden = false;
     gate.hidden = true;
     passwordInput.value = "";
     openChat();
     const source = guestSource(snapshot, base);
     const hasQueue = Boolean(source && source.kind !== "screen");
-    support.toggleAttribute("data-has-queue", hasQueue);
-    supportTabs.hidden = !hasQueue;
-    if (!hasQueue) showPane("chat");
+    setQueueAvailable(hasQueue);
     viewerQueue.update(snapshot.queue, { visible: hasQueue });
     if (!source) {
       watch = undefined;
@@ -577,7 +630,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       host?.actions?.remove();
       host = nextHost;
       if (host?.actions) find(".guest-heading").append(host.actions);
-      queueSlot.replaceChildren(host?.queue ?? viewerQueue.node);
+      mountQueue();
       dismissedSource = undefined;
       openChat();
       schedule(0);
@@ -595,8 +648,12 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       dockEntry?.deactivate();
     },
     reconnectAfterMove() {
-      if (playing?.kind === "youtube") startPlayback();
-      else if (playing?.kind === "screen" || watch?.source.playing) playing?.surface.play();
+      if (!playing) return;
+      if (playing.kind === "youtube") startPlayback(true);
+      else {
+        controls.setFullscreenSurface(playing.surface.element);
+        if (playing.kind === "screen" || watch?.source.playing) playing.surface.play();
+      }
     },
   };
 }

@@ -1,0 +1,60 @@
+.video-dock-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.video-dock-panel[data-floating] {
+  position: fixed;
+  z-index: 6;
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  box-shadow: 0 12px 42px #000a;
+}
+
+.video-dock-heading { display: flex; align-items: center; gap: 6px; min-inline-size: 0; padding: 7px 8px 7px 12px; }
+.video-dock-caption { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .94rem; }
+.video-dock-actions { flex: none; flex-wrap: nowrap; gap: 6px; }
+.video-dock-actions .button { min-block-size: 34px; padding: 5px 8px; font-size: .8rem; }
+.video-dock-panel[data-floating] .video-dock-heading { cursor: grab; touch-action: none; user-select: none; }
+.video-dock-panel[data-floating] .video-dock-heading:active { cursor: grabbing; }
+.video-dock-heading .icon-button { min-inline-size: 34px; }
+.video-dock-stage { display: grid; grid-template-columns: minmax(0, 1fr); min-block-size: 0; min-inline-size: 0; overflow: auto; }
+.video-dock-stage .panel { border: 0; }
+.video-dock-panel .video-dock-stage > :is(.guest-player, .watch-party-player):not(:fullscreen) {
+  grid-template-rows: minmax(200px, 1fr) auto;
+}
+.video-dock-panel .watch-party-heading { display: none; }
+.video-dock-panel .watch-party-controls .watch-audio input { inline-size: clamp(40px, 12vw, 85px); }
+.video-dock-panel .watch-cinema-button { display: none; }
+.video-dock-status { padding: 0 10px 8px; font-size: .83rem; }
+
+.video-dock-resize { display: none; }
+.video-dock-panel[data-floating] .video-dock-resize { display: block; position: absolute; z-index: 1; touch-action: none; }
+.video-dock-resize:is([data-edge="n"], [data-edge="s"]) { inset-inline: 12px; block-size: 8px; cursor: ns-resize; }
+.video-dock-resize:is([data-edge="e"], [data-edge="w"]) { inset-block: 12px; inline-size: 8px; cursor: ew-resize; }
+.video-dock-resize:is([data-edge="nw"], [data-edge="ne"], [data-edge="sw"], [data-edge="se"]) { width: 12px; height: 12px; }
+.video-dock-resize:is([data-edge="n"], [data-edge="nw"], [data-edge="ne"]) { top: 0; }
+.video-dock-resize:is([data-edge="s"], [data-edge="sw"], [data-edge="se"]) { bottom: 0; }
+.video-dock-resize:is([data-edge="w"], [data-edge="nw"], [data-edge="sw"]) { left: 0; }
+.video-dock-resize:is([data-edge="e"], [data-edge="ne"], [data-edge="se"]) { right: 0; }
+.video-dock-resize:is([data-edge="nw"], [data-edge="se"]) { cursor: nwse-resize; }
+.video-dock-resize:is([data-edge="ne"], [data-edge="sw"]) { cursor: nesw-resize; }
+
+.video-dock-resize[data-edge="se"]::after {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid var(--faint);
+  border-bottom: 1px solid var(--faint);
+  content: "";
+}
+
+.video-window { display: block; min-block-size: 0; block-size: 100dvh; }
+.video-window .video-dock-panel { inline-size: 100%; block-size: 100%; }

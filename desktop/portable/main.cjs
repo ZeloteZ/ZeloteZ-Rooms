@@ -6,6 +6,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { installAudio } = require("./audio.cjs");
 const { desktopNotifications } = require("./desktop-notifications.cjs");
+const { detachedVideo } = require("./detached-video.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
 const { registerLinuxShareLink } = require("./linux-share-link.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
@@ -24,6 +25,7 @@ const closeUrl = pathToFileURL(closePage).href;
 const appIcon = path.join(__dirname, "ui", "icon.png");
 const localWindows = new Map();
 const roomLogins = new WeakMap();
+const detachedVideos = new WeakMap();
 const notifications = desktopNotifications(appIcon);
 let roomsWindow;
 let roomsContents;
@@ -583,6 +585,8 @@ ipcMain.handle("rooms:login-load", (event, id) => roomLoginSender(event)?.load(i
 ipcMain.handle("rooms:login-discard", event => roomLoginSender(event)?.discard());
 ipcMain.handle("rooms:login-save", (event, input) => isRoomsSender(event) && roomLoginSender(event)?.save(input, () => isRoomsSender(event)));
 ipcMain.handle("rooms:login-forget", event => isRoomsSender(event) && roomLoginSender(event)?.forget());
+ipcMain.handle("rooms:authorize-detached-video", event =>
+  isRoomsSender(event) ? detachedVideos.get(event.sender)?.authorize() ?? null : null);
 
 ipcMain.handle("rooms:desktop-notify", (event, input) => {
   if (!desktopSettings.notifications || !isRoomsSender(event)) return false;
@@ -732,7 +736,11 @@ function prepareRoomsWindow(origin) {
     }
     return false;
   }
+  const videoWindow = detachedVideo(contents, origin, () => isActive() && isRoomsPage(contents.getURL(), origin), allowedChild, appIcon);
+  detachedVideos.set(contents, videoWindow);
   media.webRequest.onBeforeRequest(navigation, (details, callback) => {
+    const detached = videoWindow.navigation(details);
+    if (detached !== null) return callback({ cancel: !detached });
     if (details.webContentsId !== contents.id) return callback({ cancel: true });
     const main = details.resourceType === "mainFrame";
     const accept = main ? allowedMain(details) : allowedChild(details.url, details.frame);
@@ -740,6 +748,8 @@ function prepareRoomsWindow(origin) {
     callback({ cancel: !accept });
   });
   media.webRequest.onHeadersReceived(navigation, (details, callback) => {
+    const detached = videoWindow.navigation(details, true);
+    if (detached !== null) return callback({ cancel: !detached });
     if (details.webContentsId !== contents.id) return callback({ cancel: true });
     if (details.resourceType === "subFrame") return callback({ cancel: !allowedChild(details.url, details.frame) });
     const acceptedAddress = allowedMain(details);
@@ -756,8 +766,9 @@ function prepareRoomsWindow(origin) {
   contents.on("will-redirect", event => {
     if (event.isMainFrame || !allowedChild(event.url, event.frame)) event.preventDefault();
   });
-  contents.setWindowOpenHandler(({ url }) => {
-    const external = webUrl(url);
+  contents.setWindowOpenHandler(details => {
+    if (videoWindow.handles(details)) return videoWindow.handleOpen(details);
+    const external = webUrl(details.url);
     if (external && isActive() && isRoomsPage(contents.getURL(), origin)) shell.openExternal(external.href).catch(() => {});
     return { action: "deny" };
   });
@@ -773,6 +784,7 @@ function prepareRoomsWindow(origin) {
     moveToBackground(window).catch(() => {});
   });
   window.on("closed", () => {
+    videoWindow.reset();
     if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: closing });
     if (roomsWindow === window) {
       roomsWindow = null;

@@ -31,16 +31,23 @@ body {
 
 .header-media {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: end;
   gap: 6px;
   margin-inline-start: auto;
-  min-inline-size: 0;
+  min-inline-size: min-content;
 }
 
-.header-media:not(:has(> :not([hidden]))) { display: none; }
-.header-media:has(> :not([hidden])) + .profile { margin-inline-start: 0; }
-#player-dock, #video-dock, #voice-dock, #broadcast-dock, #native-broadcast-dock { min-inline-size: 0; }
+.header-media:not(:has(.header-dock:not([hidden]))) { display: none; }
+.header-media:has(.header-dock:not([hidden])) + .profile { margin-inline-start: 0; }
+.header-dock { min-inline-size: 0; }
+.header-watch-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.header-watch-controls:not(:has(> :not([hidden]))) { display: none; }
 
 .stream-dock summary {
   min-block-size: 36px;
@@ -63,6 +70,44 @@ body {
 .stream-dock[open] summary { border-color: #7383d2; background: #303969; }
 .stream-dock summary span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.header-watch-controls :is(.quick-room-link, .video-dock-toggle) {
+  min-inline-size: 38px;
+  min-block-size: 38px;
+  padding-inline: 9px;
+  white-space: nowrap;
+}
+.header-watch-controls:has(> #quick-room-dock:not([hidden]) + #video-dock:not([hidden])) .quick-room-link {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+.header-watch-controls:has(> #quick-room-dock:not([hidden]) + #video-dock:not([hidden])) .video-dock-toggle {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-inline-start: 0;
+}
+.header-watch-controls .button:focus-visible { outline-offset: -3px; }
+.quick-room-link-icon { flex: none; color: var(--accent); font-size: 1.13em; line-height: 1; }
+.stream-dock .video-dock-toggle::before { content: none; }
+.video-dock-icon {
+  position: relative;
+  flex: none;
+  inline-size: 16px;
+  block-size: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  color: var(--accent);
+}
+.video-dock-icon::after {
+  position: absolute;
+  inset: auto 1px 1px auto;
+  inline-size: 6px;
+  block-size: 4px;
+  border-radius: 1px;
+  background: currentColor;
+  content: "";
+}
+.video-dock-title { display: none; }
+
 .stream-popover {
   position: absolute;
   z-index: 5;
@@ -77,13 +122,6 @@ body {
 
 .stream-popover .live-player { max-inline-size: none; }
 .stream-popover .player-heading { gap: 5px; }
-.video-dock-popover { background: var(--panel); border: 1px solid var(--line); }
-.video-dock-actions { justify-content: space-between; gap: 6px; padding: 7px 8px; }
-.video-dock-actions .button { min-block-size: 34px; padding: 5px 8px; font-size: .8rem; }
-.video-dock-stage .panel { border: 0; }
-.video-dock-stage .watch-party-player:not(:fullscreen) { grid-template-rows: auto minmax(204px, 1fr) auto; }
-.video-dock-stage .watch-party-heading .icon-button { display: none; }
-
 .home-dashboard {
   block-size: 100%;
   min-block-size: 0;
@@ -198,9 +236,14 @@ body {
   scrollbar-width: thin;
 }
 
-@media (max-width: 960px) {
-  .bar:has(.header-media > :not([hidden])) { flex-wrap: wrap; gap: 8px; padding-block: 8px; min-block-size: 0; }
-  .bar:has(.header-media > :not([hidden])) .navigation { order: 3; flex-basis: 100%; }
+@media (min-width: 1200px) {
+  .video-dock-label { display: none; }
+  .video-dock-title { display: block; max-inline-size: 15ch; }
+}
+
+@media (max-width: 1120px) {
+  .bar:has(.header-media .header-dock:not([hidden])) { flex-wrap: wrap; gap: 8px; padding-block: 8px; min-block-size: 0; }
+  .bar:has(.header-media .header-dock:not([hidden])) .navigation { order: 3; flex-basis: 100%; }
 }
 
 @media (max-width: 740px) {
@@ -217,12 +260,13 @@ body {
   .bar { column-gap: 7px; }
   .navigation { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, auto); gap: 2px; overflow: visible; }
   .navigation a { display: grid; place-items: center; text-align: center; padding-inline: 4px; font-size: .78rem; white-space: normal; overflow-wrap: anywhere; }
-  .bar:has(.header-media > :not([hidden])) .wordmark > span:last-child { display: none; }
+  .bar:has(.header-media .header-dock:not([hidden])) .wordmark > span:last-child { display: none; }
   .header-media { gap: 4px; }
   .profile { gap: 5px; }
   #logout { min-block-size: 34px; padding-inline: 7px; font-size: .75rem; }
   .stream-dock summary { padding-inline: 7px; gap: 4px; font-size: .75rem; }
   .stream-dock summary span { max-inline-size: 11ch; }
+  .header-watch-controls :is(.quick-room-link-label, .video-dock-label) { display: none; }
 }
 
 @media (max-width: 365px) {

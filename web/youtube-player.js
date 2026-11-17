@@ -7,10 +7,12 @@ const numeric = value => typeof value === "number" && Number.isFinite(value) && 
 
 export function createYoutubePlayer(videoId, {
   onReady, onError, onEnded, onBlocked, onPlaying, onPlaybackChange, onVolumeChange, onTitle, onVisibility,
-} = {}) {
+} = {}, ownerDocument = document) {
   if (typeof videoId !== "string" || !videoIdPattern.test(videoId)) throw new Error("Invalid YouTube video ID");
+  const view = ownerDocument.defaultView;
+  if (!view) throw new Error("YouTube playback needs an active document");
 
-  const element = document.createElement("iframe");
+  const element = ownerDocument.createElement("iframe");
   element.id = "rooms-youtube-" + crypto.randomUUID();
   element.className = "watch-youtube-frame";
   element.title = "YouTube";
@@ -25,8 +27,8 @@ export function createYoutubePlayer(videoId, {
 
   let ready = false;
   let destroyed = false;
-  let visible = false;
-  let presenting = false;
+  let visible;
+  let presenting;
   let nativeVisible = true;
   let wantsPlayback = false;
   let state = -1;
@@ -106,22 +108,23 @@ export function createYoutubePlayer(videoId, {
     if (pausing || (state !== 1 && state !== 3)) transport(true);
   }
 
-  const observer = new IntersectionObserver(([entry]) => {
+  const observer = new view.IntersectionObserver(([entry]) => {
     visible = entry.intersectionRatio > 0.5 && entry.boundingClientRect.width >= 200 && entry.boundingClientRect.height >= 200;
     updateVisibility();
   }, { threshold: [0, 0.5, 0.51, 1] });
   observer.observe(element);
 
   function updateVisibility() {
-    const next = ready && visible && nativeVisible && !document.hidden;
+    if (!ready || visible === undefined) return;
+    const next = visible && nativeVisible && !ownerDocument.hidden;
     if (next === presenting) return;
     presenting = next;
     wantsPlayback = false;
     if (!next && (state === 1 || state === 3)) transport(false);
     onVisibility?.(presenting);
   }
-  document.addEventListener("visibilitychange", updateVisibility);
-  const unobserveWindow = window.roomsWindowVisibility?.observe(value => { nativeVisible = value; updateVisibility(); });
+  ownerDocument.addEventListener("visibilitychange", updateVisibility);
+  const unobserveWindow = view.roomsWindowVisibility?.observe(value => { nativeVisible = value; updateVisibility(); });
 
   function updateState(value, stateEvent = false) {
     if (![0, 1, 2, 3, 5, -1].includes(value)) return;
@@ -143,8 +146,8 @@ export function createYoutubePlayer(videoId, {
     const playing = value !== 2;
     // Player state can also change because of buffering, browser policy, or our own commands.
     if (!stateEvent || confirming || now < ignoreSeekUntil || playing === wantsPlayback ||
-        !presenting || !document.hasFocus() ||
-        document.activeElement !== element || navigator.userActivation?.isActive !== true) return;
+        !presenting || !ownerDocument.hasFocus() ||
+        ownerDocument.activeElement !== element || view.navigator.userActivation?.isActive !== true) return;
     wantsPlayback = playing;
     onPlaybackChange?.(playing);
   }
@@ -193,7 +196,9 @@ export function createYoutubePlayer(videoId, {
     }
   }
 
-  window.addEventListener("message", receive);
+  view.addEventListener("message", receive);
+  // A reply addressed to the JavaScript sender can still arrive in the opener.
+  if (view !== window) window.addEventListener("message", receive);
   element.src = url.href;
   const connecting = setInterval(() => send({ event: "listening" }), connectionInterval);
   const failed = setTimeout(() => {
@@ -236,9 +241,10 @@ export function createYoutubePlayer(videoId, {
       clearTimeout(failed);
       clearTimeout(volumeTimer);
       observer.disconnect();
-      document.removeEventListener("visibilitychange", updateVisibility);
+      ownerDocument.removeEventListener("visibilitychange", updateVisibility);
       unobserveWindow?.();
-      window.removeEventListener("message", receive);
+      view.removeEventListener("message", receive);
+      if (view !== window) window.removeEventListener("message", receive);
       if (presenting) onVisibility?.(false);
       element.remove();
     },

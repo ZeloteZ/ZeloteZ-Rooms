@@ -18,8 +18,9 @@ export function clearQuickLinks() {
 }
 
 export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroadcast }) {
-  const name = el("span", { class: "quick-room-link-name" });
-  const link = el("a", { class: "button quick-room-link" }, el("span", { "aria-hidden": "true" }, "▶"), name);
+  const link = el("a", { class: "button quick-room-link" },
+    el("span", { class: "quick-room-link-icon", "aria-hidden": "true" }, "↩"),
+    el("span", { class: "quick-room-link-label" }, t("Back to room", "Zum Raum")));
   dock.replaceChildren(link);
   let room;
   let revision = 0;
@@ -32,13 +33,13 @@ export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroa
     dock.hidden = !room || Boolean(hasCaptureLink);
     if (!room) {
       link.removeAttribute("href");
-      return;
+    } else {
+      link.href = topicHref(room.topicId, channelId);
+      const label = t("Return to “{title}”", "Zurück zu „{title}“", { title: room.title });
+      link.setAttribute("aria-label", label);
+      link.title = label;
     }
-    link.href = topicHref(room.topicId, channelId);
-    name.textContent = room.title;
-    const label = t("Return to “{title}”", "Zurück zu „{title}“", { title: room.title });
-    link.setAttribute("aria-label", label);
-    link.title = label;
+    dock.dispatchEvent(new Event("rooms:quick-return-changed", { bubbles: true }));
   }
 
   function setRoom(value) {

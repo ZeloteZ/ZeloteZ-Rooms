@@ -27,6 +27,7 @@
   <link rel="stylesheet" href="/direct.css">
   <link rel="stylesheet" href="/tutorial.css">
   <link rel="stylesheet" href="/live-sidebar.css">
+  <link rel="stylesheet" href="/floating-video.css">
   <script src="/vendor/hls.min.js" defer></script>
   <script src="/crypto.js" defer></script>
   <script type="module" src="/app.js"></script>
@@ -46,12 +47,14 @@
         <a href="#/help" data-nav="help">How it works</a>
       </nav>
       <div class="header-media">
-        <div id="player-dock" hidden></div>
-        <div id="video-dock" hidden></div>
-        <div id="voice-dock" hidden></div>
-        <div id="broadcast-dock" hidden></div>
-        <div id="native-broadcast-dock" hidden></div>
-        <div id="quick-room-dock" hidden></div>
+        <div id="player-dock" class="header-dock" hidden></div>
+        <div class="header-watch-controls">
+          <div id="quick-room-dock" class="header-dock" hidden></div>
+          <div id="video-dock" class="header-dock" hidden></div>
+        </div>
+        <div id="voice-dock" class="header-dock" hidden></div>
+        <div id="broadcast-dock" class="header-dock" hidden></div>
+        <div id="native-broadcast-dock" class="header-dock" hidden></div>
       </div>
       <div class="profile" id="profile" hidden>
         <button type="button" class="button profile-edit" id="profile-edit" aria-label="Edit profile" aria-haspopup="dialog" title="Edit profile">

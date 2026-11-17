@@ -1,24 +1,5 @@
 .home-room-actions { flex: none; flex-wrap: nowrap; }
 
-#quick-room-dock { min-inline-size: 0; }
-.quick-room-link.button {
-  min-block-size: 36px;
-  max-inline-size: clamp(95px, 16vw, 182px);
-  width: 100%;
-}
-.quick-room-link > [aria-hidden] { flex: none; color: var(--accent); font-size: .72em; }
-.quick-room-link-name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-@media (max-width: 445px) {
-  .quick-room-link.button { gap: 4px; padding-inline: 7px; font-size: .75rem; }
-  .quick-room-link-name { max-inline-size: 11ch; }
-}
-
-@media (max-width: 365px) {
-  .quick-room-link.button { min-inline-size: 36px; }
-  .quick-room-link-name { display: none; }
-}
-
 .quick-sources, .quick-options { display: grid; gap: 8px; }
 .quick-choice.button {
   min-block-size: 58px;
