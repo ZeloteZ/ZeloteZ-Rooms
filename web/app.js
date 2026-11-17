@@ -78,7 +78,7 @@ wordmark.setAttribute("aria-label", t("ZeloteZ Rooms – Home", "ZeloteZ Rooms �
 logout.textContent = t("Sign out", "Abmelden");
 profileEditor.title = t("Edit profile", "Profil bearbeiten");
 profileEditor.setAttribute("aria-label", profileEditor.title);
-downloadsLink.textContent = t("Get the Client", "Get the Client");
+downloadsLink.querySelector(".download-label").textContent = t("Client", "Client");
 downloadsLink.hidden = desktop;
 document.querySelector("#dialog-close").setAttribute("aria-label", t("Close", "Schließen"));
 bootstrap.querySelector("p").textContent = t("Checking the connection …", "Verbindung wird geprüft …");
