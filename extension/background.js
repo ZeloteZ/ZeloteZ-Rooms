@@ -42,7 +42,7 @@ async function execute(tabId, func, args) {
   return result?.result;
 }
 
-async function reuseOpenRoom(handoff, origin, videoId) {
+async function reuseOpenRoom(handoff, origin, videoId, audience) {
   const account = await execute(handoff.id, readRoomsAccount, [origin]);
   if (typeof account !== "string" || !uuid.test(account)) return false;
   const tabs = await api.tabs.query({ windowId: handoff.windowId });
@@ -51,7 +51,8 @@ async function reuseOpenRoom(handoff, origin, videoId) {
     .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0)).slice(0, 6);
   for (const candidate of candidates) {
     if (!atAddress(await api.tabs.get(handoff.id), origin + "/")) return false;
-    const result = await execute(candidate.id, createSignedInRoom, [origin, videoId, account, candidate.url]).catch(() => ({ handled: false }));
+    const result = await execute(candidate.id, createSignedInRoom, [origin, videoId, account, candidate.url, audience])
+      .catch(() => ({ handled: false }));
     if (!result) continue;
     // Do not retry a room mutation from another tab if the first response was incomplete.
     if (!uuid.test(result.topicId ?? "") || !uuid.test(result.channelId ?? "")) return false;
@@ -68,10 +69,9 @@ async function reuseOpenRoom(handoff, origin, videoId) {
   return false;
 }
 
-async function launchInBrowser(tabId, videoId) {
+async function launchInBrowser(tabId, videoId, origin, audience) {
   const source = panel + "#" + videoId;
   let moved = false;
-  let origin;
   const trackNavigation = (id, change) => {
     if (id === tabId && (change.status === "loading" || (change.url && change.url !== source))) moved = true;
   };
@@ -79,8 +79,7 @@ async function launchInBrowser(tabId, videoId) {
   try {
     const stored = await api.storage.local.get(configKey);
     const config = configFrom(stored[configKey]);
-    if (!config || !await api.permissions.contains(permissionFor(config.origin))) throw new Error("permissionRequired");
-    origin = config.origin;
+    if (!config || config.origin !== origin || !await api.permissions.contains(permissionFor(config.origin))) throw new Error("permissionRequired");
     await verifyInstance(origin);
     const tab = await api.tabs.get(tabId);
     // Some browsers omit the URL of the sender's own extension page from tabs.get().
@@ -90,8 +89,8 @@ async function launchInBrowser(tabId, videoId) {
   }
   await api.tabs.update(tabId, { url: origin + "/" });
   const tab = await waitForTab(tabId, origin + "/", source);
-  if (tab && await reuseOpenRoom(tab, origin, videoId).catch(() => false)) return;
-  if (atAddress(await api.tabs.get(tabId), origin + "/")) await api.tabs.update(tabId, { url: browserHandoff(origin, videoId) });
+  if (tab && await reuseOpenRoom(tab, origin, videoId, audience).catch(() => false)) return;
+  if (atAddress(await api.tabs.get(tabId), origin + "/")) await api.tabs.update(tabId, { url: browserHandoff(origin, videoId, audience) });
 }
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -108,11 +107,14 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "rooms-browser-handoff" && sender.url?.startsWith(panel + "#")) {
     const id = sender.url.slice(panel.length + 1);
-    if (!videoIdPattern.test(id)) return;
+    const { origin, guestAccess, memberVisibility } = message;
+    if (!videoIdPattern.test(id) || typeof origin !== "string" ||
+        typeof guestAccess !== "boolean" || typeof memberVisibility !== "boolean") return;
     const tabId = sender.tab.id;
     if (launching.has(tabId)) return;
     launching.add(tabId);
-    launchInBrowser(tabId, id).then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, code: error.message }))
+    launchInBrowser(tabId, id, origin, { guestAccess, memberVisibility })
+      .then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, code: error.message }))
       .finally(() => { launching.delete(tabId); handoffTabs.delete(tabId); });
     return true;
   }

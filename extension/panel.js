@@ -8,9 +8,14 @@ const address = find("#instance");
 const target = find("#target");
 const save = find("#save");
 const status = find("#status");
-const desktop = find("#desktop");
+const handoff = find("#handoff");
+const handoffInstance = find("#handoff-instance");
+const desktopNote = find("#desktop-note");
 const openDesktop = find("#open-desktop");
+const openInBrowser = find("#browser-fallback");
 const edit = find("#edit");
+const defaults = mountAccessOptions("#default-access");
+const forVideo = mountAccessOptions("#video-access");
 const videoId = location.hash.slice(1);
 const selectedVideo = videoIdPattern.test(videoId);
 const knownErrors = ["invalidAddress", "invalidInstance", "incompatibleInstance", "permissionRequired"];
@@ -21,6 +26,20 @@ document.title = text(selectedVideo ? "createRoom" : "settingsTitle");
 find("h1").dataset.text = selectedVideo ? "createRoom" : "settingsTitle";
 for (const node of document.querySelectorAll("[data-text]")) node.textContent = text(node.dataset.text);
 
+function mountAccessOptions(selector) {
+  const fields = find("#room-access-options").content.cloneNode(true);
+  const guest = fields.querySelector('[name="guestAccess"]');
+  const members = fields.querySelector('[name="memberVisibility"]');
+  find(selector).append(fields);
+  return {
+    read: () => ({ guestAccess: guest.checked, memberVisibility: members.checked }),
+    set({ guestAccess = true, memberVisibility = true } = {}) {
+      guest.checked = guestAccess;
+      members.checked = memberVisibility;
+    },
+  };
+}
+
 function setStatus(key, error = false) {
   status.hidden = !key;
   status.classList.toggle("error", error);
@@ -28,7 +47,7 @@ function setStatus(key, error = false) {
 }
 
 function showSettings() {
-  desktop.hidden = true;
+  handoff.hidden = true;
   openDesktop.removeAttribute("href");
   edit.hidden = true;
   form.hidden = false;
@@ -41,25 +60,34 @@ function showError(error) {
 
 async function openBrowser() {
   setStatus("opening");
-  desktop.hidden = true;
+  handoff.hidden = true;
+  edit.hidden = true;
   openDesktop.removeAttribute("href");
-  const result = await api.runtime.sendMessage({ type: "rooms-browser-handoff" });
+  const result = await api.runtime.sendMessage({ type: "rooms-browser-handoff", origin: current.origin, ...forVideo.read() });
   if (!result?.ok) throw new Error(result?.code || "checkFailed");
 }
 
-async function launch() {
+function updateDesktopLink() {
+  openDesktop.href = desktopHandoff(current.origin, videoId, forVideo.read());
+}
+
+async function showHandoff(alreadyVerified = false) {
   form.hidden = true;
   edit.hidden = true;
-  setStatus("checking");
-  if (current.target === "browser") {
-    await openBrowser();
-    return;
+  const inDesktop = current.target === "desktop";
+  if (inDesktop && !alreadyVerified) {
+    setStatus("checking");
+    if (!await api.permissions.contains(permissionFor(current.origin))) throw new Error("permissionRequired");
+    await verifyInstance(current.origin);
   }
-  if (!await api.permissions.contains(permissionFor(current.origin))) throw new Error("permissionRequired");
-  await verifyInstance(current.origin);
+  forVideo.set(current);
+  handoffInstance.textContent = current.origin;
+  desktopNote.hidden = openDesktop.hidden = !inDesktop;
+  if (inDesktop) updateDesktopLink();
+  openInBrowser.classList.toggle("primary", !inDesktop);
+  openInBrowser.textContent = text(inDesktop ? "openBrowser" : "openInBrowser");
   setStatus("");
-  openDesktop.href = desktopHandoff(current.origin, videoId);
-  desktop.hidden = false;
+  handoff.hidden = false;
   edit.hidden = false;
 }
 
@@ -68,7 +96,7 @@ form.addEventListener("submit", async event => {
   if (save.disabled) return;
   const origin = instanceOrigin(address.value);
   if (!origin) return setStatus("invalidAddress", true);
-  const next = { origin, target: target.value };
+  const next = { origin, target: target.value, ...defaults.read() };
   const permission = permissionFor(next.origin);
   const previous = current && permissionFor(current.origin);
   const changedHost = previous?.origins[0] !== permission.origins[0];
@@ -83,7 +111,7 @@ form.addEventListener("submit", async event => {
     if (previous && changedHost) await api.permissions.remove(previous).catch(() => {});
     current = next;
     address.value = next.origin;
-    if (selectedVideo) await launch();
+    if (selectedVideo) await showHandoff(true);
     else setStatus("saved");
   } catch (error) {
     if (permitted && changedHost && current !== next) await api.permissions.remove(permission).catch(() => {});
@@ -94,14 +122,18 @@ form.addEventListener("submit", async event => {
 });
 
 edit.addEventListener("click", showSettings);
-find("#browser-fallback").addEventListener("click", () => void openBrowser().catch(showError));
+find("#video-access").addEventListener("change", () => {
+  if (!openDesktop.hidden) updateDesktopLink();
+});
+openInBrowser.addEventListener("click", () => void openBrowser().catch(showError));
 
 try {
   const stored = await api.storage.local.get(configKey);
   current = configFrom(stored[configKey]);
   address.value = current?.origin ?? "";
   target.value = current?.target ?? "browser";
-  if (selectedVideo && current) await launch();
+  defaults.set(current ?? undefined);
+  if (selectedVideo && current) await showHandoff();
   else showSettings();
 } catch (error) {
   showError(error);

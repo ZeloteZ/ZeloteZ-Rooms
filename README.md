@@ -51,7 +51,7 @@ Desktop update notifications are optional. Enable them and choose a check interv
 
 ## YouTube browser extension
 
-On YouTube, click **Create ZeloteZ Room** beside **Share**. **This browser** can start the watch party in an open Rooms tab for the same account in that browser window. If Rooms opens a new tab, sign in or enter your password under **Unlock chats**, then confirm the video in Rooms.
+On YouTube, click **Create ZeloteZ Room** beside **Share** and review the room access options. Guest links and the **Live Now** listing for members are enabled by default. You can set your own defaults in the extension settings or change them for one video. Choose **Open in browser** to use an open Rooms tab for the same account in that browser window. If Rooms opens a new tab, sign in or enter your password under **Unlock chats**, then confirm the video in Rooms.
 
 For **ZeloteZ Rooms Desktop**, open the installed app once and connect to the same Rooms address you entered in the extension. On Linux, make the AppImage executable and start it from the location where you’ll keep it so it can register its link handler. If the desktop app is unavailable, choose **Continue in browser**. [Desktop installation guide](desktop/README.md)
 

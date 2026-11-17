@@ -21,7 +21,11 @@ export function permissionFor(origin) {
 export function configFrom(value) {
   const origin = instanceOrigin(value?.origin);
   if (!origin || !["browser", "desktop"].includes(value?.target)) return null;
-  return { origin, target: value.target };
+  return {
+    origin, target: value.target,
+    guestAccess: value.guestAccess === undefined || value.guestAccess === true,
+    memberVisibility: value.memberVisibility === undefined || value.memberVisibility === true,
+  };
 }
 
 export function youtubeVideoId(address) {
@@ -41,15 +45,20 @@ function endpointArguments(origin, id) {
   }
 }
 
-export function browserHandoff(origin, id) {
-  endpointArguments(origin, id);
-  return new URL("/#/share/youtube/" + id, origin).href;
+function audienceQuery({ guestAccess, memberVisibility }) {
+  return new URLSearchParams({ guests: guestAccess ? "1" : "0", live: memberVisibility ? "1" : "0" });
 }
 
-export function desktopHandoff(origin, id) {
+export function browserHandoff(origin, id, audience) {
+  endpointArguments(origin, id);
+  return new URL("/#/share/youtube/" + id + "?" + audienceQuery(audience), origin).href;
+}
+
+export function desktopHandoff(origin, id, audience) {
   endpointArguments(origin, id);
   const url = new URL("zelotez-rooms://share/youtube/" + id);
   url.searchParams.set("instance", origin);
+  for (const [key, value] of audienceQuery(audience)) url.searchParams.set(key, value);
   return url.href;
 }
 

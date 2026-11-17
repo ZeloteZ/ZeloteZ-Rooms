@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { configFrom, desktopHandoff } from '../links.mjs'
 
 const origin = 'https://rooms.example.test'
 const panel = 'chrome-extension://rooms-test/panel.html'
@@ -12,6 +13,8 @@ const topic = '00000000-0000-4000-8000-000000000003'
 const channel = '00000000-0000-4000-8000-000000000004'
 const roomUrl = `${origin}/#/rooms/${topic}/${channel}`
 const confirmation = `${origin}/#/share/youtube/${video}`
+const defaultAudience = { guestAccess: true, memberVisibility: true }
+const guestSecret = 'a'.repeat(43)
 let fixtureId = 0
 
 async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, watchStatus = 200 } = {}) {
@@ -20,6 +23,7 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
   const attempts = []
   const requests = []
   const removed = []
+  const links = []
   let messageListener
   let onRemoved
   let nextId = 0
@@ -87,7 +91,13 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
           if (selector === '#workspace:not([hidden])' || selector === '#auth[hidden]') return current.workspace ? {} : null
           if (selector === '#profile-name') return { getAttribute: () => current.displayedAccount }
           if (selector === 'dialog[open]') return current.dialog ? {} : null
+          if (selector === '#quick-room-dock[data-guest-links]') return current.guestLinks === false ? null : {}
           throw new Error(`Unexpected selector ${selector}`)
+        }, dispatchEvent(event) {
+          assert.equal(event.type, 'rooms:guest-link-created')
+          assert.equal(event.cancelable, true)
+          links.push([current.id, JSON.parse(event.detail)])
+          return current.retainGuestLink === false
         } }
         function fetch(url, options) {
           const withAccount = options.headers?.['X-Rooms-Account']
@@ -98,7 +108,9 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
             return Response.json({ user: current.sessionAccount ? { id: current.sessionAccount } : null })
           }
           if (url.pathname === '/api/quick-rooms') {
-            return Response.json({ publicId: topic, topicId: topic, channelId: channel, source: 'youtube', guestAccess: false, memberVisibility: false })
+            const audience = JSON.parse(options.body)
+            return Response.json({ publicId: topic, topicId: topic, channelId: channel, ...audience,
+              ...(audience.guestAccess && { secret: guestSecret }) })
           }
           if (url.pathname === `/api/channels/${channel}/watch`) {
             return Response.json({ party: { videoId: video, source: 'youtube' } }, { status: watchStatus })
@@ -106,7 +118,10 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
           if (url.pathname === `/api/quick-rooms/${topic}`) return new Response(null, { status: 204 })
           throw new Error(`Unexpected request ${url}`)
         }
-        const result = await runInNewContext(`(${func.toString()})(...args)`, { window, document, location, fetch, URL, AbortSignal, args })
+        const result = await runInNewContext(`(${func.toString()})(...args)`, {
+          window, document, location, fetch, URL, AbortSignal, CustomEvent, args,
+        })
+        if (func.name === 'createSignedInRoom') assert.ok(!JSON.stringify(result).includes(guestSecret))
         current.url = location.href
         return [{ result }]
       },
@@ -114,19 +129,20 @@ async function fixture(t, { hidePanelUrl = false, reportOldPanelOnce = false, wa
   }
   await import(`../background.js?fixture=${fixtureId++}`)
 
-  function message(type, tab, url = tab.url) {
-    return new Promise(resolve => assert.equal(messageListener({ type }, { id: 'rooms-test', frameId: 0, tab, url }, resolve), true))
+  function message(type, tab, url = tab.url, values = {}) {
+    return new Promise(resolve => assert.equal(messageListener({ type, ...values }, { id: 'rooms-test', frameId: 0, tab, url }, resolve), true))
   }
   async function openHandoff() {
     const youtube = tab({ url: `https://www.youtube.com/watch?v=${video}`, workspace: false })
     assert.deepEqual(await message('rooms-youtube-video', youtube), { ok: true })
     return [...tabs.values()].find(tab => tab.url === source)
   }
-  return { tab, openHandoff, launch: tab => message('rooms-browser-handoff', tab, source), attempts, requests, removed }
+  return { tab, openHandoff, launch: (tab, audience = defaultAudience) => message('rooms-browser-handoff', tab, source, { origin, ...audience }),
+    attempts, requests, removed, links }
 }
 
 test('reuses an open same-account workspace and closes only the managed handoff tab', async t => {
-  const { tab, openHandoff, launch, attempts, requests, removed } = await fixture(t, { hidePanelUrl: true, reportOldPanelOnce: true })
+  const { tab, openHandoff, launch, attempts, requests, removed, links } = await fixture(t, { hidePanelUrl: true, reportOldPanelOnce: true })
   const ready = tab()
   const stale = tab({ sessionAccount: otherAccount })
   const differentAccount = tab({ displayedAccount: otherAccount, sessionAccount: otherAccount })
@@ -147,8 +163,9 @@ test('reuses an open same-account workspace and closes only the managed handoff 
     [handoff.id, 'GET', undefined], [stale.id, 'GET', account], [ready.id, 'GET', account],
     [ready.id, 'POST', account], [ready.id, 'POST', account],
   ])
-  assert.deepEqual(JSON.parse(requests[3].body), { source: 'youtube', guestAccess: false, memberVisibility: false })
+  assert.deepEqual(JSON.parse(requests[3].body), { source: 'youtube', ...defaultAudience })
   assert.deepEqual(JSON.parse(requests[4].body), { source: 'youtube', videoId: video })
+  assert.deepEqual(links, [[ready.id, { accountId: account, publicId: topic, secret: guestSecret }]])
 })
 
 test('a signed-in cookie alone routes the new tab to confirmation without creating a room', async t => {
@@ -157,8 +174,8 @@ test('a signed-in cookie alone routes the new tab to confirmation without creati
   tab({ dialog: true })
   tab({ onSession(location) { location.hash = '#/friends' } })
   const handoff = await openHandoff()
-  assert.deepEqual(await launch(handoff), { ok: true })
-  assert.equal(handoff.url, confirmation)
+  assert.deepEqual(await launch(handoff, { guestAccess: false, memberVisibility: true }), { ok: true })
+  assert.equal(handoff.url, confirmation + '?guests=0&live=1')
   assert.ok(requests.every(request => request.method === 'GET'))
   assert.deepEqual(removed, [])
 })
@@ -169,9 +186,48 @@ test('a partial watch start removes the incomplete room and falls back without r
   const recent = tab()
   const handoff = await openHandoff()
   assert.deepEqual(await launch(handoff), { ok: true })
-  assert.equal(handoff.url, confirmation)
+  assert.equal(handoff.url, confirmation + '?guests=1&live=1')
   assert.deepEqual(requests.filter(request => request.method !== 'GET').map(({ tabId, method, account: expected }) => [tabId, method, expected]), [
     [recent.id, 'POST', account], [recent.id, 'POST', account], [recent.id, 'DELETE', account],
   ])
   assert.deepEqual(removed, [])
+})
+
+test('both off creates a private room without passing a guest link', async t => {
+  const { tab, openHandoff, launch, requests, links } = await fixture(t)
+  const ready = tab({ guestLinks: false })
+  const handoff = await openHandoff()
+  const audience = { guestAccess: false, memberVisibility: false }
+  assert.deepEqual(await launch(handoff, audience), { ok: true })
+  assert.equal(ready.url, roomUrl)
+  assert.deepEqual(JSON.parse(requests.find(request => request.path === '/api/quick-rooms').body), { source: 'youtube', ...audience })
+  assert.deepEqual(links, [])
+})
+
+test('guest access falls back to confirmation in a tab without link retention', async t => {
+  const { tab, openHandoff, launch, requests, links } = await fixture(t)
+  tab({ guestLinks: false })
+  const handoff = await openHandoff()
+  assert.deepEqual(await launch(handoff), { ok: true })
+  assert.equal(handoff.url, confirmation + '?guests=1&live=1')
+  assert.ok(requests.every(request => request.method === 'GET'))
+  assert.deepEqual(links, [])
+})
+
+test('a stale handoff panel cannot apply its audience to a newly configured origin', async t => {
+  const { openHandoff, launch, attempts } = await fixture(t)
+  const handoff = await openHandoff()
+  assert.deepEqual(await launch(handoff, { ...defaultAudience, origin: 'https://other.example.test' }),
+    { ok: false, code: 'permissionRequired' })
+  assert.equal(handoff.url, source)
+  assert.deepEqual(attempts, [])
+})
+
+test('legacy saved settings and desktop links preserve the intended audience', () => {
+  const legacy = { origin, target: 'desktop' }
+  assert.deepEqual(configFrom(legacy), { ...legacy, ...defaultAudience })
+  const custom = { guestAccess: true, memberVisibility: false }
+  assert.deepEqual(configFrom({ ...legacy, ...custom }), { ...legacy, ...custom })
+  assert.equal(desktopHandoff(origin, video, custom),
+    'zelotez-rooms://share/youtube/' + video + '?instance=' + encodeURIComponent(origin) + '&guests=1&live=0')
 })

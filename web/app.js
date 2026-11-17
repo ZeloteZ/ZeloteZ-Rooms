@@ -103,9 +103,15 @@ function takeLinkToken(name) {
 
 function getRoute() {
   try {
-    const [path, query] = location.hash.replace(/^#\/?/u, "").split("?", 2);
-    const sharedVideo = query === undefined && /^share\/youtube\/([A-Za-z0-9_-]{11})$/u.exec(path)?.[1];
-    if (sharedVideo) return { page: "rooms", sharedVideo };
+    const fragment = location.hash.replace(/^#\/?/u, "");
+    const shared = /^share\/youtube\/([A-Za-z0-9_-]{11})(?:\?((?:guests=[01](?:&live=[01])?|live=[01](?:&guests=[01])?)))?$/u.exec(fragment);
+    if (shared) {
+      const audience = new URLSearchParams(shared[2]);
+      return { page: "rooms", sharedVideo: shared[1], audience: {
+        guestAccess: audience.get("guests") !== "0", memberVisibility: audience.get("live") !== "0",
+      } };
+    }
+    const [path, query] = fragment.split("?", 2);
     const [page = "rooms", topicId, channelId] = path.split("/").filter(Boolean).map(decodeURIComponent);
     const params = new URLSearchParams(query);
     const message = params.get("message");
@@ -319,7 +325,7 @@ async function showWorkspace(nextUser, unlocked = true) {
   voice = createVoicePanel({ user, signal }, voiceDock);
   screenShare = createScreenShareController({ signal }, broadcastDock);
   nativeBroadcast = createNativeBroadcast(signal, nativeBroadcastDock);
-  quickRoomHeader = mountQuickRoomDock(quickRoomDock, { signal, screenShare, nativeBroadcast });
+  quickRoomHeader = mountQuickRoomDock(quickRoomDock, { user, signal, screenShare, nativeBroadcast });
   tutorials = createTutorials(user.id, signal);
   mountNotifications(notificationDock, signal, render);
   if (unlocked) startHistorySharing(signal, user.id);
@@ -590,7 +596,7 @@ async function render(force = false) {
         button(t("Unlock chats", "Chats entsperren"), changePassword))] : []), page);
       player.refreshPlacement();
       videoDock.refreshPlacement();
-      if (route.sharedVideo) confirmYoutubeRoom(context, route.sharedVideo);
+      if (route.sharedVideo) confirmYoutubeRoom(context, route.sharedVideo, route.audience);
       else showTutorial(route, page);
     }
   } catch (error) {

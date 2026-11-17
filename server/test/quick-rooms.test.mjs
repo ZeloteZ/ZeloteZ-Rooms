@@ -103,6 +103,7 @@ test('temporary rooms are hidden, use the selected source once, and opt in to si
   await assert.rejects(request('GET', roomPath, { user: friend }), { status: 404 })
   await assert.rejects(request('PATCH', roomPath, { user: host, body: { visibility: 'public' } }), { status: 403 })
   await assert.rejects(request('GET', guestPath(room, 'state'), { user: friend }), { status: 404 })
+  await assert.rejects(request('GET', guestPath(room, 'state')), { status: 404 })
   assert.throws(() => quick.assertTemporarySource(room.channelId, host.id, 'screen'), { status: 409 })
   start(room, host)
   assert.throws(() => quick.assertTemporarySource(room.channelId, host.id, 'youtube'), { status: 409 })
@@ -123,6 +124,40 @@ test('temporary rooms are hidden, use the selected source once, and opt in to si
   await request('POST', '/api/quick-rooms', { user: host, body: { source: 'screen' } })
   assert.equal(db.prepare('SELECT 1 FROM topics WHERE id = ?').get(abandoned.topicId), undefined)
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+})
+
+test('a room created for guests and members returns its initial guest secret only on creation', async t => {
+  const { user, request, quick, start, guestPath, ownerPath } = fixture(t)
+  const host = user('test-host')
+  const member = user('test-member')
+  const body = { source: 'youtube', guestAccess: true, memberVisibility: true }
+  await assert.rejects(request('POST', '/api/quick-rooms', { body }), { status: 401 })
+  const { status, body: room } = await request('POST', '/api/quick-rooms', { user: host, body })
+  assert.equal(status, 201)
+  assert.equal(room.guestAccess, true)
+  assert.equal(room.memberVisibility, true)
+  assert.equal(room.guestPath, '/guest/' + room.publicId)
+  assert.match(room.secret, /^[A-Za-z0-9_-]{43}$/u)
+  assert.equal((await request('GET', '/api/quick-rooms', { user: host })).body.room.secret, undefined)
+  assert.equal((await request('GET', ownerPath(room), { user: host })).body.secret, undefined)
+  const save = await request('PATCH', ownerPath(room), { user: host, body: { guestAccess: true, memberVisibility: true } })
+  assert.equal(save.body.secret, undefined)
+
+  assert.deepEqual(await quick.homeActivity(), [])
+  start(room, host)
+  assert.deepEqual(await quick.homeActivity(), [{ publicId: room.publicId, source: 'youtube', title: 'Shared clip' }])
+  await assert.rejects(request('GET', ownerPath(room), { user: member }), { status: 404 })
+  await assert.rejects(request('GET', guestPath(room, 'state')), { status: 401 })
+  const signedIn = await request('GET', guestPath(room, 'state'), { user: member })
+  assert.equal(signedIn.body.party.title, 'Shared clip')
+  assert.equal(signedIn.body.secret, undefined)
+
+  const redeem = await request('POST', guestPath(room, 'session'), { body: { password: room.secret } })
+  assert.equal(redeem.status, 204)
+  const cookie = redeem.headers['Set-Cookie'].split(';')[0]
+  const guest = await request('GET', guestPath(room, 'state'), { cookie })
+  assert.equal(guest.body.party.title, 'Shared clip')
+  assert.equal(guest.body.secret, undefined)
 })
 
 test('guest passwords are hashed and redeem only scoped room access, which rotation and revocation invalidate', async t => {

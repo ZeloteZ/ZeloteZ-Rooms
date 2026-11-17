@@ -17,7 +17,7 @@ export function clearQuickLinks() {
   passwords.clear();
 }
 
-export function mountQuickRoomDock(dock, { signal, screenShare, nativeBroadcast }) {
+export function mountQuickRoomDock(dock, { user, signal, screenShare, nativeBroadcast }) {
   const name = el("span", { class: "quick-room-link-name" });
   const link = el("a", { class: "button quick-room-link" }, el("span", { "aria-hidden": "true" }, "▶"), name);
   dock.replaceChildren(link);
@@ -74,8 +74,19 @@ export function mountQuickRoomDock(dock, { signal, screenShare, nativeBroadcast 
   screenShare.whenChanged(captureChanged, { signal });
   nativeBroadcast?.whenChanged(captureChanged, { signal });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); }, { signal });
+  document.addEventListener("rooms:guest-link-created", event => {
+    if (typeof event.detail !== "string" || event.detail.length > 200) return;
+    let link;
+    try { link = JSON.parse(event.detail); } catch { return; }
+    if (link?.accountId !== user.id || typeof link.publicId !== "string" || !uuid.test(link.publicId) ||
+        typeof link.secret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(link.secret)) return;
+    rememberLink(user, { publicId: link.publicId, secret: link.secret, guestAccess: true });
+    event.preventDefault();
+  }, { signal });
+  dock.dataset.guestLinks = "";
   signal.addEventListener("abort", () => {
     clearTimeout(timer);
+    delete dock.dataset.guestLinks;
     dock.hidden = true;
     dock.replaceChildren();
   }, { once: true });
@@ -116,7 +127,7 @@ function sharingOption(control, title, description) {
     el("span", {}, el("strong", {}, title), el("small", { class: "muted" }, description)));
 }
 
-function audienceFields(settings = {}) {
+function audienceFields(settings = { guestAccess: true, memberVisibility: true }) {
   const guest = el("input", { type: "checkbox", checked: settings.guestAccess === true });
   const members = el("input", { type: "checkbox", checked: settings.memberVisibility === true });
   return {
@@ -129,15 +140,17 @@ function audienceFields(settings = {}) {
   };
 }
 
-export function confirmYoutubeRoom(context, videoId) {
+export function confirmYoutubeRoom(context, videoId, settings) {
   if (!/^[A-Za-z0-9_-]{11}$/u.test(videoId)) return;
   const heading = t("Create temporary room", "Temporären Raum erstellen");
+  const audience = audienceFields(settings);
   showDialog(heading, form([
-    el("p", {}, t("Open this YouTube video in a private temporary room.", "Öffne dieses YouTube-Video in einem privaten temporären Raum.")),
+    el("p", {}, t("Open this YouTube video in a temporary room.", "Öffne dieses YouTube-Video in einem temporären Raum.")),
+    audience.node,
   ], heading, async (_feedback, currentForm) => {
     let room;
     try {
-      room = await api("quick-rooms", { method: "POST", body: { source: "youtube" }, signal: context.signal });
+      room = await api("quick-rooms", { method: "POST", body: { source: "youtube", ...audience.values() }, signal: context.signal });
       if (!currentForm.isConnected) throw new DOMException("Room creation canceled", "AbortError");
       await api("channels/" + identifier(room.channelId) + "/watch", {
         method: "POST", body: { source: "youtube", videoId }, signal: context.signal,
@@ -148,6 +161,7 @@ export function confirmYoutubeRoom(context, videoId) {
       if (room) await api("quick-rooms/" + identifier(room.publicId), { method: "DELETE", keepalive: true }).catch(() => {});
       throw error;
     }
+    rememberLink(context.user, room);
     context.quickRoomHeader.created(room);
     closeDialog();
     location.hash = topicHref(room.topicId, room.channelId);

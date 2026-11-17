@@ -26,18 +26,36 @@
           <option value="desktop" data-text="targetDesktop"></option>
         </select>
       </label>
+      <fieldset class="room-access" id="default-access">
+        <legend data-text="defaultAccess"></legend>
+      </fieldset>
       <p data-text="privacyNote"></p>
       <button type="submit" id="save" data-text="save"></button>
     </form>
     <p id="status" role="status" hidden></p>
-    <section id="desktop" hidden>
-      <p data-text="desktopNote"></p>
+    <section id="handoff" hidden>
+      <p class="handoff-instance"><span data-text="instanceLabel"></span> <strong id="handoff-instance"></strong></p>
+      <fieldset class="room-access" id="video-access">
+        <legend data-text="videoAccess"></legend>
+      </fieldset>
+      <p data-text="videoAccessNote"></p>
+      <p id="desktop-note" data-text="desktopNote" hidden></p>
       <div class="actions">
-        <a class="button" id="open-desktop" data-text="openDesktop" referrerpolicy="no-referrer"></a>
-        <button type="button" id="browser-fallback" data-text="openBrowser"></button>
+        <a class="button primary" id="open-desktop" data-text="openDesktop" referrerpolicy="no-referrer" hidden></a>
+        <button type="button" id="browser-fallback" data-text="openInBrowser"></button>
       </div>
     </section>
     <button type="button" id="edit" data-text="editSettings" hidden></button>
+    <template id="room-access-options">
+      <label class="access-option">
+        <input type="checkbox" name="guestAccess" checked>
+        <span><strong data-text="guestAccess"></strong><small data-text="guestAccessHelp"></small></span>
+      </label>
+      <label class="access-option">
+        <input type="checkbox" name="memberVisibility" checked>
+        <span><strong data-text="memberVisibility"></strong><small data-text="memberVisibilityHelp"></small></span>
+      </label>
+    </template>
   </main>
 </body>
 </html>

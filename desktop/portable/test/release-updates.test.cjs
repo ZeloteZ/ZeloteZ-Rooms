@@ -63,6 +63,27 @@ test("desktop handoff only parses one canonical instance and an exact YouTube vi
     valid.replace("/youtube/", "/youtube/hidden/../"), valid.replace("M7lc1UVf-VE", "x"),
     valid.replace(encodeURIComponent(origin), encodeURIComponent(origin + "/redirect")),
     valid.replace(encodeURIComponent(origin), encodeURIComponent("javascript:prompt(1)")),
+    valid.replace(encodeURIComponent(origin), encodeURIComponent("https://ROOMS.example.com")),
+    valid + "\n",
   ]) assert.equal(parseShareLink(invalid, normalize), null);
   assert.equal(shareLinkFromArguments([valid, valid], normalize), null);
+});
+
+test("desktop handoff forwards only explicit guest and live flags in a canonical order", () => {
+  const origin = "https://rooms.example.com";
+  const allow = value => value === origin ? origin : null;
+  const prefix = "zelotez-rooms://share/youtube/M7lc1UVf-VE?";
+  const fragment = "#/share/youtube/M7lc1UVf-VE";
+  const instance = "instance=" + encodeURIComponent(origin);
+  const valid = prefix + instance;
+  assert.deepEqual(parseShareLink(valid + "&guests=0", allow), { origin, fragment: fragment + "?guests=0" });
+  assert.deepEqual(parseShareLink(valid + "&live=1", allow), { origin, fragment: fragment + "?live=1" });
+  assert.deepEqual(shareLinkFromArguments(["rooms", prefix + "live=0&" + instance + "&guests=1"], allow),
+    { origin, fragment: fragment + "?guests=1&live=0" });
+
+  for (const suffix of [
+    "&guests=0&guests=0", "&live=1&live=0", "&visibility=1", "&guests=false", "&live=2",
+    "&guests=%30", "&g%75ests=0", "&live=", "&guests=1=0", "&guests=1&", "&live=0#elsewhere",
+  ]) assert.equal(parseShareLink(valid + suffix, allow), null);
+  assert.equal(parseShareLink(prefix + "guests=0&live=1", allow), null);
 });

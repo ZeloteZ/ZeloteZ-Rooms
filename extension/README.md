@@ -10,10 +10,16 @@ Sign in to GitHub with access to this repository and download [ZeloteZ-Rooms-You
 
 Open the extension’s settings from its toolbar icon. Enter the HTTPS address of your Rooms instance without a path, choose where to open Rooms, and grant access to that host when prompted. Reload any YouTube watch page you already had open.
 
+## Choose who can join
+
+**Allow guests with the link** enables a password-protected guest link you can share. **Show in Live Now for members** lets signed-in members find and open the room from Rooms. Both options start enabled. Save your defaults in the extension settings, or change either option for just one video after choosing **Create ZeloteZ Room** on YouTube.
+
+Rooms Web 0.1.22 or later applies these choices when the handoff opens a confirmation page. Use Rooms Desktop 0.1.22 or later for the desktop handoff.
+
 ## Choose where Rooms opens
 
-**This browser.** Keep a Rooms tab open for the same account in the same browser window. When that tab is ready and you have no temporary room open, one click starts a private room for the selected video. If Rooms opens a new tab, sign in or use **Unlock chats** to enter your Rooms password, then confirm the video. Rooms only creates the new room after you confirm in that tab.
+**This browser.** Review the room access options and click **Open in browser**. When a Rooms tab is ready for the same account in that browser window and you have no temporary room open, the extension starts the room in that tab. If Rooms opens a new tab, sign in or use **Unlock chats** to enter your Rooms password, then confirm the video.
 
 **ZeloteZ Rooms Desktop.** Start the installed desktop app manually once and finish connecting to the exact same Rooms address as in the extension. On Linux, make the AppImage executable and start it from its permanent location. It registers a link handler on compatible desktops if no default is set. Start it again after moving or updating it so its own entry points to the current file. On the handoff screen, choose **Open desktop app** and confirm the browser prompt if it appears. If the app does not open, choose **Continue in browser**. [Desktop installation and link setup](../desktop/README.md)
 
-The extension saves the address and target locally. It sends the selected video ID through the handoff when you click the YouTube button. The extension checks the server’s Rooms protocol and page marker, and the normal Rooms site handles sign-in. It uses the browser’s existing session for same-origin requests when you are already signed in. It reads no cookies or credentials and stores no viewing history. Choose an instance run by someone you trust.
+The extension saves your address, target, and default access options locally. It passes the selected video ID and access choices to Rooms when you open the video. The extension checks the server’s Rooms protocol and page marker, and the normal Rooms site handles sign-in. It uses the browser’s existing session for same-origin requests when you are already signed in. It reads no cookies or credentials and stores no viewing history. Choose an instance run by someone you trust.

@@ -17,12 +17,13 @@ export async function readRoomsAccount(origin) {
 }
 
 // Executed as a fixed script only in an already-open Rooms tab.
-export async function createSignedInRoom(origin, videoId, accountId, address) {
+export async function createSignedInRoom(origin, videoId, accountId, address, { guestAccess, memberVisibility }) {
   const id = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
   const inRooms = () => window === window.top && location.origin === origin && location.pathname === "/" && !location.search;
   const ready = () => inRooms() && location.href === address &&
     document.querySelector("#workspace:not([hidden])") && document.querySelector("#auth[hidden]") &&
-    document.querySelector("#profile-name")?.getAttribute("data-person-name") === accountId && !document.querySelector("dialog[open]");
+    document.querySelector("#profile-name")?.getAttribute("data-person-name") === accountId &&
+    !document.querySelector("dialog[open]") && (!guestAccess || document.querySelector("#quick-room-dock[data-guest-links]"));
   if (!id.test(accountId) || !/^[A-Za-z0-9_-]{11}$/u.test(videoId) || !ready()) return null;
 
   let attempted = false;
@@ -42,13 +43,20 @@ export async function createSignedInRoom(origin, videoId, accountId, address) {
     const session = await request("/api/auth/session", "GET");
     if (session?.user?.id !== accountId || !ready()) return null;
     attempted = true;
-    const room = await request("/api/quick-rooms", "POST", { source: "youtube", guestAccess: false, memberVisibility: false });
-    if (!id.test(room?.topicId ?? "") || typeof room.channelId !== "string" || !id.test(room.channelId) || room.publicId !== room.topicId ||
-        room.source !== "youtube" || room.guestAccess !== false || room.memberVisibility !== false) throw new Error("Invalid Rooms response");
+    const room = await request("/api/quick-rooms", "POST", { source: "youtube", guestAccess, memberVisibility });
+    if (!id.test(room?.topicId ?? "") || room.publicId !== room.topicId) throw new Error("Invalid Rooms response");
     createdRoom = room.publicId;
+    if (typeof room.channelId !== "string" || !id.test(room.channelId) || room.source !== "youtube" ||
+        room.guestAccess !== guestAccess || room.memberVisibility !== memberVisibility ||
+        (guestAccess && !/^[A-Za-z0-9_-]{43}$/u.test(room.secret ?? ""))) throw new Error("Invalid Rooms response");
     const watch = await request("/api/channels/" + room.channelId + "/watch", "POST", { source: "youtube", videoId });
     if (watch?.party?.videoId !== videoId || watch.party.source !== "youtube") throw new Error("The watch party could not start");
     if (!ready()) throw new Error("The Rooms tab changed");
+    // Give the one-time secret directly to the same Rooms tab's in-memory link store.
+    if (guestAccess && document.dispatchEvent(new CustomEvent("rooms:guest-link-created", {
+      detail: JSON.stringify({ accountId, publicId: room.publicId, secret: room.secret }),
+      cancelable: true,
+    }))) throw new Error("The Rooms tab could not retain the guest link");
     location.hash = "/rooms/" + room.topicId + "/" + room.channelId;
     return { topicId: room.topicId, channelId: room.channelId };
   } catch {

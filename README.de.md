@@ -74,6 +74,6 @@ Wenn du **Auf diesem Gerät angemeldet bleiben** auswählst, schützt der sicher
 
 ## YouTube-Erweiterung
 
-Klicke auf YouTube neben **Teilen** auf **ZeloteZ-Raum erstellen**. Mit **Öffnen in → Diesem Browser** kann die Erweiterung die Watchparty in einem offenen Rooms-Tab für dasselbe Konto im selben Browserfenster starten. Öffnet Rooms einen neuen Tab, melde dich an oder gib unter **Chats entsperren** dein Passwort ein. Bestätige anschließend das Video in Rooms.
+Klicke auf YouTube neben **Teilen** auf **ZeloteZ-Raum erstellen** und prüfe den Raumzugriff. Der Gastlink und die Anzeige unter **Gerade live** für Mitglieder sind standardmäßig aktiviert. Du kannst deine Vorgaben in den Erweiterungseinstellungen speichern oder sie für ein einzelnes Video ändern. Mit **Im Browser öffnen** kann die Erweiterung die Watchparty in einem offenen Rooms-Tab desselben Kontos im selben Browserfenster starten. Öffnet Rooms einen neuen Tab, melde dich an oder gib unter **Chats entsperren** dein Passwort ein. Bestätige anschließend das Video in Rooms.
 
 Für **ZeloteZ Rooms Desktop** öffnest du die installierte App einmal und verbindest sie mit derselben Rooms-Adresse wie in der Erweiterung. Mache das AppImage unter Linux ausführbar und starte es an dem Ort, an dem es liegen bleiben soll. So kann die App den Linkhandler registrieren. Wenn sich die Desktop-App nicht öffnen lässt, wähle **Im Browser fortfahren**. [Desktop-Installationsanleitung](desktop/README.md)
