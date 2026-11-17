@@ -14,7 +14,7 @@ On Windows x64, run the `ZeloteZ-Rooms-…-x64.exe` installer. On Linux x64, mar
 
 Rooms requires the Chromium sandbox on Linux. If you see a startup error about the sandbox, refresh any older desktop integration that adds `--no-sandbox` and check your distribution’s documentation for allowing unprivileged user namespaces for this app.
 
-The browser extension can pass a YouTube video directly to the desktop app when your system recognizes the `zelotez-rooms:` link handler. On Linux, integrate the AppImage with your desktop to make the handler discoverable. Set the same Rooms instance in the extension and desktop app.
+To open YouTube videos from the browser extension, start the installed app once and connect to the same Rooms address in both the app and the extension. On Linux, start the executable AppImage from the location where you’ll keep it. On desktops that support XDG link handlers, it registers `zelotez-rooms:` if no default handler is set. If you move or update the AppImage, run it once to update the entry it manages. If your system uses another handler, choose Rooms in your system’s link settings if available. You can also choose **Continue in browser** from the extension. [Extension installation guide](../extension/README.md)
 
 Open a live channel, choose the resolution and frame rate, then click **Share screen** to select a screen or application window. For a region, enable the crop option and select the area in the local preview before starting.
 

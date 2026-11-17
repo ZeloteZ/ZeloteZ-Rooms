@@ -336,7 +336,7 @@ async function showWorkspace(nextUser, unlocked = true) {
   if (!signal.aborted) startPresence(nextUser.id, signal);
 }
 
-function showAuth(note = "", preset = "", showInvite = false) {
+function enterAuth() {
   clearQuickLinks();
   if (user) void forgetMemberQuickChatDevices();
   if (user) window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
@@ -364,10 +364,19 @@ function showAuth(note = "", preset = "", showInvite = false) {
   profile.hidden = true;
   navigation.hidden = true;
   auth.hidden = false;
+}
 
+function showAuthPage(title, ...content) {
+  auth.replaceChildren(
+    el("div", { class: "auth-banner" }, el("h1", {}, "ZeloteZ Rooms"),
+      el("p", {}, t("A private place for our friends.", "Ein privater Treffpunkt für unseren Freundeskreis."))),
+    el("div", { class: "auth-form-area" }, el("h2", {}, title), content, languageChooser()));
+}
+
+function showAuth(note = "", preset = "", showInvite = false) {
+  enterAuth();
   const startRegister = showInvite && pendingInvite !== null;
   const authAction = startRegister ? t("Create account", "Konto erstellen") : t("Sign in", "Anmelden");
-  const header = el("h2", {}, authAction);
   const username = el("input", {
     type: "text", name: "username", autocomplete: "username", maxlength: "32",
     required: true, value: preset, autocapitalize: "none", spellcheck: "false",
@@ -429,17 +438,52 @@ function showAuth(note = "", preset = "", showInvite = false) {
       "Rooms couldn’t save this sign-in in your system’s secure storage. Sign in again the next time you open the app.",
       "Rooms konnte die Anmeldung nicht sicher auf diesem Gerät speichern. Melde dich beim nächsten Start erneut an."));
   });
-  auth.replaceChildren(
-    el("div", { class: "auth-banner" }, el("h1", {}, "ZeloteZ Rooms"),
-      el("p", {}, t("A private place for our friends.", "Ein privater Treffpunkt für unseren Freundeskreis."))),
-    el("div", { class: "auth-form-area" }, header, authForm,
-      pendingInvite !== null && button(startRegister ? t("Back to sign in", "Zum Login") : t("Accept invitation", "Einladung annehmen"),
-        () => showAuth("", "", !startRegister), { class: "ghost" }), languageChooser()));
+  showAuthPage(authAction, authForm,
+    pendingInvite !== null && button(startRegister ? t("Back to sign in", "Zum Login") : t("Accept invitation", "Einladung annehmen"),
+      () => showAuth("", "", !startRegister), { class: "ghost" }));
+}
+
+function sameChatIdentity(account, current) {
+  return current?.id === account.id && current.identity?.nonce === account.identity?.nonce &&
+    current.identity?.detached === account.identity?.detached;
+}
+
+function showUnlock(account) {
+  enterAuth();
+  const password = passwordInput();
+  const title = t("Unlock chats", "Chats entsperren");
+  const unlockForm = form(field(t("Password", "Passwort"), password), title, async (_, screen) => {
+    const encryption = globalThis.ClubCrypto;
+    if (!encryption) throw new Error(t("Encryption could not be loaded. Reload the page.", "Die Verschlüsselung konnte nicht geladen werden. Lade die Seite neu."));
+    const currentForm = () => screen.isConnected && !user;
+    const passphrase = password.value;
+    password.value = "";
+    if (!await encryption.unlock(account, passphrase, undefined, currentForm)) {
+      if (currentForm()) throw new Error(t("This password could not unlock your chats.", "Dieses Passwort konnte deine Chats nicht entsperren."));
+      return;
+    }
+    try {
+      const { user: current } = await api("auth/session");
+      if (!currentForm()) return;
+      if (!sameChatIdentity(account, current)) {
+        showAuth(t("Your session has changed. Please sign in again.", "Deine Sitzung hat sich geändert. Melde dich erneut an."));
+        return;
+      }
+      await showWorkspace(current);
+    } catch (error) {
+      if (currentForm()) encryption.lock();
+      throw error;
+    }
+  });
+  showAuthPage(title, el("p", { class: "status" },
+    t("You are signed in as @{name}. Enter your password to unlock chats in this tab.",
+      "Du bist als @{name} angemeldet. Gib dein Passwort ein, um Chats in diesem Tab zu entsperren.", { name: account.username })),
+  unlockForm, button(t("Sign in with another account", "Mit anderem Konto anmelden"), () => showAuth(), { class: "ghost" }));
 }
 
 async function showRecovery(token) {
   pendingInvite = null;
-  showAuth();
+  enterAuth();
   const title = t("Recover owner account", "Betreiberkonto wiederherstellen");
   const panel = el("div", { class: "auth-form-area stack" }, el("h2", {}, title));
   auth.replaceChildren(panel);
@@ -572,8 +616,7 @@ async function checkTabAccount() {
   checkingAccount = true;
   try {
     const session = await api("auth/session");
-    if (user === current && (session.user?.id !== current.id ||
-      session.user?.identity?.nonce !== current.identity?.nonce || session.user?.identity?.detached !== current.identity?.detached)) lockOnAccountChange();
+    if (user === current && !sameChatIdentity(current, session.user)) lockOnAccountChange();
   } catch {
     // Requests from this tab retain their expected-account guard during an interruption.
   } finally {
@@ -644,9 +687,9 @@ async function start() {
     if (await globalThis.ClubCrypto?.unlock(session.user)) return showWorkspace(session.user);
     const savedVault = await desktopLogin?.load(session.user.id).catch(() => null);
     if (savedVault && await globalThis.ClubCrypto?.unlock(session.user, undefined, savedVault)) return showWorkspace(session.user);
-    await desktopLogin?.discard().catch(() => {});
+    await desktopLogin?.forget().catch(() => {});
     if (session.user.identity?.detached) return showWorkspace(session.user, false);
-    showAuth(t("Sign in to unlock your chats in this tab.", "Melde dich an, um deine Chats in diesem Tab zu entsperren."), session.user.username);
+    showUnlock(session.user);
   } catch {
     bootstrap.replaceChildren(
       el("p", { class: "error" }, t("ZeloteZ Rooms is currently unavailable.", "Die Verbindung zum Treffpunkt ist gerade nicht verfügbar.")),

@@ -4,7 +4,7 @@
 
 A private place for friends to chat, talk, and share their screens. Host an invite-only instance, set up rooms around whatever brings your group together, and join from a browser or the desktop app.
 
-[Deutsch](README.de.md) · [Self-hosting](#self-hosting) · [Desktop app](desktop/README.md)
+[Deutsch](README.de.md) · [Self-hosting](#self-hosting) · [Desktop app](desktop/README.md) · [YouTube extension](#youtube-browser-extension)
 
 ## What you can do
 
@@ -49,7 +49,11 @@ If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the w
 
 Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. The app reads the version advertised by your verified Rooms instance. The release link opens GitHub in your browser.
 
-The optional browser extension adds **Create ZeloteZ Room** to YouTube in Chromium browsers and Firefox. Choose a verified instance and open the video in a browser tab or in your configured desktop app. [Extension setup](extension/README.md)
+## YouTube browser extension
+
+On YouTube, click **Create ZeloteZ Room** beside **Share**. **This browser** can start the watch party in an open Rooms tab for the same account in that browser window. If Rooms opens a new tab, sign in or enter your password under **Unlock chats**, then confirm the video in Rooms.
+
+For **ZeloteZ Rooms Desktop**, open the installed app once and connect to the same Rooms address you entered in the extension. On Linux, make the AppImage executable and start it from the location where you’ll keep it so it can register its link handler. If the desktop app is unavailable, choose **Continue in browser**. [Desktop installation guide](desktop/README.md)
 
 ## What stays private
 

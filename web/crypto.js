@@ -124,7 +124,7 @@ window.ClubCrypto = (() => {
     try { sessionStorage.removeItem(cacheName); } catch { /* Storage may be disabled. */ }
   }
 
-  async function unlock(user, passphrase, savedVault) {
+  async function unlock(user, passphrase, savedVault, current = () => true) {
     try {
       const pub = publicPoint(user.publicKey);
       let vault;
@@ -140,13 +140,14 @@ window.ClubCrypto = (() => {
       }
       const jwk = await unwrapIdentity(user, pub, vault);
       const key = await subtle.importKey("jwk", jwk, curve, false, ["deriveBits"]);
+      if (!current()) return false;
       pin(user.id, pub);
       const encodedVault = base64(vault);
       active = { id: user.id, key, vault: encodedVault };
       try { sessionStorage.setItem(cacheName, JSON.stringify({ id: user.id, vault: encodedVault })); } catch { /* Optional cache. */ }
       return true;
     } catch {
-      lock();
+      if (current()) lock();
       return false;
     }
   }

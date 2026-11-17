@@ -7,6 +7,7 @@ const { pathToFileURL } = require("node:url");
 const { installAudio } = require("./audio.cjs");
 const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
+const { registerLinuxShareLink } = require("./linux-share-link.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
 const { createRememberedLogin } = require("./remembered-login.cjs");
 const { checkIntervals, findUpdate, releasePage } = require("./release-updates.cjs");
@@ -885,7 +886,10 @@ if (process.platform === "linux" && app.commandLine.hasSwitch("no-sandbox")) {
   app.on("activate", () => restoreWindow(settingsWindow ?? roomsWindow));
   app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId("de.zelotez.rooms");
-    if (app.isPackaged && !app.isDefaultProtocolClient(shareScheme)) app.setAsDefaultProtocolClient(shareScheme);
+    if (app.isPackaged) {
+      if (process.platform === "linux") void registerLinuxShareLink().catch(() => {});
+      else if (!app.isDefaultProtocolClient(shareScheme)) app.setAsDefaultProtocolClient(shareScheme);
+    }
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     nativeTheme.on("updated", () => { if (roomsWindow) updateTitlebar(roomsWindow); });

@@ -4,7 +4,7 @@
 
 ZeloteZ Rooms ist ein selbst gehosteter Treffpunkt für deinen Freundeskreis. In euren Räumen könnt ihr schreiben, miteinander sprechen und euren Bildschirm teilen. Ihr nutzt Rooms im Browser oder in der Desktop-App für Windows und Linux. Neue Konten entstehen über Einladungslinks des Betreibers.
 
-[English](README.md) · [Selbst hosten](#selbst-hosten) · [Desktop-App](desktop/README.md)
+[English](README.md) · [Selbst hosten](#selbst-hosten) · [Desktop-App](desktop/README.md) · [YouTube-Erweiterung](#youtube-erweiterung)
 
 ## Auf einen Blick
 
@@ -70,6 +70,10 @@ Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst di
 
 Updatehinweise sind optional. In den Desktop-Einstellungen kannst du sie einschalten und das Prüfintervall festlegen. Die App liest die Versionsnummer deiner geprüften Rooms-Instanz. Den Release öffnet sie in deinem Browser auf GitHub.
 
-Die optionale Browsererweiterung ergänzt **Create ZeloteZ Room** auf YouTube in Chromium-Browsern und Firefox. Wähle eine geprüfte Instanz und öffne das Video im Browser oder in deiner konfigurierten Desktop-App. [Anleitung zur Erweiterung](extension/README.md)
-
 Wenn du **Auf diesem Gerät angemeldet bleiben** auswählst, schützt der sichere Systemspeicher deine Sitzung und den Chat-Entsperrschlüssel bis zur Abmeldung oder bis die Sitzung abläuft.
+
+## YouTube-Erweiterung
+
+Klicke auf YouTube neben **Teilen** auf **ZeloteZ-Raum erstellen**. Mit **Öffnen in → Diesem Browser** kann die Erweiterung die Watchparty in einem offenen Rooms-Tab für dasselbe Konto im selben Browserfenster starten. Öffnet Rooms einen neuen Tab, melde dich an oder gib unter **Chats entsperren** dein Passwort ein. Bestätige anschließend das Video in Rooms.
+
+Für **ZeloteZ Rooms Desktop** öffnest du die installierte App einmal und verbindest sie mit derselben Rooms-Adresse wie in der Erweiterung. Mache das AppImage unter Linux ausführbar und starte es an dem Ort, an dem es liegen bleiben soll. So kann die App den Linkhandler registrieren. Wenn sich die Desktop-App nicht öffnen lässt, wähle **Im Browser fortfahren**. [Desktop-Installationsanleitung](desktop/README.md)
