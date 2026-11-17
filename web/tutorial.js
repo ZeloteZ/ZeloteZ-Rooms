@@ -72,9 +72,9 @@ const pages = {
   ],
 };
 
-function targetIn(scope, selector) {
+function targetIn(scope, selector, header) {
   for (const choice of selector.split(", ")) {
-    for (const target of scope.querySelectorAll(choice)) {
+    for (const target of [...scope.querySelectorAll(choice), ...(header?.querySelectorAll(choice) ?? [])]) {
       if (target.getClientRects().length && getComputedStyle(target).visibility === "visible") return target;
     }
   }
@@ -151,7 +151,7 @@ export function createTutorials(accountId, signal) {
     const margin = 12;
     card.style.maxWidth = Math.max(0, width - margin * 2) + "px";
     card.style.maxHeight = Math.max(0, height - margin * 2) + "px";
-    const target = targetIn(guide.scope, guide.steps[guide.index].selector);
+    const target = targetIn(guide.scope, guide.steps[guide.index].selector, guide.header);
     const rect = target && visibleBounds(target, viewport);
     spotlight.hidden = !rect;
     if (rect) {
@@ -185,7 +185,7 @@ export function createTutorials(accountId, signal) {
   }
 
   function paint() {
-    const { steps, index, scope } = guide;
+    const { steps, index, scope, header } = guide;
     const current = steps[index];
     heading.textContent = current.title;
     text.textContent = current.description;
@@ -193,7 +193,7 @@ export function createTutorials(accountId, signal) {
     previous.disabled = index === 0;
     next.textContent = index + 1 === steps.length ? t("Done", "Fertig") : t("Next", "Weiter");
     card.scrollTop = 0;
-    targetIn(scope, current.selector)?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+    targetIn(scope, current.selector, header)?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
     if (!dialog.open) dialog.showModal();
     layout();
     heading.focus({ preventScroll: true });
@@ -218,25 +218,28 @@ export function createTutorials(accountId, signal) {
       return;
     }
     if (guide?.key === requested?.key && guide) {
-      if (guide.scope !== requested.scope) {
+      if (guide.scope !== requested.scope || guide.header !== requested.header) {
         guide.scope = requested.scope;
-        watch(requested.scope);
+        guide.header = requested.header;
+        watch(requested.scope, requested.header);
       }
       schedule();
       return;
     }
     close();
     if (!openProfile && document.querySelector("dialog[open]")) return;
-    const steps = pages[requested.key].filter(step => targetIn(requested.scope, step.selector));
+    const steps = pages[requested.key].filter(step => targetIn(requested.scope, step.selector, requested.header));
     if (!steps.length) return;
     guide = { ...requested, steps, index: 0 };
-    watch(requested.scope);
+    watch(requested.scope, requested.header);
     paint();
   }
 
-  function watch(scope) {
+  function watch(scope, header) {
     mutation.disconnect();
-    mutation.observe(scope, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "class", "open"] });
+    const changes = { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "class", "open"] };
+    mutation.observe(scope, changes);
+    if (header) mutation.observe(header, changes);
   }
 
   dialog.addEventListener("cancel", event => {
@@ -267,8 +270,8 @@ export function createTutorials(accountId, signal) {
 
   void progress.sync();
   return {
-    visit(key, scope) {
-      page = Object.hasOwn(pages, key) ? { key, scope } : null;
+    visit(key, scope, header) {
+      page = Object.hasOwn(pages, key) ? { key, scope, header } : null;
       refresh();
     },
     leave() {

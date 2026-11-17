@@ -602,6 +602,46 @@ function renderQuickPreview(context, topic, channel, signal) {
   return el("div", { class: "quick-capture-preview", "aria-hidden": "true" }, video, nativePreview);
 }
 
+function roomHeading(topic, title = topic.title) {
+  const roomLabel = topic.temporary ? el("span", { "aria-current": "page" }, title)
+    : el("a", { href: topicHref(topic.id), "aria-current": "page" }, title);
+  const heading = el("h1", { title, tabindex: -1 }, roomLabel);
+  const channelLabel = el("span", { "aria-current": "page" });
+  const separator = () => el("span", { class: "room-breadcrumb-separator", "aria-hidden": "true" }, "›");
+  const channelCrumb = el("li", { class: "room-breadcrumb-channel", hidden: true }, separator(), channelLabel);
+  const breadcrumb = el("nav", { class: "room-breadcrumb", "aria-label": t("Breadcrumb", "Navigationspfad") },
+    el("ol", { class: "room-breadcrumb-list", role: "list" },
+      el("li", { class: "room-breadcrumb-home" }, el("a", { href: "#/rooms" }, t("All rooms", "Alle Räume"))),
+      el("li", { class: "room-breadcrumb-room" }, separator(), heading),
+      channelCrumb));
+  const header = el("div", { class: "room-hero section-heading", "data-tutorial": "room-hero" },
+    el("div", { class: "room-title" }, breadcrumb, !topic.temporary && tag(topic)));
+  applyTopicDesign(header, topic.appearance);
+  return { header, setTitle(title) {
+    if (roomLabel.textContent !== title) roomLabel.textContent = heading.title = title;
+  }, setChannel(channel) {
+    channelCrumb.hidden = !channel;
+    if (channel) {
+      roomLabel.removeAttribute("aria-current");
+      channelLabel.textContent = channelLabel.title = channel.title;
+    } else {
+      roomLabel.setAttribute("aria-current", "page");
+    }
+  } };
+}
+
+function quickRoomTitle(title, source) {
+  if (title && !["Temporary stream", "Temporärer Stream", "Temporary watch party", "Temporäre Watchparty"].includes(title)) return title;
+  if (source === "screen") return t("Live stream", "Livestream");
+  if (source === "local" || source === "youtube") return t("Watch party", "Watchparty");
+  return t("Live room", "Live-Raum");
+}
+
+export function quickViewerHeading() {
+  const { header, setTitle } = roomHeading({ temporary: true }, quickRoomTitle());
+  return { header, update: (title, source) => setTitle(quickRoomTitle(title, source)) };
+}
+
 function renderQuickTopic(context, topic, channels, selectedId, target) {
   const channel = channels.find(item => item.type === "live");
   if (!channel) throw new Error(t("This temporary room has ended.", "Dieser temporäre Raum wurde beendet."));
@@ -611,6 +651,7 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   };
   const child = { ...context, room: topic, shareSource: sameId(channel.id, selectedId) ? target?.shareSource : undefined };
   const screenRoom = topic.quickSource === "screen";
+  const { header } = roomHeading(topic, quickRoomTitle(topic.title, topic.quickSource));
   const screen = screenRoom ? createQuickScreen(child, channel) : null;
   const setup = screenRoom ? null : createWatchParty(child, channel, {
     setupOnly: true,
@@ -633,7 +674,7 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   node.dataset.temporary = "true";
   context.player.setLocation(topic, channel, null);
   context.voice.setLocation(null);
-  return { node, select(id, next) {
+  return { node, header, select(id, next) {
     if (!sameId(id, channel.id) || !next?.shareSource) return;
     if (next.shareSource === "screen") screen?.prepare();
     else setup?.prepareSource(next.shareSource);
@@ -648,28 +689,25 @@ export async function renderTopic(context, topicId, selectedId, target) {
   const owner = topic.role === "owner";
   const manager = owner || topic.role === "admin";
   const room = el("div", { class: "topic-view", "data-joined": topic.joined === true });
+  const { header, setChannel } = roomHeading(topic);
   applyTopicDesign(room, topic.appearance);
-  const hero = el("div", { class: "panel room-hero section-heading", "data-tutorial": "room-hero" },
-    el("div", { class: "room-title" },
-      el("h1", { title: topic.title }, topic.title),
-      el("div", { class: "inline room-title-meta" }, el("a", { href: "#/rooms", class: "subtle" }, t("All rooms", "Alle Räume")), tag(topic))),
-    topic.joined && el("div", { class: "inline room-actions" }, favoriteControl(topic, context),
+  if (topic.joined) header.append(el("div", { class: "inline room-actions" }, favoriteControl(topic, context),
       button(t("Members", "Mitglieder"), () => membersDialog(context, topic, members)),
       topic.canDesign && button("Design", () => editTopicDesign(context, topic, appearance => {
         topic.appearance = appearance;
         applyTopicDesign(room, appearance);
+        applyTopicDesign(header, appearance);
       }), { "aria-haspopup": "dialog", title: t("Edit room design", "Raumdesign bearbeiten") }),
       owner ? button([
         el("span", { class: "room-action-label" }, t("Settings", "Einstellungen")),
         el("span", { class: "room-action-icon", "aria-hidden": "true" }, "⚙"),
       ], () => topicSettings(context, topic, stopRoomCapture, openChannelManagement), { "aria-label": t("Settings", "Einstellungen"), title: t("Settings", "Einstellungen") })
         : button(t("Leave", "Verlassen"), () => leaveDialog(context, topic))));
-  room.append(hero);
   if (!topic.joined) {
     context.voice.setLocation(null);
     context.player.setLocation(topic, null, null);
     room.append(joinPanel(context, topic));
-    return { node: room, select() {} };
+    return { node: room, header, select() {} };
   }
 
   let channels = initialChannels;
@@ -752,6 +790,7 @@ export async function renderTopic(context, topicId, selectedId, target) {
   }
 
   function markSelected(channel) {
+    setChannel(channel);
     if (channel) picker.value = channel.id;
     for (const link of links) {
       if (sameId(link.dataset.channelId, channel?.id)) link.setAttribute("aria-current", "page");
@@ -814,5 +853,5 @@ export async function renderTopic(context, topicId, selectedId, target) {
   context.signal.addEventListener("abort", () => channelView?.abort(), { once: true });
   room.append(layout);
   select(selectedId, target);
-  return { node: room, select };
+  return { node: room, header, select };
 }

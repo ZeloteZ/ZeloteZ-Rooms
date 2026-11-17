@@ -1,4 +1,4 @@
-import { renderTopic, renderTopics } from "./rooms.js";
+import { quickViewerHeading, renderTopic, renderTopics } from "./rooms.js";
 import { renderAdmin, renderFriends } from "./people.js";
 import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
@@ -20,6 +20,9 @@ import { language, languages, setLanguage, t } from "./i18n.js";
 import { api, button, closeDialog, el, field, form, notify, paintPersonMark, paintPersonName, requireLoginOnExpiry,
   select, setExpectedAccount, showDialog, topicHref } from "./ui.js";
 
+const siteHeader = document.querySelector(".site-header");
+const wordmark = siteHeader.querySelector(".wordmark");
+const roomHeader = siteHeader.querySelector("#room-header");
 const navigation = document.querySelector("#navigation");
 const profile = document.querySelector("#profile");
 const adminLink = document.querySelector("#admin-link");
@@ -68,7 +71,7 @@ document.documentElement.lang = language();
 navigation.setAttribute("aria-label", t("Main navigation", "Hauptnavigation"));
 for (const link of navigation.querySelectorAll("[data-nav]")) link.textContent = navLabels[link.dataset.nav];
 document.querySelector(".skip-link").textContent = t("Skip to content", "Zum Inhalt springen");
-document.querySelector(".wordmark").setAttribute("aria-label", t("ZeloteZ Rooms – Home", "ZeloteZ Rooms – Startseite"));
+wordmark.setAttribute("aria-label", t("ZeloteZ Rooms – Home", "ZeloteZ Rooms – Startseite"));
 logout.textContent = t("Sign out", "Abmelden");
 profileEditor.title = t("Edit profile", "Profil bearbeiten");
 profileEditor.setAttribute("aria-label", profileEditor.title);
@@ -138,6 +141,24 @@ function setNav(active) {
   for (const link of navigation.querySelectorAll("[data-nav]")) {
     if (link.dataset.nav === active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
+  }
+}
+
+function setRoomHeader(banner = null, recoverFocus = false) {
+  const focused = document.activeElement;
+  const inRoom = Boolean(banner);
+  const moveFocus = roomHeader.contains(focused) ||
+    (inRoom && (navigation.contains(focused) || focused === wordmark)) ||
+    (recoverFocus && focused === document.body);
+  if (banner === roomHeader.firstElementChild) return;
+  roomHeader.replaceChildren(...(banner ? [banner] : []));
+  roomHeader.hidden = !inRoom;
+  siteHeader.toggleAttribute("data-room-route", inRoom);
+  navigation.inert = wordmark.inert = inRoom;
+  if (moveFocus) {
+    const target = inRoom ? banner.querySelector("h1") :
+      (navigation.hidden ? wordmark : navigation.querySelector('[aria-current="page"]:not([hidden])') ?? wordmark);
+    target?.focus({ preventScroll: true });
   }
 }
 
@@ -338,7 +359,7 @@ async function showWorkspace(nextUser, unlocked = true) {
   adminLink.hidden = !user.admin;
   paintOwnProfile();
   workspace.hidden = false;
-  await render();
+  await render(true);
   if (!signal.aborted) startPresence(nextUser.id, signal);
 }
 
@@ -369,6 +390,7 @@ function enterAuth() {
   workspace.replaceChildren();
   profile.hidden = true;
   navigation.hidden = true;
+  setRoomHeader();
   auth.hidden = false;
 }
 
@@ -529,17 +551,17 @@ async function showRecovery(token) {
   }
 }
 
-function showTutorial(route, page) {
+function showTutorial(route, page, banner) {
   if (route.page === "watch" || page.hasAttribute("data-temporary")) return;
   if (page.matches(".home-dashboard")) tutorials?.visit("home", page);
   else if (page.matches(".topic-view")) {
     if (!page.hasAttribute("data-joined")) {
-      tutorials?.visit("join", page);
+      tutorials?.visit("join", page, banner);
       return;
     }
     const channel = route.channelId && (page.querySelector(".room-layout[data-live-channel]") ? "live"
       : page.querySelector(".conversation") ? "chat" : null);
-    tutorials?.visit(channel || "room", page);
+    tutorials?.visit(channel || "room", page, banner);
   } else tutorials?.visit(route.page, page);
 }
 
@@ -551,57 +573,70 @@ async function render(force = false) {
   setNav(route.page === "watch" ? "rooms" : route.page);
   if (force !== true && route.page === "rooms" && route.topicId && activeTopic?.id === route.topicId) {
     activeTopic.view.select(route.channelId, route.target);
-    showTutorial(route, activeTopic.view.node);
+    showTutorial(route, activeTopic.view.node, activeTopic.view.header);
     return;
   }
+  const focused = document.activeElement;
+  const recoverFocus = workspace.contains(focused) || roomHeader.contains(focused);
+  if (route.topicId && (route.page === "rooms" || route.page === "watch")) {
+    const actions = roomHeader.querySelector(".room-actions");
+    if (actions) actions.inert = true;
+  } else setRoomHeader();
   player.setLocation();
   voice.setLocation(null);
   if (view) view.abort();
   activeTopic = null;
   view = new AbortController();
   const { signal } = view;
+  let requestedHash = location.hash;
+  const current = () => !signal.aborted && location.hash === requestedHash;
   workspace.replaceChildren(el("p", { class: "panel status", role: "status" }, t("Loading …", "Wird geladen …")));
   workspace.scrollTop = 0;
   const context = { user, signal, player, videoDock, voice, screenShare, nativeBroadcast, quickRoomHeader, profileUpdates, refresh: () => render(true) };
   try {
     if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
-      const requestedHash = location.hash;
       const { room } = await api("quick-rooms", { signal });
-      if (signal.aborted || location.hash !== requestedHash) return;
+      if (!current()) return;
       if (room?.publicId === route.topicId && room.topicId === route.topicId && roomIdPattern.test(room.channelId ?? "")) {
         history.replaceState(history.state, "", topicHref(room.topicId, room.channelId));
+        requestedHash = location.hash;
         route.page = "rooms";
         route.channelId = room.channelId;
         route.target = undefined;
       }
     }
-    let page;
+    let page, banner;
     if (route.page === "friends") page = await renderFriends(context);
     else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
     else if (route.page === "invites" && user.admin) page = await renderAdmin({ ...context, onSecurity: openAccountSecurity });
     else if (route.page === "help") page = renderHowItWorks();
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
-      page = renderGuestViewer({ publicId: route.topicId, signal, member: true, videoDock });
+      const quick = quickViewerHeading();
+      banner = quick.header;
+      page = renderGuestViewer({ publicId: route.topicId, signal, member: true, videoDock, onRoom: quick.update });
     }
     else if (route.page === "rooms" && route.topicId) {
       const topic = await renderTopic(context, route.topicId, route.channelId, route.target);
-      if (signal.aborted) return;
+      if (!current()) return;
       activeTopic = { id: route.topicId, view: topic };
       page = topic.node;
+      banner = topic.header;
     }
     else page = await renderTopics(context);
-    if (!signal.aborted) {
+    if (current()) {
       workspace.replaceChildren(...(vaultLocked ? [el("div", { class: "panel stack", role: "status" },
         el("p", {}, t("Your chats are locked. If you find your previous chat password, update it to unlock them.",
           "Deine Chats sind gesperrt. Wenn du das bisherige Chatpasswort wiederfindest, kannst du sie damit entsperren.")),
         button(t("Unlock chats", "Chats entsperren"), changePassword))] : []), page);
+      setRoomHeader(banner, recoverFocus);
       player.refreshPlacement();
       videoDock.refreshPlacement();
       if (route.sharedVideo) confirmYoutubeRoom(context, route.sharedVideo, route.audience);
-      else showTutorial(route, page);
+      else showTutorial(route, page, banner);
     }
   } catch (error) {
-    if (!signal.aborted) {
+    if (current()) {
+      setRoomHeader(null, recoverFocus);
       workspace.replaceChildren(el("div", { class: "panel stack" },
         el("h1", {}, t("Page unavailable", "Seite nicht verfügbar")), el("p", { class: "error", role: "alert" }, error.message),
         el("div", { class: "inline" }, button(t("Try again", "Erneut laden"), render),

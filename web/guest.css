@@ -54,7 +54,7 @@
 }
 .guest-heading .guest-room-title { min-inline-size: 0; }
 .guest-room[data-watch-party] { row-gap: 8px; }
-.guest-room[data-watch-party]:has(.guest-room-title.sr-only):not(:has(.quick-view-actions > :not([hidden]))) { row-gap: 0; }
+.guest-room:has(.guest-room-title.sr-only):not(:has(.quick-view-actions > :not([hidden]))) { row-gap: 0; }
 .guest-room[data-watch-party] .guest-room-title:not(.sr-only) {
   flex: 1 1 12ch;
   overflow: hidden;

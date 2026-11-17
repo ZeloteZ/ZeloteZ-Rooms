@@ -38,15 +38,15 @@ function setText(node, text) {
 let supportId = 0;
 
 export function renderGuestViewer(options) {
-  const { publicId, videoDock, signal, member, host } = options;
+  const { publicId, videoDock, signal, member, host, onRoom } = options;
   if (!member || !videoDock) return createGuestViewer(options).viewer;
   const entry = videoDock.get("temporary:" + publicId, entry => createGuestViewer({ ...options, signal: entry.signal }, entry));
-  entry.instance.connectView(host);
+  entry.instance.connectView(host, onRoom);
   entry.mount(entry.instance.slot, signal, entry.instance.disconnectView);
   return entry.instance.viewer;
 }
 
-function createGuestViewer({ publicId, signal, member = false, password, host }, dockEntry) {
+function createGuestViewer({ publicId, signal, member = false, password, host, onRoom }, dockEntry) {
   const viewer = document.createElement("div");
   viewer.className = "guest-viewer";
   viewer.innerHTML = `
@@ -225,8 +225,8 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     const watchParty = room.hasAttribute("data-watch-party");
     const videoTitle = watchParty && watch?.source.title;
     setText(title, videoTitle || roomTitle || t("Live room", "Live-Raum"));
-    title.classList.toggle("sr-only", watchParty && !videoTitle &&
-      (!roomTitle || roomTitle === "Temporary watch party" || roomTitle === "Temporäre Watchparty"));
+    title.classList.toggle("sr-only", !videoTitle && (member || (watchParty &&
+      (!roomTitle || roomTitle === "Temporary watch party" || roomTitle === "Temporäre Watchparty"))));
     chatTab.textContent = t("Live chat", "Livechat");
     queueTab.textContent = t("Queue", "Warteschlange");
     supportTabs.setAttribute("aria-label", t("Watch party panels", "Bereiche der Watchparty"));
@@ -454,6 +454,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
     authorized = true;
     const name = snapshot.roomTitle ?? snapshot.title;
     roomTitle = typeof name === "string" ? name.slice(0, 120) : "";
+    onRoom?.(roomTitle, snapshot.source);
     room.toggleAttribute("data-watch-party", snapshot.source === "youtube" || snapshot.source === "local");
     room.hidden = false;
     gate.hidden = true;
@@ -629,11 +630,13 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
   else void refresh();
   return {
     viewer, player, slot,
-    connectView(nextHost) {
+    connectView(nextHost, nextOnRoom) {
       mounted = true;
       removeHostActions();
       host = nextHost;
+      onRoom = nextOnRoom;
       mountHost();
+      updateLabels();
       dismissedSource = undefined;
       openChat();
       schedule(0);
@@ -642,6 +645,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host },
       mounted = false;
       removeHostActions();
       host = undefined;
+      onRoom = undefined;
       hidePreview();
       closeChat();
     },

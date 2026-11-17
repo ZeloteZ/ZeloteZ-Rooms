@@ -46,23 +46,26 @@
         <a href="#/invites" data-nav="invites" id="admin-link" hidden>Invites</a>
         <a href="#/help" data-nav="help">How it works</a>
       </nav>
-      <div class="header-media">
-        <div id="player-dock" class="header-dock" hidden></div>
-        <div class="header-watch-controls">
-          <div id="quick-room-dock" class="header-dock" hidden></div>
-          <div id="video-dock" class="header-dock" hidden></div>
+      <div id="room-header" class="room-header" hidden></div>
+      <div class="header-tools">
+        <div class="header-media">
+          <div id="player-dock" class="header-dock" hidden></div>
+          <div class="header-watch-controls">
+            <div id="quick-room-dock" class="header-dock" hidden></div>
+            <div id="video-dock" class="header-dock" hidden></div>
+          </div>
+          <div id="voice-dock" class="header-dock" hidden></div>
+          <div id="broadcast-dock" class="header-dock" hidden></div>
+          <div id="native-broadcast-dock" class="header-dock" hidden></div>
         </div>
-        <div id="voice-dock" class="header-dock" hidden></div>
-        <div id="broadcast-dock" class="header-dock" hidden></div>
-        <div id="native-broadcast-dock" class="header-dock" hidden></div>
-      </div>
-      <div class="profile" id="profile" hidden>
-        <button type="button" class="button profile-edit" id="profile-edit" aria-label="Edit profile" aria-haspopup="dialog" title="Edit profile">
-          <span class="avatar" id="avatar" aria-hidden="true"></span>
-          <span class="profile-name" id="profile-name"></span>
-        </button>
-        <div id="notification-dock" class="notification-dock" hidden></div>
-        <button class="button" type="button" id="logout">Sign out</button>
+        <div class="profile" id="profile" hidden>
+          <button type="button" class="button profile-edit" id="profile-edit" aria-label="Edit profile" aria-haspopup="dialog" title="Edit profile">
+            <span class="avatar" id="avatar" aria-hidden="true"></span>
+            <span class="profile-name" id="profile-name"></span>
+          </button>
+          <div id="notification-dock" class="notification-dock" hidden></div>
+          <button class="button" type="button" id="logout">Sign out</button>
+        </div>
       </div>
     </div>
   </header>
