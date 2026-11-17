@@ -9,9 +9,11 @@ COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY web/ /srv/www/
 COPY --from=player /build/node_modules/hls.js/dist/hls.min.js /srv/www/vendor/hls.min.js
 COPY --from=player /build/node_modules/hls.js/LICENSE /srv/www/vendor/hls.LICENSE
+COPY --from=player /build/node_modules/qrcode-generator/dist/qrcode.mjs /srv/www/vendor/qrcode-generator.js
+COPY server/qrcode-generator-license.json /srv/www/vendor/qrcode-generator-license.json
 # Move the whole module graph together so relative imports share one version.
 RUN set -eu; cd /srv/www; \
-    set -- ./*.js ./*.css ./vendor/hls.min.js; \
+    set -- ./*.js ./*.css ./vendor/hls.min.js ./vendor/qrcode-generator.js; \
     version=$(sha256sum "$@" | sha256sum | cut -c 1-32); \
     mkdir -p "assets/$version"; \
     mv "$@" "assets/$version/"; \

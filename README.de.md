@@ -51,9 +51,11 @@ Wenn dein Reverse-Proxy Anfragen nach Größe begrenzt, erlaube 4 MiB je Teilst�
 
 Starte die Dienste und erstelle den Einmal-Link für das Betreiberkonto.
 
-Richte nach der Kontoerstellung oder nach dem Upgrade einer bestehenden Instanz die Zwei-Faktor-Anmeldung für den Betreiber ein.
+Mitglieder können unter **Profil → Zwei-Faktor-Anmeldung** freiwillig einen Authenticator hinzufügen. Scanne den QR-Code und bestätige ihn mit einem sechsstelligen Code. Bewahre die einmalig angezeigten Wiederherstellungscodes getrennt vom Gerät auf. Sie können bei der Anmeldung jeweils einmal den Authenticator-Code ersetzen. Im Profil kannst du das Gerät wechseln, neue Wiederherstellungscodes erzeugen oder die freiwillige Zwei-Faktor-Anmeldung deaktivieren.
 
-Füge den ausgegebenen Schlüssel zu deiner Authenticator-App hinzu. Wähle einen zeitbasierten Code mit sechs Stellen und 30 Sekunden Gültigkeit. Der Befehl beendet bestehende Betreibersitzungen. Melde dich anschließend mit Passwort und Code an. Änderungen unter **Einladungen** und am Betreiberpasswort brauchen eine aktuelle Bestätigung per Authenticator. Mit demselben Befehl kannst du einen verlorenen Authenticator ersetzen.
+Für den Betreiber ist die Zwei-Faktor-Anmeldung Pflicht. Die erste Einrichtung und der Gerätewechsel sind per QR-Code im Profil möglich. Änderungen unter **Einladungen** und am Betreiberpasswort brauchen eine aktuelle Bestätigung per Authenticator. Wenn du den Zugriff auf den Authenticator verloren hast oder nach einem Upgrade noch keinen eingerichtet hast, öffne ein privates Serverterminal.
+
+Scanne den QR-Code aus dem Terminal mit deiner Authenticator-App. Bei Bedarf kannst du den Schlüssel manuell als zeitbasierten Code mit sechs Stellen und 30 Sekunden Intervall hinzufügen. Der Befehl beendet bestehende Betreibersitzungen und ersetzt den bisherigen Authenticator. Melde dich erneut an und erstelle im Profil neue Wiederherstellungscodes.
 
 Im Profil kannst du unter **Passwort ändern** dein Passwort wechseln. Rooms erhält deinen Chatschlüssel und beendet die anderen Sitzungen. Um das Betreiberkonto über die Konsole wiederherzustellen, führe `docker compose exec -T server node bootstrap.mjs --recover-owner` aus. Der Befehl beendet die Betreibersitzungen, widerruft ungenutzte Einladungen und sperrt die Anmeldung mit dem alten Passwort. Öffne den Einmal-Link aus dem Terminal innerhalb von 20 Minuten. Mit dem bisherigen Chatpasswort bleiben deine Chats zugänglich. Wenn du es verloren hast, kannst du das Konto mit gesperrten Chats wiederherstellen und sie später mit dem bisherigen Chatpasswort entsperren. Führe den Befehl erneut aus, falls der Link abläuft.
 

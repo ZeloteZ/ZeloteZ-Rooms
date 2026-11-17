@@ -2,6 +2,7 @@ import { renderTopic, renderTopics } from "./rooms.js";
 import { renderAdmin, renderFriends } from "./people.js";
 import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
+import { showAccountSecurity } from "./account-security.js";
 import { renderHowItWorks } from "./how-it-works.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 import { forgetMemberQuickChatDevices } from "./quick-chat-crypto.js";
@@ -153,7 +154,7 @@ profileEditor.addEventListener("click", () => {
     Object.assign(user, profile);
     paintOwnProfile();
     profileUpdates.dispatchEvent(new Event("change"));
-  }, languageChooser(), () => tutorials?.reset(), changePassword);
+  }, languageChooser(), () => tutorials?.reset(), changePassword, openAccountSecurity);
   tutorials?.openProfile(document.querySelector("#dialog-content"));
 });
 
@@ -166,6 +167,68 @@ function authenticatorInput() {
   return el("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]{6}", maxlength: "6" });
 }
 
+function signInFactor() {
+  const input = authenticatorInput();
+  const label = el("span");
+  const switchMode = button("", () => {
+    setMode(!recovery);
+    input.focus();
+  }, { class: "ghost" });
+  const node = el("div", { class: "stack", hidden: true }, el("label", { class: "field" }, label, input), switchMode);
+  let recovery = false;
+
+  function setMode(next) {
+    recovery = next;
+    input.value = "";
+    input.inputMode = next ? "text" : "numeric";
+    input.autocomplete = next ? "off" : "one-time-code";
+    input.maxLength = next ? 36 : 6;
+    if (next) input.removeAttribute("pattern");
+    else input.pattern = "[0-9]{6}";
+    label.textContent = next ? t("Recovery code", "Wiederherstellungscode") : t("Authenticator code", "Authenticator-Code");
+    switchMode.textContent = next ? t("Use authenticator code", "Authenticator-Code verwenden") : t("Use recovery code", "Wiederherstellungscode verwenden");
+  }
+  setMode(false);
+
+  return {
+    node,
+    value: () => input.value.trim(),
+    show({ focus = true } = {}) {
+      node.hidden = false;
+      input.required = true;
+      if (focus) input.focus();
+    },
+    clear() {
+      node.hidden = true;
+      input.required = false;
+      setMode(false);
+    },
+  };
+}
+
+async function openAccountSecurity() {
+  const account = user;
+  const signal = workspaceSession?.signal;
+  if (!account || !signal || signal.aborted) return;
+  const remembered = desktopLogin?.load(account.id).then(Boolean).catch(() => false);
+  try {
+    await showAccountSecurity(account, { signal, async onSessionChanged() {
+      if (signal.aborted || user !== account) return;
+      sessionChanges?.postMessage("changed");
+      if (desktopLogin) {
+        const keepSignIn = await remembered;
+        if (signal.aborted || user !== account) return;
+        const vault = ClubCrypto.deviceUnlockKey(account.id);
+        if (vault && keepSignIn) await desktopLogin.save(account.id, vault).catch(() => {});
+        else await desktopLogin.forget().catch(() => {});
+      }
+      if (!signal.aborted && user === account && getRoute().page === "invites") void render(true);
+    } });
+  } catch (error) {
+    if (!signal.aborted && user === account) notify(error.message);
+  }
+}
+
 async function changePassword() {
   const account = user;
   if (!account) return;
@@ -175,13 +238,14 @@ async function changePassword() {
   const next = passwordInput(true);
   const code = authenticatorInput();
   const codeField = field(t("Authenticator code", "Authenticator-Code"), code);
+  const memberFactor = account.admin ? null : signInFactor();
   const askForCode = () => { codeField.hidden = false; code.required = true; };
   codeField.hidden = true;
   const body = form([
     field(t("Current password", "Aktuelles Passwort"), current),
     previous && field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
     field(t("New password", "Neues Passwort"), next),
-    codeField,
+    account.admin ? codeField : memberFactor.node,
   ], title, async () => {
     if (user !== account) return;
     const nextPassword = next.value;
@@ -200,12 +264,16 @@ async function changePassword() {
     if (!body.isConnected || user !== account) return;
     let updated;
     try {
-      ({ user: updated } = await api("auth/password", { method: "POST", body: { current: currentCredential, ...prepared } }));
+      ({ user: updated } = await api("auth/password", { method: "POST", body: {
+        current: currentCredential, ...prepared,
+        ...(memberFactor && !memberFactor.node.hidden && { code: memberFactor.value() }),
+      } }));
     } catch (error) {
       if (error.details?.code === "ROOMS_OWNER_APPROVAL") {
         askForCode();
         code.focus();
       }
+      if (error.details?.code === "ROOMS_MFA_CODE") memberFactor?.show();
       throw error;
     }
     closeDialog();
@@ -219,21 +287,22 @@ async function changePassword() {
     await showWorkspace(updated);
     notify(t("Password changed. Other sessions have ended.", "Das Passwort wurde geändert. Andere Sitzungen wurden beendet."));
   });
-  if (account.admin) {
-    let security;
-    try {
-      security = await api("admin/security");
-    } catch (error) {
-      if (user === account) notify(error.message);
-      return;
-    }
-    if (user !== account) return;
-    if (!security.configured) {
-      showDialog(title, el("p", {}, t("Set up two-factor sign-in under Invites first.", "Richte zuerst unter Einladungen die Zwei-Faktor-Anmeldung ein.")));
-      return;
-    }
-    if (security.approvedUntil <= Date.now() / 1000) askForCode();
+  let security;
+  try {
+    security = await api(account.admin ? "admin/security" : "auth/mfa");
+  } catch (error) {
+    if (user === account) notify(error.message);
+    return;
   }
+  if (user !== account) return;
+  if (account.admin && !security.configured) {
+    showDialog(title, el("div", { class: "stack" },
+      el("p", {}, t("Set up two-factor sign-in first.", "Richte zuerst die Zwei-Faktor-Anmeldung ein.")),
+      button(t("Set up with QR code", "Per QR-Code einrichten"), openAccountSecurity)));
+    return;
+  }
+  if (account.admin && security.approvedUntil <= Date.now() / 1000) askForCode();
+  if (memberFactor && security.enabled) memberFactor.show({ focus: false });
   showDialog(title, body);
 }
 
@@ -309,20 +378,14 @@ function showAuth(note = "", preset = "", showInvite = false) {
     type: "password", name: "password", autocomplete: startRegister ? "new-password" : "current-password",
     required: true, minlength: startRegister ? "12" : undefined,
   });
-  const code = authenticatorInput();
-  const codeField = field(t("Authenticator code", "Authenticator-Code"), code);
-  codeField.hidden = true;
-  username.addEventListener("input", () => {
-    code.value = "";
-    code.required = false;
-    codeField.hidden = true;
-  });
+  const factor = signInFactor();
+  username.addEventListener("input", factor.clear);
   const remember = desktopLogin && !startRegister && el("input", { type: "checkbox", name: "remember" });
   const authForm = form([
     startRegister && field(t("Display name", "Anzeigename"), name),
     field(t("Username", "Benutzername"), username),
     field(t("Password", "Passwort"), password),
-    codeField,
+    factor.node,
     remember && el("label", { class: "inline" }, remember,
       t("Keep me signed in on this device", "Auf diesem Gerät angemeldet bleiben")),
     note && el("p", { class: "status" }, note),
@@ -340,18 +403,14 @@ function showAuth(note = "", preset = "", showInvite = false) {
         } })
         : await api("auth/login", { method: "POST", body: {
           username: loginName, password: await ClubCrypto.credential(loginName, plainPassword),
-          ...(!codeField.hidden && { code: code.value }),
+          ...(!factor.node.hidden && { code: factor.value() }),
         } });
     } catch (error) {
-      if (error.details?.code === "ROOMS_OWNER_CODE") {
-        codeField.hidden = false;
-        code.required = true;
-        code.focus();
-      }
+      if (["ROOMS_OWNER_CODE", "ROOMS_MFA_CODE"].includes(error.details?.code)) factor.show();
       throw error;
     }
     password.value = "";
-    code.value = "";
+    factor.clear();
     sessionChanges?.postMessage("changed");
     const unlocked = await ClubCrypto.unlock(result.user, plainPassword);
     if (!unlocked && !result.user.identity?.detached) {
@@ -365,6 +424,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
         : desktopLogin.forget()).catch(() => false);
     }
     await showWorkspace(result.user, unlocked);
+    if (startRegister && result.user.admin) void openAccountSecurity();
     if (keepSignedIn && (!remembered || !unlocked)) notify(t(
       "Rooms couldn’t save this sign-in in your system’s secure storage. Sign in again the next time you open the app.",
       "Rooms konnte die Anmeldung nicht sicher auf diesem Gerät speichern. Melde dich beim nächsten Start erneut an."));
@@ -467,7 +527,7 @@ async function render(force = false) {
     let page;
     if (route.page === "friends") page = await renderFriends(context);
     else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
-    else if (route.page === "invites" && user.admin) page = await renderAdmin(context);
+    else if (route.page === "invites" && user.admin) page = await renderAdmin({ ...context, onSecurity: openAccountSecurity });
     else if (route.page === "help") page = renderHowItWorks();
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       page = renderGuestViewer({ publicId: route.topicId, signal, member: true, videoDock });

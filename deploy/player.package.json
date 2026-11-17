@@ -2,5 +2,5 @@
   "name": "zelotez-live-player",
   "version": "1.0.0",
   "private": true,
-  "dependencies": {"hls.js": "1.7.4"}
+  "dependencies": {"hls.js": "1.7.4", "qrcode-generator": "2.0.4"}
 }

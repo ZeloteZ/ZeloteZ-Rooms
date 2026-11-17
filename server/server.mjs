@@ -88,7 +88,7 @@ function service(handler) {
         if (error instanceof RequestError) {
           const headers = request.complete ? {} : { Connection: 'close' }
           if (error.code === 'ROOMS_ACCOUNT_CHANGED') headers['X-Rooms-Error'] = 'account-changed'
-          const knownCode = ['ROOMS_ACCOUNT_CHANGED', 'ROOMS_OWNER_CODE', 'ROOMS_OWNER_APPROVAL'].includes(error.code)
+          const knownCode = ['ROOMS_ACCOUNT_CHANGED', 'ROOMS_OWNER_CODE', 'ROOMS_OWNER_APPROVAL', 'ROOMS_MFA_CODE'].includes(error.code)
           json(response, error.status, { error: error.message, ...(knownCode && { code: error.code }) }, headers)
         } else {
           console.error('Request failed', error.code ?? error.name)

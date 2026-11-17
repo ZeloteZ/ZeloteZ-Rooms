@@ -4,6 +4,7 @@ import { promisify } from 'node:util'
 import { assertOrigin, json, readJson, RequestError, transaction } from './http.mjs'
 import { createOwnerAccess, initializeOwnerAccess } from './owner-access.mjs'
 import { createAuthWork } from './auth-work.mjs'
+import { createAccountMfa, isTotpCode } from './account-mfa.mjs'
 
 const secondsPerHour = 3600
 const sessionLifetime = 7 * 24 * secondsPerHour
@@ -228,7 +229,8 @@ function attemptLimit(maxAttempts, windowSeconds) {
 
 export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor = () => ({}), revokeBroadcasts = () => {} }) {
   initializeAuthSchema(db)
-  const owner = createOwnerAccess(db)
+  const mfa = createAccountMfa(db, { publicOrigin })
+  const owner = createOwnerAccess(db, { mfa })
   const present = user => user && { ...user, ...profileFor(user.id) }
   const secure = new URL(publicOrigin).protocol === 'https:'
   const cookieName = secure ? '__Host-zelotez_session' : 'zelotez_session'
@@ -278,6 +280,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
   const credentialAttempts = attemptLimit(8, 60)
   const recoveryAttempts = attemptLimit(16, 60)
   const codeAttempts = attemptLimit(12, 60)
+  const enrollmentAttempts = attemptLimit(12, 60)
   const runPasswordWork = createAuthWork()
 
   function sessionToken(req) {
@@ -370,7 +373,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     const actual = await passwordKey(body.password, salt, { lane: 'login', ip, subject: username, response: res })
     if (!actual) return
     if (!timingSafeEqual(actual, expected) || !row) throw invalidLogin()
-    if (row.admin === 1 && body.code !== undefined && rejectLimited(res, codeAttempts('login:' + row.id))) return
+    if (body.code !== undefined && rejectLimited(res, codeAttempts('login:' + row.id))) return
 
     const result = transaction(db, () => {
       const current = selectLogin.get(username)
@@ -378,8 +381,10 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       if (current.admin === 1 && !owner.configured(row.id)) {
         throw new RequestError(403, 'Richte zuerst die Zwei-Faktor-Anmeldung für das Betreiberkonto ein.')
       }
-      const factorVerified = current.admin === 1 && owner.verifyFactor(row.id, body.code)
-      return { user: present(toUser(current)), cookie: startSession(req, row.id, { factorVerified }) }
+      const user = toUser(current)
+      const verified = mfa.verify(user, body.code)
+      const factorVerified = user.admin && verified && isTotpCode(body.code)
+      return { user: present(user), cookie: startSession(req, row.id, { factorVerified }) }
     })
     json(res, 200, { user: result.user }, { 'Set-Cookie': result.cookie })
   }
@@ -453,12 +458,61 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
         throw new RequestError(409, 'Das Konto wurde inzwischen geändert. Melde dich erneut an.')
       }
       const until = approvedUntil()
+      if (!actor.admin) mfa.verify(actor, body.code)
       updateCredentials.run(passwordHashFor(newSalt, key), JSON.stringify(identity), actor.id)
       deleteAccountSessions.run(actor.id)
       revokeBroadcasts(actor.id)
       return { user: present(toUser(selectLogin.get(actor.username))), cookie: startSession(req, actor.id, { approvedUntil: until }) }
     })
     json(res, 200, { user: result.user }, { 'Set-Cookie': result.cookie })
+  }
+
+  async function manageMfa(req, res, action) {
+    const actor = requireSession(req)
+    if (action === 'disable' && actor.admin) throw new RequestError(403, 'Das Betreiberkonto benötigt die Zwei-Faktor-Anmeldung.')
+    const confirming = action === 'confirm'
+    if (rejectLimited(res, (confirming ? enrollmentAttempts : credentialAttempts)(actor.id))) return
+    const body = await readJson(req, 1024)
+    if (requireSession(req).id !== actor.id) throw invalidLogin()
+    const tokenHash = digest(sessionToken(req))
+    const row = confirming ? null : selectLogin.get(actor.username)
+    if (row) {
+      if (!base64url(body.current, 43)) throw new RequestError(400, 'Das Passwort konnte nicht verarbeitet werden.')
+      const [salt, expected] = passwordHashParts(row.password_hash)
+      const key = await passwordKey(body.current, salt, {
+        lane: 'registration', ip: requestAddress(req, trustProxyIp), subject: 'password:' + actor.id, response: res,
+      })
+      if (!key) return
+      if (!timingSafeEqual(key, expected)) throw new RequestError(403, 'Das aktuelle Passwort stimmt nicht.')
+    }
+    if (res.destroyed) return
+    const result = transaction(db, () => {
+      if (requireSession(req).id !== actor.id || (row && selectLogin.get(actor.username)?.password_hash !== row.password_hash)) {
+        throw new RequestError(409, 'Das Konto wurde inzwischen geändert. Melde dich erneut an.')
+      }
+      if (action === 'setup') {
+        mfa.verify(actor, body.code)
+        return { body: mfa.start(actor, tokenHash) }
+      }
+      let recoveryCodes
+      if (confirming) {
+        recoveryCodes = mfa.confirm(actor, tokenHash, body.enrollmentId, body.code)
+      } else {
+        mfa.verify(actor, body.code)
+        if (action === 'disable') mfa.disable(actor)
+        else recoveryCodes = mfa.rotateRecoveryCodes(actor)
+      }
+      // Renew the current browser and invalidate all credentials issued before the change.
+      const approvedUntil = actor.admin ? owner.approvedUntil(sessionToken(req)) : 0
+      deleteAccountSessions.run(actor.id)
+      revokeBroadcasts(actor.id)
+      const factorVerified = actor.admin && confirming
+      return {
+        body: { ...mfa.status(actor), ...(recoveryCodes && { recoveryCodes }) },
+        cookie: startSession(req, actor.id, { factorVerified, approvedUntil }),
+      }
+    })
+    json(res, 200, result.body, result.cookie ? { 'Set-Cookie': result.cookie } : {})
   }
 
   async function recoverOwner(req, res, complete) {
@@ -507,6 +561,16 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     if (pathname === '/api/auth/password' && req.method === 'POST') {
       assertOrigin(req, publicOrigin)
       await changePassword(req, res)
+      return true
+    }
+    if (pathname === '/api/auth/mfa' && req.method === 'GET') {
+      json(res, 200, mfa.status(requireSession(req)))
+      return true
+    }
+    const mfaAction = /^\/api\/auth\/mfa\/(setup|confirm|disable|recovery-codes)$/.exec(pathname)
+    if (mfaAction && req.method === 'POST') {
+      assertOrigin(req, publicOrigin)
+      await manageMfa(req, res, mfaAction[1])
       return true
     }
     if (['/api/auth/recovery', '/api/auth/recovery/complete'].includes(pathname) && req.method === 'POST') {

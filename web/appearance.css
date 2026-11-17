@@ -153,3 +153,8 @@
   .appearance-image-preview { aspect-ratio: 5 / 2; }
   .appearance-color-grid { grid-template-columns: 1fr; }
 }
+
+.account-security > .tag { justify-self: start; }
+.mfa-qr { display: block; width: min(100%, 240px); height: auto; image-rendering: pixelated; }
+.mfa-setup-key, .account-recovery-codes code { overflow-wrap: anywhere; }
+.account-recovery-codes { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }

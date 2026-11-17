@@ -293,7 +293,7 @@ function accountPanel(signal, approval) {
   return { node, initialize: () => { if (cursor === undefined) void load(); } };
 }
 
-export async function renderAdmin({ signal }) {
+export async function renderAdmin({ signal, onSecurity }) {
   const security = await api("admin/security", { signal });
   signal.throwIfAborted();
   if (security.configured !== true) {
@@ -301,9 +301,9 @@ export async function renderAdmin({ signal }) {
       el("div", { class: "page-heading" }, el("h1", {}, t("Site administration", "Website-Verwaltung"))),
       el("section", { class: "panel people-panel" },
         el("h2", {}, t("Set up owner two-factor sign-in", "Zwei-Faktor-Anmeldung für das Betreiberkonto einrichten")),
-        el("p", { class: "muted" }, t("Run this command on the Rooms server. Add the generated key to your authenticator app, then sign in again.",
-          "Führe diesen Befehl auf dem Rooms-Server aus. Füge den erzeugten Schlüssel deiner Authenticator-App hinzu und melde dich erneut an.")),
-        el("p", { class: "status" }, el("code", {}, "docker compose exec -T server node bootstrap.mjs --setup-owner-mfa"))));
+        el("p", { class: "muted" }, t("Scan a QR code with your authenticator app to unlock owner actions.",
+          "Scanne einen QR-Code mit deiner Authenticator-App, um Betreiberaktionen freizugeben.")),
+        button(t("Set up with QR code", "Per QR-Code einrichten"), onSecurity, { class: "primary" })));
   }
   const initial = await api("admin/invites", { signal });
   signal.throwIfAborted();

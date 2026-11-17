@@ -26,9 +26,13 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 3. **Open the ports your group needs.** HTTPS terminates at your reverse proxy. The media defaults are TCP 1936 for native RTMPS ingest and UDP 8189 with a TCP fallback on the same port for WebRTC.
 4. **Start the instance and create the owner account.** Run these commands from the repository root, then open the bootstrap link.
 
-5. **Set up the owner’s authenticator.** Run the command below after creating the owner account or upgrading an existing instance.
+5. **Set up the owner’s authenticator.** After creating the account, scan the QR code in Rooms and confirm it with an authenticator code.
 
-   Add the printed key to your authenticator app as a time-based code with six digits and a 30-second period. This command revokes existing owner sessions. Sign in again with your password and code. Sensitive actions under **Invites** and changes to the owner password require a recent authenticator confirmation. Run the same command to replace a lost authenticator.
+Members can enable two-factor sign-in under **Profile → Two-factor sign-in**. Scan the QR code and enter a six-digit code from the app. Save the displayed recovery codes separately from the device. Each can replace an authenticator code once when signing in. Use the profile to change devices, generate new recovery codes or turn off optional two-factor sign-in.
+
+Two-factor sign-in is required for the owner. The owner can set up and replace an authenticator in the profile. Sensitive actions under **Invites** and changes to the owner password require recent authenticator confirmation. If you lost access to the authenticator or need to set one up after an upgrade, run this in the server terminal.
+
+Scan the terminal QR code with your authenticator app. You can also enter the printed key as a time-based code with six digits and a 30-second period. This command replaces the old authenticator and ends existing owner sessions. Sign in again and generate recovery codes in the profile.
 
 The site owner manages invitations and can suspend accounts or end their sessions under **Invites → Accounts**. Each account can broadcast one stream at a time, with up to eight simultaneous broadcasts per instance.
 

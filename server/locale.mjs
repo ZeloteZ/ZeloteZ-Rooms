@@ -26,6 +26,11 @@ const catalogs = {
       'Das Passwort oder der Chatschlüssel konnte nicht verarbeitet werden.': 'The password or chat key could not be processed.',
       'Der Wiederherstellungslink ist ungültig oder abgelaufen.': 'The recovery link is invalid or has expired.',
       'Gib einen aktuellen Code aus deiner Authenticator-App ein.': 'Enter a current code from your authenticator app.',
+      'Gib einen aktuellen Code aus deiner Authenticator-App oder einen Wiederherstellungscode ein.':
+        'Enter a current authenticator code or a recovery code.',
+      'Diese Zwei-Faktor-Einrichtung ist abgelaufen. Starte sie erneut.': 'This two-factor setup has expired. Start it again.',
+      'Richte zuerst die Zwei-Faktor-Anmeldung ein.': 'Set up two-factor sign-in first.',
+      'Das Betreiberkonto benötigt die Zwei-Faktor-Anmeldung.': 'Two-factor sign-in is required for the site owner.',
       'Richte zuerst die Zwei-Faktor-Anmeldung für das Betreiberkonto ein.': 'Set up two-factor sign-in for the owner account on the server first.',
       'Bestätige den Betreiberzugriff mit einem aktuellen Authenticator-Code.': 'Confirm owner access with a current authenticator code.',
       'Das Bild konnte nicht verarbeitet werden. Wähle ein statisches Bild mit höchstens 16 Megapixeln.':
