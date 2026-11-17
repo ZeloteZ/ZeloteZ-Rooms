@@ -51,6 +51,12 @@ Wenn dein Reverse-Proxy Anfragen nach Größe begrenzt, erlaube 4 MiB je Teilst�
 
 Starte die Dienste und erstelle den Einmal-Link für das Betreiberkonto.
 
+Richte nach der Kontoerstellung oder nach dem Upgrade einer bestehenden Instanz die Zwei-Faktor-Anmeldung für den Betreiber ein.
+
+Füge den ausgegebenen Schlüssel zu deiner Authenticator-App hinzu. Wähle einen zeitbasierten Code mit sechs Stellen und 30 Sekunden Gültigkeit. Der Befehl beendet bestehende Betreibersitzungen. Melde dich anschließend mit Passwort und Code an. Änderungen unter **Einladungen** und am Betreiberpasswort brauchen eine aktuelle Bestätigung per Authenticator. Mit demselben Befehl kannst du einen verlorenen Authenticator ersetzen.
+
+Im Profil kannst du unter **Passwort ändern** dein Passwort wechseln. Rooms erhält deinen Chatschlüssel und beendet die anderen Sitzungen. Um das Betreiberkonto über die Konsole wiederherzustellen, führe `docker compose exec -T server node bootstrap.mjs --recover-owner` aus. Der Befehl beendet die Betreibersitzungen, widerruft ungenutzte Einladungen und sperrt die Anmeldung mit dem alten Passwort. Öffne den Einmal-Link aus dem Terminal innerhalb von 20 Minuten. Mit dem bisherigen Chatpasswort bleiben deine Chats zugänglich. Wenn du es verloren hast, kannst du das Konto mit gesperrten Chats wiederherstellen und sie später mit dem bisherigen Chatpasswort entsperren. Führe den Befehl erneut aus, falls der Link abläuft.
+
 Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 
 > [!IMPORTANT]

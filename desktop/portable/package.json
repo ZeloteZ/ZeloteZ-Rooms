@@ -1,6 +1,6 @@
 {
   "name": "zelotez-rooms-desktop",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "ZeloteZ Rooms desktop client",
   "author": "ZeloteZ",
   "desktopName": "de.zelotez.rooms.desktop",
@@ -37,6 +37,7 @@
     },
     "linux": {
       "target": "AppImage",
+      "executableArgs": [],
       "icon": "ui/icon.png",
       "syncDesktopName": true,
       "category": "Network",

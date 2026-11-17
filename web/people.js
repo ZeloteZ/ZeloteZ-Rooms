@@ -139,7 +139,101 @@ function inviteState(invite) {
   return "active";
 }
 
-function accountPanel(signal) {
+function ownerApproval(initial, signal) {
+  const heading = t("Owner security", "Sicherheit des Betreiberkontos");
+  const required = t("Enter a current authenticator code to unlock owner actions.",
+    "Gib einen aktuellen Authenticator-Code ein, um Betreiberaktionen freizugeben.");
+  const summary = status();
+  summary.tabIndex = -1;
+  const code = el("input", {
+    type: "text", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]{6}", maxlength: "6", required: true,
+  });
+  let deadline = 0;
+  let timer;
+  let page;
+  let confirmation;
+
+  const authorization = form(field(t("Authenticator code", "Authenticator-Code"), code),
+    t("Unlock owner actions", "Betreiberaktionen freigeben"), async () => {
+      const value = code.value;
+      code.value = "";
+      const { approvedUntil } = await api("admin/authorize", { method: "POST", body: { code: value }, signal });
+      signal.throwIfAborted();
+      setApproval(approvedUntil);
+      summary.focus({ preventScroll: true });
+    });
+  const node = el("section", { class: "panel people-panel" }, el("h2", {}, heading), summary, authorization);
+
+  function approved() {
+    return !signal.aborted && deadline > Date.now();
+  }
+
+  function update() {
+    clearTimeout(timer);
+    const unlocked = approved();
+    authorization.hidden = unlocked;
+    tell(summary, unlocked ? t("Owner actions unlocked until {time}.", "Betreiberaktionen sind bis {time} freigegeben.",
+      { time: localizedTime(deadline) }) : required);
+    for (const control of page.querySelectorAll("[data-owner-action]")) control.hidden = !unlocked;
+    if (unlocked) timer = setTimeout(update, Math.min(deadline - Date.now(), 2 ** 31 - 1));
+    else if (confirmation?.isConnected) {
+      closeDialog();
+      code.focus();
+    }
+  }
+
+  function setApproval(until) {
+    deadline = Number.isSafeInteger(until) ? until * 1000 : 0;
+    update();
+  }
+
+  signal.addEventListener("abort", () => {
+    clearTimeout(timer);
+    if (confirmation?.isConnected) closeDialog();
+  }, { once: true });
+
+  return {
+    node,
+    attach(root) {
+      page = root;
+      setApproval(initial);
+    },
+    protect(control) {
+      control.dataset.ownerAction = "";
+      control.hidden = !approved();
+      return control;
+    },
+    confirm(title, content) {
+      if (!approved()) {
+        update();
+        code.focus();
+        return;
+      }
+      confirmation = content;
+      showDialog(title, content);
+    },
+    async mutate(path, options) {
+      signal.throwIfAborted();
+      if (!approved()) {
+        update();
+        code.focus();
+        throw new Error(required);
+      }
+      const current = deadline;
+      try {
+        return await api(path, { ...options, signal });
+      } catch (error) {
+        if (error.details?.code === "ROOMS_OWNER_APPROVAL" && current === deadline && !signal.aborted) {
+          setApproval(0);
+          code.focus();
+        }
+        throw error;
+      }
+    },
+  };
+}
+
+function accountPanel(signal, approval) {
   const title = t("Accounts", "Konten");
   const list = peopleList(title);
   const feedback = status();
@@ -149,17 +243,18 @@ function accountPanel(signal) {
 
   function row(account) {
     function confirm(label, explanation, body) {
-      showDialog(label, form([
+      const confirmation = form([
         el("p", {}, account.displayName + " · @" + account.username),
         el("p", { class: "muted" }, explanation),
         button(t("Cancel", "Abbrechen"), closeDialog, { class: "ghost" }),
       ], label, async () => {
-        const { account: next } = await api("admin/accounts/" + identifier(account.id), { method: "PATCH", body, signal });
+        const { account: next } = await approval.mutate("admin/accounts/" + identifier(account.id), { method: "PATCH", body });
         if (signal.aborted) return;
-        closeDialog();
+        if (confirmation.isConnected) closeDialog();
         entry.replaceWith(row(next));
         notify(t("Account updated.", "Konto aktualisiert."));
-      }));
+      });
+      approval.confirm(label, confirmation);
     }
     const disable = t("Suspend account", "Konto sperren");
     const enable = t("Reactivate", "Wieder freigeben");
@@ -174,7 +269,7 @@ function accountPanel(signal) {
         "Die Person wird überall abgemeldet, und ihre Übertragungen werden beendet."), { revokeSessions: true })),
     ];
     const detail = account.admin ? t("Site operator", "Betreiber") : account.disabled ? t("Suspended", "Gesperrt") : "";
-    const entry = personRow(account, controls.filter(Boolean), detail);
+    const entry = personRow(account, controls.filter(Boolean).map(approval.protect), detail);
     return entry;
   }
 
@@ -199,7 +294,20 @@ function accountPanel(signal) {
 }
 
 export async function renderAdmin({ signal }) {
+  const security = await api("admin/security", { signal });
+  signal.throwIfAborted();
+  if (security.configured !== true) {
+    return el("div", { class: "secondary-page invitations-page" },
+      el("div", { class: "page-heading" }, el("h1", {}, t("Site administration", "Website-Verwaltung"))),
+      el("section", { class: "panel people-panel" },
+        el("h2", {}, t("Set up owner two-factor sign-in", "Zwei-Faktor-Anmeldung für das Betreiberkonto einrichten")),
+        el("p", { class: "muted" }, t("Run this command on the Rooms server. Add the generated key to your authenticator app, then sign in again.",
+          "Führe diesen Befehl auf dem Rooms-Server aus. Füge den erzeugten Schlüssel deiner Authenticator-App hinzu und melde dich erneut an.")),
+        el("p", { class: "status" }, el("code", {}, "docker compose exec -T server node bootstrap.mjs --setup-owner-mfa"))));
+  }
   const initial = await api("admin/invites", { signal });
+  signal.throwIfAborted();
+  const approval = ownerApproval(security.approvedUntil, signal);
   const invites = peopleList(t("Created invites", "Erstellte Einladungen"));
   const invitationPanel = el("div", { class: "stack", hidden: true });
   const expiry = select([
@@ -223,7 +331,7 @@ export async function renderAdmin({ signal }) {
         const trigger = event.currentTarget;
         trigger.disabled = true;
         try {
-          await api("admin/invites/" + identifier(invite.id), { method: "DELETE", signal });
+          await approval.mutate("admin/invites/" + identifier(invite.id), { method: "DELETE" });
           await updateList();
           notify(t("Invite revoked.", "Einladung widerrufen."));
         } catch (error) {
@@ -232,19 +340,21 @@ export async function renderAdmin({ signal }) {
           trigger.disabled = false;
         }
       }, { class: "danger" }) : null;
-      return el("li", { class: "person-row" }, el("span", { class: "avatar", "aria-hidden": "true" }, "↗"), details, revoke && el("div", { class: "inline" }, revoke));
+      return el("li", { class: "person-row" }, el("span", { class: "avatar", "aria-hidden": "true" }, "↗"), details,
+        revoke && approval.protect(el("div", { class: "inline" }, revoke)));
     }) : [el("li", { class: "muted" }, t("No invites yet.", "Es gibt noch keine Einladungen."))]));
     invites.tabIndex = entries.length ? 0 : -1;
   }
 
   populate(initial.invites ?? []);
-  const accounts = accountPanel(signal);
+  const accounts = accountPanel(signal, approval);
   const invitationView = el("div", { class: "secondary-panels invite-panels" },
       el("section", { class: "panel people-panel invite-create" },
         el("h2", {}, t("New invite link", "Neuer Einladungslink")),
         el("p", { class: "muted" }, t("Each link creates one account and expires automatically.", "Jeder Link erlaubt genau eine Kontoerstellung und läuft automatisch ab.")),
-        form(field(t("Valid for", "Gültigkeit"), expiry), t("Create link", "Link erstellen"), async () => {
-          const response = await api("admin/invites", { method: "POST", body: { hours: Number(expiry.value) }, signal });
+        approval.protect(form(field(t("Valid for", "Gültigkeit"), expiry), t("Create link", "Link erstellen"), async () => {
+          const response = await approval.mutate("admin/invites", { method: "POST", body: { hours: Number(expiry.value) } });
+          signal.throwIfAborted();
           const invite = response.invite ?? response;
           const url = new URL(invite.url, location.origin);
           if (url.origin !== location.origin || !url.hash.startsWith("#invite=")) {
@@ -257,7 +367,7 @@ export async function renderAdmin({ signal }) {
               el("span", { class: "subtle" }, expires(invite))));
           invitationPanel.hidden = false;
           await updateList();
-        }),
+        })),
         invitationPanel),
       el("section", { class: "panel people-panel invite-list" }, el("h2", {}, t("Created invites", "Erstellte Einladungen")), invites));
   const title = el("h1", {}, t("Invites", "Einladungen"));
@@ -271,7 +381,11 @@ export async function renderAdmin({ signal }) {
     accountButton.setAttribute("aria-pressed", String(showAccounts));
     if (showAccounts) accounts.initialize();
   }
-  return el("div", { class: "secondary-page invitations-page" },
-    el("div", { class: "page-heading" }, title, el("div", { class: "inline", role: "group", "aria-label": t("Site administration", "Website-Verwaltung") }, inviteButton, accountButton)),
+  const page = el("div", { class: "secondary-page invitations-page" },
+    el("div", { class: "stack" },
+      el("div", { class: "page-heading" }, title, el("div", { class: "inline", role: "group", "aria-label": t("Site administration", "Website-Verwaltung") }, inviteButton, accountButton)),
+      approval.node),
     invitationView, accounts.node);
+  approval.attach(page);
+  return page;
 }

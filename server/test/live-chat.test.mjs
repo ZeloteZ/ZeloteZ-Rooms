@@ -53,22 +53,49 @@ function fixture(t) {
     return { id, cookie: '__Host-zelotez_session=' + secret }
   }
 
-  async function request(method, path, actor, body) {
-    const incoming = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))])
+  async function request(method, path, actor, body, writeChunk) {
+    const binary = Buffer.isBuffer(body)
+    const incoming = Readable.from(body === undefined ? [] : [binary ? body : Buffer.from(JSON.stringify(body))])
     incoming.method = method
-    incoming.headers = { cookie: actor?.cookie, ...(body !== undefined && { 'content-type': 'application/json' }) }
+    incoming.headers = { cookie: actor?.cookie,
+      ...(body !== undefined && { 'content-type': binary ? 'application/octet-stream' : 'application/json' }) }
     const chunks = []
-    const response = new Writable({ write(data, _encoding, done) { chunks.push(data); done() } })
-    response.writeHead = status => { response.status = status; return response }
+    const response = new Writable({ write(data, _encoding, done) {
+      chunks.push(data)
+      if (writeChunk) writeChunk(done, this)
+      else done()
+    } })
+    let headers
+    response.writeHead = (status, values = {}) => { response.status = status; headers = values; return response }
     const url = new URL(path, origin)
     for (const handler of handlers) {
       if (await handler.handle(incoming, response, url)) {
-        return { status: response.status, body: chunks.length ? JSON.parse(Buffer.concat(chunks)) : undefined }
+        const bytes = chunks.length ? Buffer.concat(chunks) : undefined
+        const body = bytes && (headers['Content-Type']?.startsWith('application/json') ? JSON.parse(bytes) : bytes)
+        return { status: response.status, headers, body }
       }
     }
     throw new Error('Unhandled test route ' + path)
   }
   return { db, user, request }
+}
+
+async function attachmentFixture(t) {
+  const { db, user, request } = fixture(t)
+  const owner = user('Owner')
+  const viewer = user('Viewer')
+  const { body: { topic } } = await request('POST', '/api/topics', owner, { title: 'Files', visibility: 'public' })
+  const room = '/api/topics/' + topic.id
+  await request('POST', room + '/join', viewer, {})
+  const { body: { channels } } = await request('GET', room, owner)
+  const channelId = channels.find(channel => channel.type === 'chat').id
+  const channel = '/api/channels/' + channelId
+  const id = randomUUID()
+  const file = channel + '/files/' + id
+  const message = randomUUID()
+  const post = attachmentIds => request('POST', channel + '/messages', owner,
+    { id: message, envelope: envelopeFor(owner, viewer), attachmentIds })
+  return { db, user, request, owner, viewer, room, channelId, channel, id, file, message, post }
 }
 
 test('regular live chat persists independently of broadcasts and is limited to current members of the channel', async t => {
@@ -156,4 +183,79 @@ test('temporary stream rooms do not expose persistent chat APIs even to their ow
     { id, envelope: envelopeFor(owner), attachmentIds: [] }), { status: 404 })
   await assert.rejects(request('GET', channelPath + '/messages/reactions?ids=' + id, owner), { status: 404 })
   await assert.rejects(request('GET', '/api/mentions?channelId=' + live.id, owner), { status: 404 })
+})
+
+test('chat attachments stream the exact uploaded bytes to current recipients and are deleted with their message', async t => {
+  const { db, user, request, owner, viewer, room, channel, id, file, message, post } = await attachmentFixture(t)
+  const bytes = randomBytes(2 * 256 * 1024 + 117)
+  assert.equal((await request('PUT', file, owner, randomBytes(bytes.length + 256 * 1024))).status, 201)
+  assert.equal((await request('PUT', file, owner, bytes)).status, 201)
+  await assert.rejects(request('GET', file, owner), { status: 404 })
+  assert.equal((await post([id])).status, 201)
+
+  const stranger = user('Stranger')
+  await assert.rejects(request('GET', file, stranger), { status: 404 })
+  await request('POST', room + '/join', stranger, {})
+  await assert.rejects(request('GET', file, stranger), { status: 404 })
+  await assert.rejects(request('GET', file + '?maxBytes=0', viewer), { status: 400 })
+  assert.equal((await request('GET', file + '?maxBytes=' + (bytes.length - 1), viewer)).status, 204)
+  const result = await request('GET', file + '?maxBytes=' + bytes.length, viewer)
+  assert.equal(result.status, 200)
+  assert.equal(result.headers['Content-Length'], bytes.length)
+  assert.equal(result.headers['Content-Disposition'], 'attachment')
+  assert.deepEqual(result.body, bytes)
+  const countChunks = db.prepare('SELECT count(*) AS count FROM attachment_chunks WHERE attachment_id = ?')
+  assert.equal(countChunks.get(id).count, 3)
+
+  assert.equal((await request('DELETE', channel + '/messages/' + message, owner, {})).status, 200)
+  await assert.rejects(request('GET', file, viewer), { status: 404 })
+  assert.equal(countChunks.get(id).count, 0)
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+})
+
+test('the first authorized read of a legacy attachment moves its bytes into chunks', async t => {
+  const { db, user, request, owner, viewer, channelId, id, file, message, post } = await attachmentFixture(t)
+  const bytes = randomBytes(2 * 256 * 1024 + 29)
+  assert.equal((await post([])).status, 201)
+  db.prepare('INSERT INTO attachments VALUES (?,?,?,?,?,?,?)').run(id, channelId, owner.id, message, bytes, bytes.length, Date.now())
+  const legacySize = db.prepare('SELECT length(bytes) AS length FROM attachments WHERE id = ?')
+  const countChunks = db.prepare('SELECT count(*) AS count FROM attachment_chunks WHERE attachment_id = ?')
+
+  await assert.rejects(request('GET', file, user('Stranger')), { status: 404 })
+  assert.equal((await request('GET', file + '?maxBytes=1', viewer)).status, 204)
+  assert.equal(legacySize.get(id).length, bytes.length)
+  assert.equal(countChunks.get(id).count, 0)
+  assert.deepEqual((await request('GET', file, viewer)).body, bytes)
+  assert.equal(legacySize.get(id).length, 0)
+  assert.equal(countChunks.get(id).count, 3)
+  assert.deepEqual((await request('GET', file, viewer)).body, bytes)
+})
+
+test('attachment downloads limit simultaneous reads and stop when a connection closes or access is removed', async t => {
+  const { request, owner, viewer, room, id, file, post } = await attachmentFixture(t)
+  const bytes = randomBytes(256 * 1024 + 32)
+  await request('PUT', file, owner, bytes)
+  await post([id])
+  const firstWrite = Promise.withResolvers()
+  const secondWrite = Promise.withResolvers()
+  const drain = Promise.withResolvers()
+  const heldWrite = signal => (done, response) => {
+    signal.resolve(response)
+    drain.promise.then(() => done())
+  }
+  const first = request('GET', file, viewer, undefined, heldWrite(firstWrite))
+  const second = request('GET', file, viewer, undefined, heldWrite(secondWrite))
+  try {
+    const [connection] = await Promise.all([firstWrite.promise, secondWrite.promise])
+    await assert.rejects(request('GET', file, viewer), { status: 429 })
+    connection.destroy()
+    await assert.rejects(first, { code: 'ERR_STREAM_PREMATURE_CLOSE' })
+    assert.deepEqual((await request('GET', file, viewer)).body, bytes)
+    assert.equal((await request('DELETE', room + '/join', viewer)).status, 200)
+  } finally {
+    drain.resolve()
+    await Promise.allSettled([first, second])
+  }
+  await assert.rejects(second, { status: 404 })
+  assert.deepEqual((await request('GET', file, owner)).body, bytes)
 })

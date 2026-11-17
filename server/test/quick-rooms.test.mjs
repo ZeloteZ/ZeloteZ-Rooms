@@ -50,7 +50,7 @@ function fixture(t) {
       revoke: () => db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(token) }
   }
 
-  async function request(method, path, { user: actor, cookie = actor?.cookie, body, beforeBody } = {}) {
+  async function request(method, path, { user: actor, cookie = actor?.cookie, body, beforeBody, address = '127.0.0.1' } = {}) {
     const stream = Readable.from((async function* () {
       await beforeBody?.()
       if (body !== undefined) yield Buffer.from(JSON.stringify(body))
@@ -58,7 +58,7 @@ function fixture(t) {
     stream.method = method
     stream.url = path
     stream.headers = { ...(cookie && { cookie }), ...(body !== undefined && { 'content-type': 'application/json' }) }
-    stream.socket = { remoteAddress: '127.0.0.1' }
+    stream.socket = { remoteAddress: address }
     const chunks = []
     const response = new Writable({ write(data, _encoding, done) { chunks.push(data); done() } })
     response.writeHead = (statusCode, headers) => {
@@ -249,4 +249,48 @@ test('temporary chat uses the same guest access as playback and identifies signe
   assert.equal((await request('GET', chat, { cookie })).body.deviceId, deviceId)
   await request('DELETE', ownerPath(room), { user: host })
   await assert.rejects(request('GET', chat, { cookie }), { status: 404 })
+})
+
+test('temporary chat admits distinct browsers within a shared network quota and keeps devices private', async t => {
+  const { user, request, guestPath, ownerPath } = fixture(t)
+  const host = user('test-host')
+  const otherHost = user('other-host')
+  const create = user => request('POST', '/api/quick-rooms', { user, body: { source: 'screen', guestAccess: true } })
+    .then(({ body }) => body)
+  const room = await create(host)
+  const otherRoom = await create(otherHost)
+  const redeem = (room, address) => request('POST', guestPath(room, 'session'), { address, body: { password: room.secret } })
+    .then(({ headers }) => headers['Set-Cookie'].split(';')[0])
+  const firstAddress = '192.0.2.10'
+  const secondAddress = '192.0.2.11'
+  const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const key = publicKey.export({ format: 'jwk' })
+  const join = (room, cookie, address, deviceId = randomUUID()) =>
+    request('POST', guestPath(room, 'chat/join'), { cookie, address, body: { deviceId, publicKey: key } })
+  const firstTicket = await redeem(room, firstAddress)
+  const secondTicket = await redeem(room, firstAddress)
+  assert.notEqual(firstTicket, secondTicket)
+  const first = (await join(room, firstTicket, firstAddress)).body
+  const read = `${guestPath(room, 'chat')}?deviceId=${first.deviceId}`
+  await assert.rejects(request('GET', read, { cookie: secondTicket, address: firstAddress }), { status: 409 })
+  for (const cookie of [firstTicket, secondTicket, await redeem(room, firstAddress), await redeem(room, firstAddress)]) {
+    for (let index = cookie === firstTicket ? 1 : 0; index < 4; index++) await join(room, cookie, firstAddress)
+  }
+  const nextTicket = await redeem(room, firstAddress)
+  await assert.rejects(join(room, nextTicket, firstAddress), { status: 429 })
+
+  const { body } = await join(room, await redeem(room, secondAddress), secondAddress)
+  assert.equal(body.peers.length, 17)
+  assert.deepEqual(Object.keys(body.peers[0]), ['id', 'publicKey', 'name', 'guest'])
+  assert.equal((await request('GET', read, { cookie: firstTicket, address: secondAddress })).body.deviceId, first.deviceId)
+  assert.equal((await join(otherRoom, await redeem(otherRoom, firstAddress), firstAddress)).body.peers.length, 1)
+
+  await request('POST', guestPath(room, 'chat/leave'), { cookie: firstTicket, address: secondAddress,
+    body: { deviceId: first.deviceId } })
+  assert.equal((await join(room, nextTicket, firstAddress)).body.peers.length, 17)
+  await assert.rejects(request('GET', read, { cookie: firstTicket, address: secondAddress }), { status: 409 })
+
+  const rotated = (await request('PATCH', ownerPath(room), { user: host, body: { renewPassword: true } })).body
+  await assert.rejects(join(room, nextTicket, firstAddress), { status: 401 })
+  assert.equal((await join(room, await redeem(rotated, firstAddress), firstAddress)).body.peers.length, 1)
 })

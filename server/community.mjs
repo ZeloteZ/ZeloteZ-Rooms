@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { pipeline } from 'node:stream/promises'
 import { channelList, initializeChannelOrder } from './channel-management.mjs'
 import { createDirect } from './direct.mjs'
 import { json, readBytes, readJson, RequestError, transaction } from './http.mjs'
@@ -7,6 +8,10 @@ import { responseLocale } from './locale.mjs'
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u
 const invisibleControls = /[\p{Cc}\p{Cs}\p{Bidi_Control}]/u
 const fileLimit = 12 * 1024 * 1024 + 28
+const fileChunkSize = 256 * 1024
+const maxDownloads = 16
+const maxDownloadsPerUser = 2
+const downloadByteLimit = 96 * 1024 * 1024
 const totalFileLimit = 2 * 1024 * 1024 * 1024
 const userFileLimit = 250 * 1024 * 1024
 const stagingTime = 60 * 60 * 1000
@@ -202,6 +207,12 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     ) STRICT;
     CREATE INDEX IF NOT EXISTS pending_attachments ON attachments(message_id, created_at);
     CREATE INDEX IF NOT EXISTS user_uploads ON attachments(user_id);
+    CREATE TABLE IF NOT EXISTS attachment_chunks (
+      attachment_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+      part INTEGER NOT NULL,
+      bytes BLOB NOT NULL,
+      PRIMARY KEY(attachment_id, part)
+    ) STRICT, WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS chat_storage (
       scope TEXT PRIMARY KEY, messages INTEGER NOT NULL, bytes INTEGER NOT NULL
     ) STRICT, WITHOUT ROWID;
@@ -287,6 +298,15 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
   }, 15 * 60 * 1000)
   cleanup.unref()
   const uploading = new Set()
+  const downloads = new Map()
+  let downloadCount = 0
+  let downloadBytes = 0
+  let fileFor
+  const readLegacyFile = db.prepare('SELECT bytes FROM attachments WHERE id = ?')
+  const clearLegacyFile = db.prepare("UPDATE attachments SET bytes = x'' WHERE id = ?")
+  const clearFileChunks = db.prepare('DELETE FROM attachment_chunks WHERE attachment_id = ?')
+  const insertFileChunk = db.prepare('INSERT INTO attachment_chunks VALUES (?,?,?)')
+  const readFileChunk = db.prepare('SELECT bytes FROM attachment_chunks WHERE attachment_id = ? AND part = ?')
   const posting = new Map()
   const showTopic = row => topicView(row, appearance)
   const showMessage = row => messageView(row, appearance.profile)
@@ -715,6 +735,12 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     })
   }
 
+  function writeFileChunks(id, bytes) {
+    for (let offset = 0, part = 0; offset < bytes.length; offset += fileChunkSize, part++) {
+      insertFileChunk.run(id, part, bytes.subarray(offset, offset + fileChunkSize))
+    }
+  }
+
   async function putFile(request, user, channel, fileId) {
     assertId(fileId)
     direct.assertCanSend(channel.id, user.id)
@@ -740,29 +766,63 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
         if (used + fileSizeIncrease > totalFileLimit || usedBySender + fileSizeIncrease > userFileLimit) {
           throw new RequestError(413, 'Der Speicher für Anhänge ist voll.')
         }
-        db.prepare(`INSERT INTO attachments(id,channel_id,user_id,bytes,size,created_at) VALUES (?,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET bytes = excluded.bytes, size = excluded.size, created_at = excluded.created_at`)
-          .run(fileId, channel.id, user.id, bytes, bytes.length, now)
+        db.prepare(`INSERT INTO attachments(id,channel_id,user_id,bytes,size,created_at) VALUES (?,?,?,x'',?,?)
+          ON CONFLICT(id) DO UPDATE SET size = excluded.size, created_at = excluded.created_at, bytes = excluded.bytes`)
+          .run(fileId, channel.id, user.id, bytes.length, now)
+        clearFileChunks.run(fileId)
+        writeFileChunks(fileId, bytes)
       })
     } finally {
       uploading.delete(user.id)
     }
   }
 
-  function getFile(response, user, channel, fileId, limit) {
+  async function getFile(request, response, user, channel, fileId, limit) {
     assertId(fileId)
     if (limit !== null && (!/^[1-9]\d{0,7}$/u.test(limit) || Number(limit) > fileLimit)) {
       throw new RequestError(400, 'Ungültige Auswahl.')
     }
-    const file = db.prepare(`SELECT CASE WHEN a.size <= ? THEN a.bytes END AS bytes, a.size
+    fileFor ??= db.prepare(`SELECT a.size, a.message_id, length(a.bytes) AS legacy_size
       FROM attachments a JOIN messages m ON m.id = a.message_id
       ${joinHistory} WHERE a.id = ? AND a.channel_id = ? AND ${undeleted} AND (g.revision IS NOT NULL OR ${originalAccess})`)
-      .get(limit === null ? fileLimit : Number(limit), user.id, fileId, channel.id, user.id)
+    const file = fileFor.get(user.id, fileId, channel.id, user.id)
     if (!file) throw missing()
-    if (file.bytes === null) return response.writeHead(204).end()
-    response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': file.size,
-      'Content-Disposition': 'attachment', 'Content-Security-Policy': "default-src 'none'; sandbox" })
-    response.end(file.bytes)
+    if (file.size > (limit === null ? fileLimit : Number(limit))) return response.writeHead(204).end()
+    const userDownloads = downloads.get(user.id) ?? 0
+    if (userDownloads >= maxDownloadsPerUser || downloadCount >= maxDownloads || downloadBytes + file.size > downloadByteLimit) {
+      throw new RequestError(429, 'Warte, bis andere Downloads abgeschlossen sind.')
+    }
+    downloads.set(user.id, userDownloads + 1)
+    downloadCount++
+    downloadBytes += file.size
+    try {
+      if (file.legacy_size) transaction(db, () => {
+        // Convert only this authorized legacy attachment and keep it intact if conversion fails.
+        const legacy = readLegacyFile.get(fileId)?.bytes
+        if (legacy?.length !== file.size) throw new Error('Invalid legacy attachment size')
+        writeFileChunks(fileId, legacy)
+        clearLegacyFile.run(fileId)
+      })
+      async function* parts() {
+        for (let offset = 0, part = 0; offset < file.size; offset += fileChunkSize, part++) {
+          if (requireSession(request).id !== user.id) throw missing()
+          getMessageChannel(user.id, channel.id)
+          if (fileFor.get(user.id, fileId, channel.id, user.id)?.message_id !== file.message_id) throw missing()
+          const row = readFileChunk.get(fileId, part)
+          if (row?.bytes.length !== Math.min(fileChunkSize, file.size - offset)) throw new Error('Invalid attachment chunk')
+          yield row.bytes
+        }
+      }
+      response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': file.size,
+        'Content-Disposition': 'attachment', 'Content-Security-Policy': "default-src 'none'; sandbox" })
+      await pipeline(parts(), response)
+    } finally {
+      const remaining = downloads.get(user.id) - 1
+      if (remaining) downloads.set(user.id, remaining)
+      else downloads.delete(user.id)
+      downloadCount--
+      downloadBytes -= file.size
+    }
   }
 
   async function handle(request, response, url) {
@@ -846,7 +906,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
         if (method === 'PUT') {
           await putFile(request, user, channel, file)
           json(response, 201, { id: file })
-        } else if (method === 'GET') getFile(response, user, channel, file, searchParams.get('maxBytes'))
+        } else if (method === 'GET') await getFile(request, response, user, channel, file, searchParams.get('maxBytes'))
         else return false
       } else return false
     } else return false

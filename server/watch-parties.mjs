@@ -19,8 +19,13 @@ const maxQueue = 16
 const maxUploadRequests = 4
 const maxMediaReads = 128
 const maxMediaReadsPerSession = 8
+const maxGuestMediaReads = 96
+const maxGuestMediaReadsPerRoom = 32
+const maxGuestMediaReadsPerSource = 16
 const maxViewers = 128
 const maxViewersPerCredential = 4
+const maxGuestViewers = 112
+const maxGuestViewersPerSource = 16
 const viewerLease = 12_000
 const uploadIdleTime = 3 * 60_000
 const uploadLifetime = 20 * 60_000
@@ -216,10 +221,17 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const id = credential.key + ':' + report.playerId
     const previous = party.viewers.get(id)
     if (previous && previous.revision >= report.revision) return
-    if (!previous && (party.viewers.size >= maxViewers ||
-        [...party.viewers.values()].filter(viewer => viewer.key === credential.key).length >= maxViewersPerCredential)) throw tooBusy()
+    if (!previous) {
+      const viewers = [...party.viewers.values()]
+      if (viewers.length >= maxViewers || viewers.filter(viewer => viewer.key === credential.key).length >= maxViewersPerCredential ||
+          (credential.guest && viewers.filter(viewer => viewer.guest).length >= maxGuestViewers) ||
+          (credential.quotaSource && viewers.filter(viewer => viewer.quotaSource === credential.quotaSource).length >= maxGuestViewersPerSource)) {
+        throw tooBusy()
+      }
+    }
     // Retain a release until any older in-flight heartbeat has had time to arrive.
-    party.viewers.set(id, { ...credential, present, revision: report.revision, expiresAt: time + viewerLease })
+    party.viewers.set(id, { ...credential, quotaSource: previous ? previous.quotaSource : credential.quotaSource,
+      present, revision: report.revision, expiresAt: time + viewerLease })
     if (present && party.autoStart) {
       party.autoStart = false
       party.playing = true
@@ -448,17 +460,30 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     }
   }
 
-  async function serve(request, response, party, { key, verifyAccess, isActive }) {
+  function assertReadCapacity(key, guest) {
+    if (reads.size >= maxMediaReads) throw tooBusy()
+    let sessionReads = 0
+    let guestReads = 0
+    let roomReads = 0
+    let sourceReads = 0
+    for (const read of reads) {
+      if (read.session === key && ++sessionReads >= maxMediaReadsPerSession) throw tooBusy()
+      if (!guest || !read.guest) continue
+      if (++guestReads >= maxGuestMediaReads ||
+          (read.guest.roomId === guest.roomId && ++roomReads >= maxGuestMediaReadsPerRoom) ||
+          (guest.quotaSource && read.guest.quotaSource === guest.quotaSource && ++sourceReads >= maxGuestMediaReadsPerSource)) throw tooBusy()
+    }
+  }
+
+  async function serve(request, response, party, { key, guest, verifyAccess, isActive }) {
     if (party.state !== 'ready' || !party.file) throw missing()
     const range = mediaRange(request.headers.range, party.size)
     const headers = { 'Accept-Ranges': 'bytes' }
     if (!range) return response.writeHead(416, { ...headers, 'Content-Range': `bytes */${party.size}` }).end()
     const wantsBody = request.method !== 'HEAD'
-    if (wantsBody && (reads.size >= maxMediaReads || [...reads].filter(read => read.session === key).length >= maxMediaReadsPerSession)) {
-      throw tooBusy()
-    }
+    if (wantsBody) assertReadCapacity(key, guest)
     const { start, end, partial } = range
-    const read = { party, session: key, isActive, abort: new AbortController() }
+    const read = { party, session: key, guest, isActive, abort: new AbortController() }
     if (wantsBody) reads.add(read)
     let file
     try {
@@ -499,7 +524,8 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const party = guestParty(scope, now())
     if (party?.id !== partyId || party.source !== 'local' || !isActive()) throw missing()
     const key = scope.guestKey.session ?? `guest:${scope.guestKey.token}`
-    return serve(request, response, party, { key, isActive, verifyAccess() { if (!isActive()) throw missing() } })
+    const guest = scope.guestKey.token ? { roomId: scope.roomId, quotaSource: scope.quotaSource } : undefined
+    return serve(request, response, party, { key, guest, isActive, verifyAccess() { if (!isActive()) throw missing() } })
   }
 
   function updatePlayback(party, { action, revision, position }, time, canChooseNext = false) {
@@ -549,7 +575,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     if (party?.id !== partyId) throw missing()
     const { session, token } = scope.guestKey
     const key = session ?? (token && 'guest:' + token)
-    updateViewer(party, { key, isActive }, report, method === 'POST', time)
+    updateViewer(party, { key, guest: Boolean(token), quotaSource: scope.quotaSource, isActive }, report, method === 'POST', time)
   }
 
   async function reportMemberViewer(request, response, actor, party) {

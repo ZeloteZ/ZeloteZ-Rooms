@@ -16,7 +16,8 @@ import { createNativeBroadcast } from "./native-broadcast.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
 import { createTutorials } from "./tutorial.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
-import { api, button, closeDialog, el, field, form, notify, paintPersonMark, paintPersonName, requireLoginOnExpiry, select, setExpectedAccount, topicHref } from "./ui.js";
+import { api, button, closeDialog, el, field, form, notify, paintPersonMark, paintPersonName, requireLoginOnExpiry,
+  select, setExpectedAccount, showDialog, topicHref } from "./ui.js";
 
 const navigation = document.querySelector("#navigation");
 const profile = document.querySelector("#profile");
@@ -51,8 +52,9 @@ let screenShare;
 let nativeBroadcast;
 let quickRoomHeader;
 let tutorials;
-const invite = takeInvite();
-let pendingInvite = invite;
+let vaultLocked = false;
+let pendingRecovery = takeLinkToken("recover");
+let pendingInvite = pendingRecovery === null ? takeLinkToken("invite") : null;
 
 const routes = { topics: "rooms", themen: "rooms", freunde: "friends", einladungen: "invites", "so-funktionierts": "help" };
 const navLabels = {
@@ -77,9 +79,9 @@ function languageChooser() {
   picker.addEventListener("change", () => {
     setLanguage(picker.value);
     window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "language", language: picker.value });
-    if (pendingInvite !== null) {
+    if (pendingInvite !== null || pendingRecovery !== null) {
       const url = new URL(location.href);
-      url.hash = new URLSearchParams({ invite: pendingInvite }).toString();
+      url.hash = new URLSearchParams(pendingRecovery !== null ? { recover: pendingRecovery } : { invite: pendingInvite }).toString();
       history.replaceState(null, "", url);
     }
     location.reload();
@@ -87,15 +89,15 @@ function languageChooser() {
   return field(t("Language", "Sprache"), picker);
 }
 
-function takeInvite() {
+function takeLinkToken(name) {
   const url = new URL(location.href);
   const hash = new URLSearchParams(url.hash.slice(1));
-  const invitation = hash.get("invite");
-  if (invitation !== null) {
+  const token = hash.get(name);
+  if (token !== null) {
     url.hash = "";
     history.replaceState(null, "", url);
   }
-  return invitation;
+  return token;
 }
 
 function getRoute() {
@@ -151,12 +153,93 @@ profileEditor.addEventListener("click", () => {
     Object.assign(user, profile);
     paintOwnProfile();
     profileUpdates.dispatchEvent(new Event("change"));
-  }, languageChooser(), () => tutorials?.reset());
+  }, languageChooser(), () => tutorials?.reset(), changePassword);
   tutorials?.openProfile(document.querySelector("#dialog-content"));
 });
 
-async function showWorkspace(nextUser) {
+function passwordInput(newPassword = false) {
+  return el("input", { type: "password", required: true,
+    autocomplete: newPassword ? "new-password" : "current-password", minlength: newPassword ? "12" : undefined });
+}
+
+function authenticatorInput() {
+  return el("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]{6}", maxlength: "6" });
+}
+
+async function changePassword() {
+  const account = user;
+  if (!account) return;
+  const title = t("Change password", "Passwort ändern");
+  const current = passwordInput();
+  const previous = account.identity?.detached ? passwordInput() : null;
+  const next = passwordInput(true);
+  const code = authenticatorInput();
+  const codeField = field(t("Authenticator code", "Authenticator-Code"), code);
+  const askForCode = () => { codeField.hidden = false; code.required = true; };
+  codeField.hidden = true;
+  const body = form([
+    field(t("Current password", "Aktuelles Passwort"), current),
+    previous && field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
+    field(t("New password", "Neues Passwort"), next),
+    codeField,
+  ], title, async () => {
+    if (user !== account) return;
+    const nextPassword = next.value;
+    const [prepared, currentCredential] = await Promise.all([
+      ClubCrypto.rewrapIdentity(account, previous?.value ?? current.value, nextPassword),
+      ClubCrypto.credential(account.username, current.value),
+    ]);
+    const remember = Boolean(await desktopLogin?.load(account.id).catch(() => null));
+    if (!body.isConnected || user !== account) return;
+    if (!codeField.hidden) {
+      await api("admin/authorize", { method: "POST", body: { code: code.value } });
+      codeField.hidden = true;
+      code.required = false;
+      code.value = "";
+    }
+    if (!body.isConnected || user !== account) return;
+    let updated;
+    try {
+      ({ user: updated } = await api("auth/password", { method: "POST", body: { current: currentCredential, ...prepared } }));
+    } catch (error) {
+      if (error.details?.code === "ROOMS_OWNER_APPROVAL") {
+        askForCode();
+        code.focus();
+      }
+      throw error;
+    }
+    closeDialog();
+    sessionChanges?.postMessage("changed");
+    if (!await ClubCrypto.unlock(updated, nextPassword)) {
+      await desktopLogin?.forget().catch(() => {});
+      showAuth(t("Sign in again with your new password.", "Melde dich mit deinem neuen Passwort an."), updated.username);
+      return;
+    }
+    await (remember ? desktopLogin.save(updated.id, ClubCrypto.deviceUnlockKey(updated.id)) : desktopLogin?.forget())?.catch(() => {});
+    await showWorkspace(updated);
+    notify(t("Password changed. Other sessions have ended.", "Das Passwort wurde geändert. Andere Sitzungen wurden beendet."));
+  });
+  if (account.admin) {
+    let security;
+    try {
+      security = await api("admin/security");
+    } catch (error) {
+      if (user === account) notify(error.message);
+      return;
+    }
+    if (user !== account) return;
+    if (!security.configured) {
+      showDialog(title, el("p", {}, t("Set up two-factor sign-in under Invites first.", "Richte zuerst unter Einladungen die Zwei-Faktor-Anmeldung ein.")));
+      return;
+    }
+    if (security.approvedUntil <= Date.now() / 1000) askForCode();
+  }
+  showDialog(title, body);
+}
+
+async function showWorkspace(nextUser, unlocked = true) {
   user = nextUser;
+  vaultLocked = !unlocked;
   setExpectedAccount(user.id);
   workspaceSession?.abort();
   workspaceSession = new AbortController();
@@ -170,7 +253,7 @@ async function showWorkspace(nextUser) {
   quickRoomHeader = mountQuickRoomDock(quickRoomDock, { signal, screenShare, nativeBroadcast });
   tutorials = createTutorials(user.id, signal);
   mountNotifications(notificationDock, signal, render);
-  startHistorySharing(signal, user.id);
+  if (unlocked) startHistorySharing(signal, user.id);
   pendingInvite = null;
   auth.replaceChildren();
   auth.hidden = true;
@@ -202,6 +285,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
   view = null;
   activeTopic = null;
   user = null;
+  vaultLocked = false;
   setExpectedAccount(null);
   globalThis.ClubCrypto?.lock();
   closeDialog();
@@ -225,11 +309,20 @@ function showAuth(note = "", preset = "", showInvite = false) {
     type: "password", name: "password", autocomplete: startRegister ? "new-password" : "current-password",
     required: true, minlength: startRegister ? "12" : undefined,
   });
+  const code = authenticatorInput();
+  const codeField = field(t("Authenticator code", "Authenticator-Code"), code);
+  codeField.hidden = true;
+  username.addEventListener("input", () => {
+    code.value = "";
+    code.required = false;
+    codeField.hidden = true;
+  });
   const remember = desktopLogin && !startRegister && el("input", { type: "checkbox", name: "remember" });
   const authForm = form([
     startRegister && field(t("Display name", "Anzeigename"), name),
     field(t("Username", "Benutzername"), username),
     field(t("Password", "Passwort"), password),
+    codeField,
     remember && el("label", { class: "inline" }, remember,
       t("Keep me signed in on this device", "Auf diesem Gerät angemeldet bleiben")),
     note && el("p", { class: "status" }, note),
@@ -238,28 +331,41 @@ function showAuth(note = "", preset = "", showInvite = false) {
     const loginName = username.value.trim().toLowerCase();
     const plainPassword = password.value;
     const keepSignedIn = remember?.checked === true;
-    const result = startRegister
-      ? await api("auth/register", { method: "POST", body: {
-        ...(await ClubCrypto.prepareRegistration(loginName, plainPassword)),
-        invite: pendingInvite, username: loginName, displayName: name.value.trim(),
-      } })
-      : await api("auth/login", { method: "POST", body: {
-        username: loginName, password: await ClubCrypto.credential(loginName, plainPassword),
-      } });
+    let result;
+    try {
+      result = startRegister
+        ? await api("auth/register", { method: "POST", body: {
+          ...(await ClubCrypto.prepareRegistration(loginName, plainPassword)),
+          invite: pendingInvite, username: loginName, displayName: name.value.trim(),
+        } })
+        : await api("auth/login", { method: "POST", body: {
+          username: loginName, password: await ClubCrypto.credential(loginName, plainPassword),
+          ...(!codeField.hidden && { code: code.value }),
+        } });
+    } catch (error) {
+      if (error.details?.code === "ROOMS_OWNER_CODE") {
+        codeField.hidden = false;
+        code.required = true;
+        code.focus();
+      }
+      throw error;
+    }
     password.value = "";
+    code.value = "";
     sessionChanges?.postMessage("changed");
-    if (!await ClubCrypto.unlock(result.user, plainPassword)) {
+    const unlocked = await ClubCrypto.unlock(result.user, plainPassword);
+    if (!unlocked && !result.user.identity?.detached) {
       await desktopLogin?.forget().catch(() => {});
       throw new Error(t("Your keys could not be unlocked.", "Deine Schlüssel konnten nicht entsperrt werden."));
     }
     let remembered;
     if (desktopLogin) {
-      remembered = await (keepSignedIn
+      remembered = await (keepSignedIn && unlocked
         ? desktopLogin.save(result.user.id, ClubCrypto.deviceUnlockKey(result.user.id))
         : desktopLogin.forget()).catch(() => false);
     }
-    await showWorkspace(result.user);
-    if (keepSignedIn && !remembered) notify(t(
+    await showWorkspace(result.user, unlocked);
+    if (keepSignedIn && (!remembered || !unlocked)) notify(t(
       "Rooms couldn’t save this sign-in in your system’s secure storage. Sign in again the next time you open the app.",
       "Rooms konnte die Anmeldung nicht sicher auf diesem Gerät speichern. Melde dich beim nächsten Start erneut an."));
   });
@@ -269,6 +375,48 @@ function showAuth(note = "", preset = "", showInvite = false) {
     el("div", { class: "auth-form-area" }, header, authForm,
       pendingInvite !== null && button(startRegister ? t("Back to sign in", "Zum Login") : t("Accept invitation", "Einladung annehmen"),
         () => showAuth("", "", !startRegister), { class: "ghost" }), languageChooser()));
+}
+
+async function showRecovery(token) {
+  pendingInvite = null;
+  showAuth();
+  const title = t("Recover owner account", "Betreiberkonto wiederherstellen");
+  const panel = el("div", { class: "auth-form-area stack" }, el("h2", {}, title));
+  auth.replaceChildren(panel);
+  try {
+    const { user: account } = await api("auth/recovery", { method: "POST", body: { token } });
+    if (pendingRecovery !== token || !panel.isConnected) return;
+    const previous = passwordInput();
+    const password = passwordInput(true);
+    const keepLocked = el("input", { type: "checkbox" });
+    keepLocked.addEventListener("change", () => {
+      previous.disabled = keepLocked.checked;
+      if (keepLocked.checked) previous.value = "";
+    });
+    panel.append(el("p", {}, "@" + account.username), form([
+      el("p", {}, t("Use the previous chat password to keep your existing chats accessible.",
+        "Gib das bisherige Chatpasswort ein, damit die vorhandenen Chats zugänglich bleiben.")),
+      field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
+      el("label", { class: "inline" }, keepLocked, t("I lost the chat password. Keep the chats locked.",
+        "Ich habe das Chatpasswort verloren. Die Chats sollen gesperrt bleiben.")),
+      field(t("New password", "Neues Passwort"), password),
+    ], title, async () => {
+      const prepared = keepLocked.checked
+        ? { password: await ClubCrypto.credential(account.username, password.value), keepLocked: true }
+        : await ClubCrypto.rewrapIdentity(account, previous.value, password.value);
+      if (pendingRecovery !== token || !panel.isConnected) return;
+      await api("auth/recovery/complete", { method: "POST", body: { token, ...prepared } });
+      pendingRecovery = null;
+      await desktopLogin?.discard().catch(() => {});
+      sessionChanges?.postMessage("changed");
+      showAuth(t("Owner password reset. Sign in with your new password.", "Das Betreiberpasswort wurde zurückgesetzt. Melde dich mit dem neuen Passwort an."),
+        account.username);
+    }), languageChooser());
+  } catch (error) {
+    if (pendingRecovery !== token || !panel.isConnected) return;
+    pendingRecovery = null;
+    showAuth(error.message);
+  }
 }
 
 function showTutorial(route, page) {
@@ -332,7 +480,10 @@ async function render(force = false) {
     }
     else page = await renderTopics(context);
     if (!signal.aborted) {
-      workspace.replaceChildren(page);
+      workspace.replaceChildren(...(vaultLocked ? [el("div", { class: "panel stack", role: "status" },
+        el("p", {}, t("Your chats are locked. If you find your previous chat password, update it to unlock them.",
+          "Deine Chats sind gesperrt. Wenn du das bisherige Chatpasswort wiederfindest, kannst du sie damit entsperren.")),
+        button(t("Unlock chats", "Chats entsperren"), changePassword))] : []), page);
       player.refreshPlacement();
       videoDock.refreshPlacement();
       if (route.sharedVideo) confirmYoutubeRoom(context, route.sharedVideo);
@@ -361,7 +512,8 @@ async function checkTabAccount() {
   checkingAccount = true;
   try {
     const session = await api("auth/session");
-    if (user === current && session.user?.id !== current.id) lockOnAccountChange();
+    if (user === current && (session.user?.id !== current.id ||
+      session.user?.identity?.nonce !== current.identity?.nonce || session.user?.identity?.detached !== current.identity?.detached)) lockOnAccountChange();
   } catch {
     // Requests from this tab retain their expected-account guard during an interruption.
   } finally {
@@ -383,8 +535,15 @@ document.querySelector(".skip-link").addEventListener("click", event => {
 });
 window.addEventListener("hashchange", () => {
   tutorials?.leave();
-  const invitation = takeInvite();
+  const recovery = takeLinkToken("recover");
+  if (recovery !== null) {
+    pendingRecovery = recovery;
+    void showRecovery(recovery);
+    return;
+  }
+  const invitation = takeLinkToken("invite");
   if (invitation !== null) {
+    pendingRecovery = null;
     pendingInvite = invitation;
     showAuth("", "", true);
     return;
@@ -417,6 +576,7 @@ logout.addEventListener("click", async () => {
 
 async function start() {
   try {
+    if (pendingRecovery !== null) return showRecovery(pendingRecovery);
     const session = await api("auth/session");
     if (!session.user) await desktopLogin?.discard().catch(() => {});
     if (pendingInvite !== null) return showAuth("", "", true);
@@ -425,6 +585,7 @@ async function start() {
     const savedVault = await desktopLogin?.load(session.user.id).catch(() => null);
     if (savedVault && await globalThis.ClubCrypto?.unlock(session.user, undefined, savedVault)) return showWorkspace(session.user);
     await desktopLogin?.discard().catch(() => {});
+    if (session.user.identity?.detached) return showWorkspace(session.user, false);
     showAuth(t("Sign in to unlock your chats in this tab.", "Melde dich an, um deine Chats in diesem Tab zu entsperren."), session.user.username);
   } catch {
     bootstrap.replaceChildren(

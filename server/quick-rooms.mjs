@@ -62,6 +62,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
   const secure = new URL(publicOrigin).protocol === 'https:'
   const cookieName = secure ? '__Secure-zelotez_guest' : 'zelotez_guest'
   const signingKey = randomBytes(32)
+  const quotaKey = randomBytes(32)
   const redeemAttempts = new Map()
   const createAttempts = new Map()
   const chat = createQuickChat({ isGuestActive, now })
@@ -177,17 +178,23 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
     return provided.toString('base64url') === parts[3] && timingSafeEqual(provided, ticketDigest(room, `${parts[1]}.${parts[2]}`))
   }
 
+  function quotaSource(request) {
+    // Keep the network identifier private and separate from the browser's access ticket.
+    return createHmac('sha256', quotaKey).update(requestAddress(request, trustProxyIp)).digest('base64url')
+  }
+
   function exchange(request, response, room, password) {
     if (!room.guest_hash) throw missing()
     const time = now()
-    if (!charge(redeemAttempts, requestAddress(request, trustProxyIp), 20, time)) {
-      throw new RequestError(429, 'Warte einen Moment, bevor du es erneut versuchst.')
-    }
-    if (typeof password !== 'string' || !passwordPattern.test(password) || !timingSafeEqual(digest(password), room.guest_hash)) throw unauthorized()
-    if (ticketValid(room, cookieValue(request, cookieName), time)) {
+    const validPassword = typeof password === 'string' && passwordPattern.test(password) && timingSafeEqual(digest(password), room.guest_hash)
+    if (validPassword && ticketValid(room, cookieValue(request, cookieName), time)) {
       response.writeHead(204).end()
       return
     }
+    if (!charge(redeemAttempts, quotaSource(request), 20, time)) {
+      throw new RequestError(429, 'Warte einen Moment, bevor du es erneut versuchst.')
+    }
+    if (!validPassword) throw unauthorized()
     const expires = Math.floor(room.expires_at / 1000)
     const unsigned = `${expires}.${randomBytes(16).toString('base64url')}`
     const ticket = unsigned + '.' + ticketDigest(room, unsigned).toString('base64url')
@@ -206,7 +213,7 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
   function guestAccess(request, id) {
     const room = activeRoom(id)
     const ticket = cookieValue(request, cookieName)
-    if (ticketValid(room, ticket)) return scope(room, { token: ticket })
+    if (ticketValid(room, ticket)) return { ...scope(room, { token: ticket }), quotaSource: quotaSource(request) }
     const user = auth.session(request)
     const session = user ? auth.sessionKey(request) : null
     if (user && accountAccess(room, user.id, session)) {

@@ -856,7 +856,19 @@ function menus() {
   ]));
 }
 
-if (!app.requestSingleInstanceLock()) {
+// Some AppImage launchers add this flag when the host cannot create user namespaces.
+if (process.platform === "linux" && app.commandLine.hasSwitch("no-sandbox")) {
+  void app.whenReady().then(() => {
+    try {
+      const german = app.getLocale().toLowerCase().startsWith("de");
+      dialog.showErrorBox("ZeloteZ Rooms", german
+        ? "Die Chromium-Sandbox ist deaktiviert. Entferne --no-sandbox aus dem Starter und prüfe anhand der Dokumentation deiner Linux-Distribution, ob die App unprivilegierte User Namespaces verwenden darf."
+        : "The Chromium sandbox is disabled. Remove --no-sandbox from the launcher and check your Linux distribution’s documentation for how to allow unprivileged user namespaces for this app.");
+    } finally {
+      app.exit(1);
+    }
+  });
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("window-all-closed", () => { if (!connecting) app.quit(); });

@@ -26,7 +26,13 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 3. **Open the ports your group needs.** HTTPS terminates at your reverse proxy. The media defaults are TCP 1936 for native RTMPS ingest and UDP 8189 with a TCP fallback on the same port for WebRTC.
 4. **Start the instance and create the owner account.** Run these commands from the repository root, then open the bootstrap link.
 
+5. **Set up the owner’s authenticator.** Run the command below after creating the owner account or upgrading an existing instance.
+
+   Add the printed key to your authenticator app as a time-based code with six digits and a 30-second period. This command revokes existing owner sessions. Sign in again with your password and code. Sensitive actions under **Invites** and changes to the owner password require a recent authenticator confirmation. Run the same command to replace a lost authenticator.
+
 The site owner manages invitations and can suspend accounts or end their sessions under **Invites → Accounts**. Each account can broadcast one stream at a time, with up to eight simultaneous broadcasts per instance.
+
+To change your password, open your profile and choose **Change password**. Rooms keeps your chat key and ends your other sessions. To recover the owner account from the server console, run `docker compose exec -T server node bootstrap.mjs --recover-owner`. This revokes owner sessions and unused invitations and pauses the old sign-in. Open the one-time link in the terminal within 20 minutes. Use the previous chat password to keep the chat key accessible. If you lost that password, you can regain the account with its chats locked and unlock them later if you find it. Run the recovery command again if the link expires.
 
 The default stack sets resource limits and rotates container logs. See the [Compose file](compose.yaml) for the values.
 

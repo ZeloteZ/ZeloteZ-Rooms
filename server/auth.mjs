@@ -2,6 +2,8 @@ import { createHash, createPublicKey, randomBytes, randomUUID, scrypt, timingSaf
 import { isIP } from 'node:net'
 import { promisify } from 'node:util'
 import { assertOrigin, json, readJson, RequestError, transaction } from './http.mjs'
+import { createOwnerAccess, initializeOwnerAccess } from './owner-access.mjs'
+import { createAuthWork } from './auth-work.mjs'
 
 const secondsPerHour = 3600
 const sessionLifetime = 7 * 24 * secondsPerHour
@@ -12,10 +14,20 @@ const accountsRestricted = 'Nur der Betreiber kann Konten verwalten.'
 const hashVersion = 'scrypt-v1'
 const scryptOptions = { N: 2 ** 16, r: 8, p: 2, maxmem: 96 * 1024 ** 2 }
 const scryptAsync = promisify(scrypt)
+const derivePasswordKey = (credential, salt) => scryptAsync(Buffer.from(credential, 'base64url'), salt, 32, scryptOptions)
 const dummyHash = [hashVersion, randomBytes(16).toString('base64url'), randomToken()].join('$')
 const unixTime = () => Math.floor(Date.now() / 1000)
 const timestamp = value => value === null ? null : new Date(value * 1000).toISOString()
 const digest = value => createHash('sha256').update(value).digest()
+const passwordHashFor = (salt, key) => [hashVersion, salt.toString('base64url'), key.toString('base64url')].join('$')
+
+function passwordHashParts(hash) {
+  const [version, salt, expected] = hash.split('$')
+  if (version !== hashVersion || !base64url(salt, 22) || !base64url(expected, 43)) {
+    throw new Error('Ungültiger Passwort-Hash in der Datenbank.')
+  }
+  return [Buffer.from(salt, 'base64url'), Buffer.from(expected, 'base64url')]
+}
 
 function randomToken() {
   return randomBytes(32).toString('base64url')
@@ -68,6 +80,7 @@ export function initializeAuthSchema(db) {
       CHECK (used_at IS NULL OR revoked_at IS NULL)
     ) STRICT;
   `)
+  initializeOwnerAccess(db)
 }
 
 function ownerExists(db) {
@@ -201,7 +214,9 @@ function attemptLimit(maxAttempts, windowSeconds) {
     }
     let entry = attempts.get(key)
     if (!entry || entry.expires <= now) {
-      if (!entry && attempts.size >= maxTrackedClients) return windowSeconds
+      // Bound tracking without denying every new client when the table fills up.
+      if (entry) attempts.delete(key)
+      else if (attempts.size >= maxTrackedClients) attempts.delete(attempts.keys().next().value)
       entry = { count: 0, expires: now + windowSeconds }
       attempts.set(key, entry)
     }
@@ -213,6 +228,7 @@ function attemptLimit(maxAttempts, windowSeconds) {
 
 export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor = () => ({}), revokeBroadcasts = () => {} }) {
   initializeAuthSchema(db)
+  const owner = createOwnerAccess(db)
   const present = user => user && { ...user, ...profileFor(user.id) }
   const secure = new URL(publicOrigin).protocol === 'https:'
   const cookieName = secure ? '__Host-zelotez_session' : 'zelotez_session'
@@ -228,6 +244,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     SELECT id, username, display_name, password_hash, admin, public_key, identity
     FROM users WHERE username = ?
   `)
+  const updateCredentials = db.prepare('UPDATE users SET password_hash = ?, identity = ? WHERE id = ?')
   const deleteSession = db.prepare('DELETE FROM sessions WHERE token_hash = ?')
   const deleteAccountSessions = db.prepare('DELETE FROM sessions WHERE user_id = ?')
   const accountDisabled = db.prepare('SELECT 1 FROM disabled_accounts WHERE user_id = ?')
@@ -255,12 +272,13 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
   `)
   const usernameExists = db.prepare('SELECT 1 FROM users WHERE username = ?')
   const loginAttempts = attemptLimit(16, 60)
-  const loginWork = attemptLimit(80, 60)
   const nameAttempts = attemptLimit(8, 120)
   const inviteAttempts = attemptLimit(10, 60)
-  const registrationWork = attemptLimit(24, 60)
   const adminAttempts = attemptLimit(24, 60)
-  const hashingClients = new Set()
+  const credentialAttempts = attemptLimit(8, 60)
+  const recoveryAttempts = attemptLimit(16, 60)
+  const codeAttempts = attemptLimit(12, 60)
+  const runPasswordWork = createAuthWork()
 
   function sessionToken(req) {
     const cookies = req.headers.cookie?.split(';') ?? []
@@ -296,13 +314,21 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     return user
   }
 
-  function requireAdmin(req, message = 'Nur der Betreiber kann Einladungen verwalten.') {
+  function requireAdmin(req, { configured = true, approved = false } = {}) {
     const user = requireSession(req)
-    if (!user.admin) throw new RequestError(403, message)
+    if (!user.admin) throw new RequestError(403, accountsRestricted)
+    if (configured && !owner.configured(user.id)) {
+      throw new RequestError(403, 'Richte zuerst die Zwei-Faktor-Anmeldung für das Betreiberkonto ein.')
+    }
+    if (approved && !owner.approvedUntil(sessionToken(req))) {
+      const error = new RequestError(403, 'Bestätige den Betreiberzugriff mit einem aktuellen Authenticator-Code.')
+      error.code = 'ROOMS_OWNER_APPROVAL'
+      throw error
+    }
     return user
   }
 
-  function startSession(req, userId) {
+  function startSession(req, userId, { factorVerified = false, approvedUntil = 0 } = {}) {
     if (accountDisabled.get(userId)) throw invalidLogin()
     const previousToken = sessionToken(req)
     const token = randomToken()
@@ -310,21 +336,15 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     pruneSessions.run(now)
     if (previousToken) deleteSession.run(digest(previousToken))
     limitSessions.run(userId)
-    insertSession.run(digest(token), userId, now + sessionLifetime)
+    const tokenHash = digest(token)
+    insertSession.run(tokenHash, userId, now + sessionLifetime)
+    if (factorVerified) owner.approve(tokenHash)
+    else if (approvedUntil) owner.approve(tokenHash, approvedUntil)
     return `${cookieName}=${token}; ${cookieFlags}; Max-Age=${sessionLifetime}`
   }
 
-  async function passwordKey(credential, salt, ip, workBudget, res) {
-    if (hashingClients.size >= 2 || hashingClients.has(ip)) {
-      throw new RequestError(503, 'Die Anmeldung ist gerade ausgelastet. Versuche es gleich erneut.')
-    }
-    if (rejectLimited(res, workBudget('global'))) return null
-    hashingClients.add(ip)
-    try {
-      return await scryptAsync(Buffer.from(credential, 'base64url'), salt, 32, scryptOptions)
-    } finally {
-      hashingClients.delete(ip)
-    }
+  function passwordKey(credential, salt, access) {
+    return runPasswordWork(access, () => derivePasswordKey(credential, salt))
   }
 
   function rejectLimited(res, retryAfter) {
@@ -346,18 +366,22 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     if (rejectLimited(res, nameAttempts(`${ip}/${username}`))) return
 
     const row = selectLogin.get(username)
-    const [version, encodedSalt, encodedExpected] = (row?.password_hash ?? dummyHash).split('$')
-    if (version !== hashVersion || !base64url(encodedSalt, 22) || !base64url(encodedExpected, 43)) {
-      throw new Error('Ungültiger Passwort-Hash in der Datenbank.')
-    }
-    const salt = Buffer.from(encodedSalt, 'base64url')
-    const expected = Buffer.from(encodedExpected, 'base64url')
-    const actual = await passwordKey(body.password, salt, ip, loginWork, res)
+    const [salt, expected] = passwordHashParts(row?.password_hash ?? dummyHash)
+    const actual = await passwordKey(body.password, salt, { lane: 'login', ip, subject: username, response: res })
     if (!actual) return
     if (!timingSafeEqual(actual, expected) || !row) throw invalidLogin()
+    if (row.admin === 1 && body.code !== undefined && rejectLimited(res, codeAttempts('login:' + row.id))) return
 
-    const cookie = transaction(db, () => startSession(req, row.id))
-    json(res, 200, { user: present(toUser(row)) }, { 'Set-Cookie': cookie })
+    const result = transaction(db, () => {
+      const current = selectLogin.get(username)
+      if (current?.id !== row.id || current.password_hash !== row.password_hash || owner.recoveryPending(row.id)) throw invalidLogin()
+      if (current.admin === 1 && !owner.configured(row.id)) {
+        throw new RequestError(403, 'Richte zuerst die Zwei-Faktor-Anmeldung für das Betreiberkonto ein.')
+      }
+      const factorVerified = current.admin === 1 && owner.verifyFactor(row.id, body.code)
+      return { user: present(toUser(current)), cookie: startSession(req, row.id, { factorVerified }) }
+    })
+    json(res, 200, { user: result.user }, { 'Set-Cookie': result.cookie })
   }
 
   async function register(req, res) {
@@ -373,15 +397,16 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     const invalidInvite = () => new RequestError(400, 'Die Einladung ist ungültig, abgelaufen oder schon eingelöst.')
     if (!base64url(body.invite, 43)) throw invalidInvite()
     const inviteHash = digest(body.invite)
-    if (!redeemableInvite.get(inviteHash, unixTime())) throw invalidInvite()
+    const invitation = redeemableInvite.get(inviteHash, unixTime())
+    if (!invitation) throw invalidInvite()
     const publicKey = cleanPublicKey(body.publicKey)
     const identity = cleanIdentity(body.identity)
     if (!publicKey || !identity) throw new RequestError(400, 'Der Schlüssel für den verschlüsselten Chat ist ungültig.')
 
     const salt = randomBytes(16)
-    const key = await passwordKey(body.password, salt, ip, registrationWork, res)
+    const key = await passwordKey(body.password, salt, { lane: 'registration', ip, subject: invitation.id, response: res })
     if (!key) return
-    const passwordHash = [hashVersion, salt.toString('base64url'), key.toString('base64url')].join('$')
+    const passwordHash = passwordHashFor(salt, key)
     const result = transaction(db, () => {
       const invite = redeemableInvite.get(inviteHash, unixTime())
       if (!invite || (invite.grants_admin === 1 && ownerExists(db))) throw invalidInvite()
@@ -395,6 +420,71 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       return { user: { id, username, displayName: name, admin, publicKey, identity }, cookie: startSession(req, id) }
     })
     json(res, 201, { user: present(result.user) }, { 'Set-Cookie': result.cookie })
+  }
+
+  async function changePassword(req, res) {
+    const actor = requireSession(req)
+    const approvedUntil = () => {
+      if (!actor.admin) return 0
+      requireAdmin(req, { approved: true })
+      return owner.approvedUntil(sessionToken(req))
+    }
+    approvedUntil()
+    if (rejectLimited(res, credentialAttempts(actor.id))) return
+    const body = await readJson(req, 4096)
+    const identity = cleanIdentity(body.identity)
+    if (!identity || !base64url(body.current, 43) || !base64url(body.password, 43)) {
+      throw new RequestError(400, 'Das Passwort oder der Chatschlüssel konnte nicht verarbeitet werden.')
+    }
+    if (requireSession(req).id !== actor.id) throw invalidLogin()
+    approvedUntil()
+    const row = selectLogin.get(actor.username)
+    const [salt, expected] = passwordHashParts(row.password_hash)
+    const newSalt = randomBytes(16)
+    const ip = requestAddress(req, trustProxyIp)
+    const key = await runPasswordWork({ lane: 'registration', ip, subject: 'password:' + actor.id, response: res }, async () => {
+      const current = await derivePasswordKey(body.current, salt)
+      if (!timingSafeEqual(current, expected)) throw new RequestError(403, 'Das aktuelle Passwort stimmt nicht.')
+      return derivePasswordKey(body.password, newSalt)
+    })
+    if (!key) return
+    const result = transaction(db, () => {
+      if (requireSession(req).id !== actor.id || selectLogin.get(actor.username).password_hash !== row.password_hash) {
+        throw new RequestError(409, 'Das Konto wurde inzwischen geändert. Melde dich erneut an.')
+      }
+      const until = approvedUntil()
+      updateCredentials.run(passwordHashFor(newSalt, key), JSON.stringify(identity), actor.id)
+      deleteAccountSessions.run(actor.id)
+      revokeBroadcasts(actor.id)
+      return { user: present(toUser(selectLogin.get(actor.username))), cookie: startSession(req, actor.id, { approvedUntil: until }) }
+    })
+    json(res, 200, { user: result.user }, { 'Set-Cookie': result.cookie })
+  }
+
+  async function recoverOwner(req, res, complete) {
+    const ip = requestAddress(req, trustProxyIp)
+    if (rejectLimited(res, recoveryAttempts(ip))) return
+    const body = await readJson(req, 4096)
+    const invalidRecovery = () => new RequestError(404, 'Der Wiederherstellungslink ist ungültig oder abgelaufen.')
+    const find = () => base64url(body.token, 43) && owner.recoverable(body.token)
+    const row = find()
+    if (!row) throw invalidRecovery()
+    if (!complete) return json(res, 200, { user: toUser(row) })
+
+    const identity = body.keepLocked === true && body.identity === undefined
+      ? { ...JSON.parse(row.identity), detached: true } : cleanIdentity(body.identity)
+    if (!identity || !base64url(body.password, 43)) throw new RequestError(400, 'Das Passwort oder der Chatschlüssel konnte nicht verarbeitet werden.')
+    const salt = randomBytes(16)
+    const key = await passwordKey(body.password, salt, { lane: 'registration', ip, subject: 'password:' + row.id, response: res })
+    if (!key) return
+    transaction(db, () => {
+      if (!find()) throw invalidRecovery()
+      updateCredentials.run(passwordHashFor(salt, key), JSON.stringify(identity), row.id)
+      owner.consumeRecovery(row.id)
+      deleteAccountSessions.run(row.id)
+      revokeBroadcasts(row.id)
+    })
+    res.writeHead(204).end()
   }
 
   async function handle(req, res, pathname) {
@@ -414,6 +504,16 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       await register(req, res)
       return true
     }
+    if (pathname === '/api/auth/password' && req.method === 'POST') {
+      assertOrigin(req, publicOrigin)
+      await changePassword(req, res)
+      return true
+    }
+    if (['/api/auth/recovery', '/api/auth/recovery/complete'].includes(pathname) && req.method === 'POST') {
+      assertOrigin(req, publicOrigin)
+      await recoverOwner(req, res, pathname.endsWith('/complete'))
+      return true
+    }
     if (pathname === '/api/auth/logout' && req.method === 'POST') {
       assertOrigin(req, publicOrigin)
       const user = session(req)
@@ -428,8 +528,27 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       json(res, 200, { ok: true }, { 'Set-Cookie': `${cookieName}=; ${cookieFlags}; Max-Age=0` })
       return true
     }
+    if (pathname === '/api/admin/security' && req.method === 'GET') {
+      const admin = requireAdmin(req, { configured: false })
+      json(res, 200, { configured: owner.configured(admin.id), approvedUntil: owner.approvedUntil(sessionToken(req)) })
+      return true
+    }
+    if (pathname === '/api/admin/authorize' && req.method === 'POST') {
+      assertOrigin(req, publicOrigin)
+      const admin = requireAdmin(req)
+      if (rejectLimited(res, codeAttempts(admin.id))) return true
+      const { code } = await readJson(req, 1024)
+      const token = sessionToken(req)
+      transaction(db, () => {
+        if (requireAdmin(req).id !== admin.id) throw invalidLogin()
+        owner.verifyFactor(admin.id, code)
+        owner.approve(digest(token))
+      })
+      json(res, 200, { approvedUntil: owner.approvedUntil(token) })
+      return true
+    }
     if (pathname === '/api/admin/accounts' && req.method === 'GET') {
-      requireAdmin(req, accountsRestricted)
+      requireAdmin(req)
       const cursor = new URL(req.url, publicOrigin).searchParams.get('after')
       const after = cursor === null ? '' : normalizeUsername(cursor)
       if (after === null) throw new RequestError(400, 'Ungültige Auswahl.')
@@ -442,7 +561,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     const accountPath = /^\/api\/admin\/accounts\/([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/u.exec(pathname)
     if (accountPath && req.method === 'PATCH') {
       assertOrigin(req, publicOrigin)
-      const admin = requireAdmin(req, accountsRestricted)
+      const admin = requireAdmin(req, { approved: true })
       if (rejectLimited(res, adminAttempts(admin.id))) return true
       const body = await readJson(req, 1024)
       if (Object.keys(body).length !== 1 || (typeof body.disabled !== 'boolean' && body.revokeSessions !== true)) {
@@ -450,7 +569,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       }
       const id = accountPath[1]
       const account = transaction(db, () => {
-        requireAdmin(req, accountsRestricted)
+        requireAdmin(req, { approved: true })
         const row = findAccount.get(id)
         if (!row) throw new RequestError(404, 'Nicht gefunden.')
         if (row.admin) throw new RequestError(403, 'Das Betreiberkonto ist geschützt.')
@@ -476,20 +595,21 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     }
     if (pathname === '/api/admin/invites' && req.method === 'POST') {
       assertOrigin(req, publicOrigin)
-      const admin = requireAdmin(req)
+      const admin = requireAdmin(req, { approved: true })
       if (rejectLimited(res, adminAttempts(admin.id))) return true
       const body = await readJson(req, 1024)
       const hours = body?.hours ?? defaultInviteHours
       if (!Number.isInteger(hours) || hours < 1 || hours > maxInviteHours) {
         throw new RequestError(400, `Eine Einladung kann zwischen 1 und ${maxInviteHours} Stunden gültig sein.`)
       }
-      json(res, 201, { invite: issueInvite(db, publicOrigin, hours, requireAdmin(req).id, false) })
+      json(res, 201, { invite: issueInvite(db, publicOrigin, hours, requireAdmin(req, { approved: true }).id, false) })
       return true
     }
     const invitePath = /^\/api\/admin\/invites\/([a-f0-9-]{36})$/.exec(pathname)
     if (invitePath && req.method === 'DELETE') {
       assertOrigin(req, publicOrigin)
-      requireAdmin(req)
+      const admin = requireAdmin(req, { approved: true })
+      if (rejectLimited(res, adminAttempts(admin.id))) return true
       const revoked = db.prepare(`
         UPDATE invites SET revoked_at = ?
         WHERE id = ? AND grants_admin = 0 AND used_at IS NULL AND revoked_at IS NULL

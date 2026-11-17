@@ -6,6 +6,8 @@ const base64url = /^[A-Za-z0-9_-]+$/u
 const maxRooms = 24
 const maxPeers = 96
 const maxDevicesPerCredential = 4
+const maxGuestDevices = 80
+const maxGuestDevicesPerSource = 16
 const maxMessages = 64
 const maxMessageBytes = 4112
 const peerLease = 120_000
@@ -129,15 +131,21 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
       return json(response, 200, snapshot(room, peer, peer.joinedSeq, at))
     }
     const peers = [...room.peers.values()]
-    const sameAccess = peers.filter(peer => sameCredential(peer.credential, scope.guestKey))
-    const candidates = sameAccess.length >= maxDevicesPerCredential ? sameAccess : room.peers.size >= maxPeers ? peers : null
-    if (candidates) {
-      const dormant = candidates.filter(peer => peer.presentUntil <= at).sort((a, b) => a.presentUntil - b.presentUntil)[0]
+    const guest = Boolean(scope.guestKey.token)
+    const fromCredential = peer => sameCredential(peer.credential, scope.guestKey)
+    const fromSource = peer => peer.quotaSource === scope.quotaSource
+    const credentialFull = peers.filter(fromCredential).length >= maxDevicesPerCredential
+    const sourceFull = guest && scope.quotaSource && peers.filter(fromSource).length >= maxGuestDevicesPerSource
+    const guestsFull = guest && peers.filter(peer => peer.guest).length >= maxGuestDevices
+    if (credentialFull || sourceFull || guestsFull || peers.length >= maxPeers) {
+      // Replacing a dormant device must free space in every currently full quota.
+      const dormant = peers.filter(peer => peer.presentUntil <= at && (!credentialFull || fromCredential(peer)) &&
+        (!sourceFull || fromSource(peer)) && (!guestsFull || peer.guest)).sort((a, b) => a.presentUntil - b.presentUntil)[0]
       if (!dormant) throw tooBusy()
       room.peers.delete(dormant.id)
     }
-    const peer = { id: input.deviceId, publicKey, name: senderName(scope), guest: Boolean(scope.guestKey.token),
-      credential: scope.guestKey, joinedSeq: room.seq, presentUntil: at + peerLease, burst: { used: 0, resetAt: 0 } }
+    const peer = { id: input.deviceId, publicKey, name: senderName(scope), guest, credential: scope.guestKey,
+      quotaSource: scope.quotaSource, joinedSeq: room.seq, presentUntil: at + peerLease, burst: { used: 0, resetAt: 0 } }
     room.peers.set(peer.id, peer)
     return json(response, 200, snapshot(room, peer, peer.joinedSeq, at))
   }

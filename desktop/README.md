@@ -12,6 +12,8 @@ Upgrade the self-hosted gateway and server together before connecting a current 
 
 On Windows x64, run the `ZeloteZ-Rooms-…-x64.exe` installer. On Linux x64, mark the AppImage as executable and open it. Use the KDE or GNOME ScreenCast portal and PipeWire for sharing on Wayland.
 
+Rooms requires the Chromium sandbox on Linux. If you see a startup error about the sandbox, refresh any older desktop integration that adds `--no-sandbox` and check your distribution’s documentation for allowing unprivileged user namespaces for this app.
+
 The browser extension can pass a YouTube video directly to the desktop app when your system recognizes the `zelotez-rooms:` link handler. On Linux, integrate the AppImage with your desktop to make the handler discoverable. Set the same Rooms instance in the extension and desktop app.
 
 Open a live channel, choose the resolution and frame rate, then click **Share screen** to select a screen or application window. For a region, enable the crop option and select the area in the local preview before starting.

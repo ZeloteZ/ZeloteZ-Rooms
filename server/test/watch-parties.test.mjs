@@ -36,17 +36,26 @@ async function fixture(t) {
   const insertUser = db.prepare(`INSERT INTO users(id, username, display_name, password_hash, admin, public_key, identity, created_at)
     VALUES (?, ?, ?, 'unused', 0, '{}', '{}', ?)`)
   for (const [name, id] of Object.entries(users)) insertUser.run(id, name, name, timestamp)
-  const channel = randomUUID()
-  const room = randomUUID()
-  db.prepare("INSERT INTO topics(id, owner_id, title, visibility, created_at) VALUES (?, ?, 'Watch test', 'private', ?)")
-    .run(room, users.host, timestamp)
-  const joinRoom = db.prepare('INSERT INTO topic_members(topic_id, user_id, role, joined_at, approved) VALUES (?, ?, ?, ?, 1)')
-  joinRoom.run(room, users.host, 'owner', timestamp)
-  joinRoom.run(room, users.viewer, 'member', timestamp)
-  joinRoom.run(room, users.moderator, 'admin', timestamp)
-  db.prepare("INSERT INTO channels(id, topic_id, title, type, stream_policy) VALUES (?, ?, 'Live', 'live', 'admins')")
-    .run(channel, room)
-  const base = `/api/channels/${channel}/watch`
+  function createRoom() {
+    const channel = randomUUID()
+    const room = randomUUID()
+    db.prepare("INSERT INTO topics(id, owner_id, title, visibility, created_at) VALUES (?, ?, 'Watch test', 'private', ?)")
+      .run(room, users.host, timestamp)
+    const joinRoom = db.prepare('INSERT INTO topic_members(topic_id, user_id, role, joined_at, approved) VALUES (?, ?, ?, ?, 1)')
+    joinRoom.run(room, users.host, 'owner', timestamp)
+    joinRoom.run(room, users.viewer, 'member', timestamp)
+    joinRoom.run(room, users.moderator, 'admin', timestamp)
+    db.prepare("INSERT INTO channels(id, topic_id, title, type, stream_policy) VALUES (?, ?, 'Live', 'live', 'admins')")
+      .run(channel, room)
+    const base = `/api/channels/${channel}/watch`
+    function request(actor, method = 'GET', relative = '', body, headers = {}) {
+      return fixtureCall(async (request, response) => {
+        assert.equal(await watch.handle(request, response, new URL(base + relative, 'http://127.0.0.1')), true)
+      }, actor, method, body, headers)
+    }
+    return { request, room, channel }
+  }
+  const { request, room, channel } = createRoom()
 
   function session(userId) {
     const token = randomBytes(32).toString('base64url')
@@ -58,7 +67,7 @@ async function fixture(t) {
     }
   }
 
-  async function fixtureCall(handler, actor, method, body, headers) {
+  async function fixtureCall(handler, actor, method, body, headers, waitToWrite) {
     const bytes = body === undefined ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body))
     const fixtureRequest = Readable.from(bytes === null ? [] : [bytes])
     fixtureRequest.method = method
@@ -68,7 +77,11 @@ async function fixture(t) {
       ...headers,
     }
     const chunks = []
-    const response = new Writable({ write(data, _encoding, done) { chunks.push(data); done() } })
+    const response = new Writable({ write(data, _encoding, done) {
+      chunks.push(data)
+      if (waitToWrite) waitToWrite().then(() => done(), done)
+      else done()
+    } })
     response.writeHead = (statusCode, responseHeaders) => {
       response.statusCode = statusCode
       response.headers = responseHeaders
@@ -82,15 +95,9 @@ async function fixture(t) {
     }
   }
 
-  function request(actor, method = 'GET', relative = '', body, headers = {}) {
-    return fixtureCall(async (request, response) => {
-      assert.equal(await watch.handle(request, response, new URL(base + relative, 'http://127.0.0.1')), true)
-    }, actor, method, body, headers)
-  }
-
-  function guestRequest(scope, party, method, isActive, headers = {}) {
+  function guestRequest(scope, party, method, isActive, headers = {}, waitToWrite) {
     return fixtureCall((request, response) => watch.serveGuestMedia(request, response, scope, party, isActive),
-      null, method, undefined, headers)
+      null, method, undefined, headers, waitToWrite)
   }
 
   async function waitForCleanup() {
@@ -101,7 +108,7 @@ async function fixture(t) {
     assert.fail('Watch party files were left behind')
   }
 
-  return { request, guestRequest, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot,
+  return { request, guestRequest, createRoom, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot,
     controlGuestPlayback: watch.controlGuestPlayback, reportGuestViewer: watch.reportGuestViewer,
     homeActivity: watch.homeActivity,
     waitForCleanup, tick: milliseconds => { now += milliseconds } }
@@ -140,6 +147,56 @@ test('guest media is limited to read-only byte ranges for the authorized tempora
   temporary.delete(channel)
   assert.equal(guestSnapshot(scope).party, null)
   await assert.rejects(guestRequest(scope, draft.id, 'GET', () => true), { status: 404 })
+})
+
+test('guest video read quotas are shared across tickets and preserve capacity for other rooms', async t => {
+  const { request, guestRequest, createRoom, session, users, room, channel, temporary } = await fixture(t)
+  const host = session(users.host)
+  const video = Buffer.alloc(24)
+  video.writeUInt32BE(24)
+  video.write('ftypisom', 4)
+  const otherRoom = createRoom()
+
+  async function upload({ request, room, channel }) {
+    const { party } = (await request(host, 'POST', '', { source: 'local', mime: 'video/mp4', size: video.length })).data
+    await request(host, 'PUT', `/${party.id}/upload?offset=0`, video, { 'content-type': 'application/octet-stream' })
+    temporary.add(channel)
+    const read = (quotaSource, token, waitToWrite) => guestRequest({ roomId: room, channelId: channel,
+      ownerId: users.host, source: 'local', guestKey: { token }, quotaSource }, party.id, 'GET', () => true, {}, waitToWrite)
+    return { party, read }
+  }
+
+  const first = await upload({ request, room, channel })
+  const second = await upload(otherRoom)
+  const release = Promise.withResolvers()
+  const reads = []
+  async function reserve(source) {
+    for (let ticket = 0; ticket < 2; ticket++) {
+      for (let slot = 0; slot < 8; slot++) {
+        const writing = Promise.withResolvers()
+        const stream = first.read(source, `${source}-${ticket}`, () => {
+          writing.resolve()
+          return release.promise
+        })
+        reads.push(stream)
+        await Promise.race([writing.promise, stream])
+      }
+    }
+  }
+
+  try {
+    await reserve('network-a')
+    await assert.rejects(first.read('network-a', 'new-browser'), { status: 429 })
+    await assert.rejects(second.read('network-a', 'new-browser'), { status: 429 })
+    await reserve('network-b')
+    await assert.rejects(first.read('network-c', 'new-browser'), { status: 429 })
+    assert.equal((await second.read('network-c', 'new-browser')).status, 200)
+    assert.equal((await request(host, 'GET', `/${first.party.id}/media`)).status, 200)
+  } finally {
+    release.resolve()
+    await Promise.all(reads)
+  }
+  assert.equal((await first.read('network-a', 'new-browser')).status, 200)
 })
 
 test('guest and member playback use one canonical revision for the authorized temporary party', async t => {
@@ -183,6 +240,27 @@ test('guest and member playback use one canonical revision for the authorized te
   assert.equal(revoked.playing, false)
   assert.equal(revoked.revision, 6)
   assert.equal(revoked.position, 13.5)
+})
+
+test('temporary YouTube viewers share a quota across tickets from one network', async t => {
+  const { request, session, users, room, channel, temporary, reportGuestViewer, tick } = await fixture(t)
+  const host = session(users.host)
+  const { party } = (await request(host, 'POST', '', { source: 'youtube', videoId: 'K5ABskPJN1Q' })).data
+  temporary.add(channel)
+  const scope = { roomId: room, channelId: channel, ownerId: users.host, source: 'youtube' }
+  const report = (token, quotaSource, playerId = randomUUID(), revision = 1) => reportGuestViewer({
+    ...scope, guestKey: { token }, quotaSource,
+  }, { partyId: party.id, playerId, revision }, 'POST', () => true)
+  const activePlayer = randomUUID()
+  report('first-browser', 'network-a', activePlayer)
+  for (let browser = 0; browser < 15; browser++) report(`browser-${browser}`, 'network-a')
+  assert.throws(() => report('new-browser', 'network-a'), { status: 429 })
+  report('first-browser', 'network-b', activePlayer, 2)
+  assert.throws(() => report('new-browser', 'network-a'), { status: 429 })
+  report('different-browser', 'network-b')
+  assert.equal((await request(host, 'POST', `/${party.id}/viewers`, { playerId: randomUUID(), revision: 1 })).status, 204)
+  tick(12_001)
+  report('new-browser', 'network-a')
 })
 
 test('watch queues preserve order and temporary scope while advancing across source types', async t => {

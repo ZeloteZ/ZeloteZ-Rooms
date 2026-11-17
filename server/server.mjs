@@ -88,7 +88,8 @@ function service(handler) {
         if (error instanceof RequestError) {
           const headers = request.complete ? {} : { Connection: 'close' }
           if (error.code === 'ROOMS_ACCOUNT_CHANGED') headers['X-Rooms-Error'] = 'account-changed'
-          json(response, error.status, { error: error.message, ...(headers['X-Rooms-Error'] && { code: error.code }) }, headers)
+          const knownCode = ['ROOMS_ACCOUNT_CHANGED', 'ROOMS_OWNER_CODE', 'ROOMS_OWNER_APPROVAL'].includes(error.code)
+          json(response, error.status, { error: error.message, ...(knownCode && { code: error.code }) }, headers)
         } else {
           console.error('Request failed', error.code ?? error.name)
           json(response, 500, { error: 'Die Anfrage konnte nicht verarbeitet werden.' })

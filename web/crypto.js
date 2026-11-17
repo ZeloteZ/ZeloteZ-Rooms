@@ -80,10 +80,43 @@ window.ClubCrypto = (() => {
     ]);
     const pub = publicPoint(await subtle.exportKey("jwk", pair.publicKey));
     const secret = await subtle.exportKey("jwk", pair.privateKey);
+    return { password: base64(login), publicKey: pub, identity: await wrapIdentity(pub, secret, vault) };
+  }
+
+  async function wrapIdentity(pub, secret, vault) {
     const iv = nonce();
     const encrypted = await subtle.encrypt(aead(iv, aad("identity", pub.x, pub.y)), await aesKey(vault),
       encoder.encode(JSON.stringify(secret)));
-    return { password: base64(login), publicKey: pub, identity: { v: 1, nonce: base64(iv), blob: base64(encrypted) } };
+    return { v: 1, nonce: base64(iv), blob: base64(encrypted) };
+  }
+
+  async function unwrapIdentity(user, pub, vault) {
+    if (user.identity?.v !== 1) throw new Error(errorText("Unknown key.", "Unbekannter Schlüssel."));
+    const secret = new Uint8Array(await subtle.decrypt(aead(binary(user.identity.nonce), aad("identity", pub.x, pub.y)),
+      await aesKey(vault), binary(user.identity.blob)));
+    try {
+      const jwk = JSON.parse(decoder.decode(secret));
+      if (jwk.x !== pub.x || jwk.y !== pub.y) throw new Error(errorText("Wrong key.", "Falscher Schlüssel."));
+      return jwk;
+    } finally {
+      secret.fill(0);
+    }
+  }
+
+  async function rewrapIdentity(user, previousChatPassword, newPassword) {
+    const pub = publicPoint(user.publicKey);
+    const previous = await accountMaterial(user.username, previousChatPassword);
+    let secret;
+    try {
+      secret = await unwrapIdentity(user, pub, await expand(previous.material, previous.salt, "identity"));
+    } catch {
+      throw new Error(errorText("The previous password could not unlock the chat key.", "Das bisherige Passwort konnte den Chatschlüssel nicht entsperren."));
+    }
+    const next = await accountMaterial(user.username, newPassword);
+    const [login, vault] = await Promise.all([
+      expand(next.material, next.salt, "login"), expand(next.material, next.salt, "identity"),
+    ]);
+    return { password: base64(login), identity: await wrapIdentity(pub, secret, vault) };
   }
 
   function lock() {
@@ -94,7 +127,6 @@ window.ClubCrypto = (() => {
   async function unlock(user, passphrase, savedVault) {
     try {
       const pub = publicPoint(user.publicKey);
-      if (user.identity?.v !== 1) throw new Error(errorText("Unknown key.", "Unbekannter Schlüssel."));
       let vault;
       if (typeof passphrase === "string") {
         const { material, salt } = await accountMaterial(user.username, passphrase);
@@ -106,10 +138,7 @@ window.ClubCrypto = (() => {
         if (cached?.id !== user.id) return false;
         vault = binary(cached.vault);
       }
-      const secret = await subtle.decrypt(aead(binary(user.identity.nonce), aad("identity", pub.x, pub.y)),
-        await aesKey(vault), binary(user.identity.blob));
-      const jwk = JSON.parse(decoder.decode(secret));
-      if (jwk.x !== pub.x || jwk.y !== pub.y) throw new Error(errorText("Wrong key.", "Falscher Schlüssel."));
+      const jwk = await unwrapIdentity(user, pub, vault);
       const key = await subtle.importKey("jwk", jwk, curve, false, ["deriveBits"]);
       pin(user.id, pub);
       const encodedVault = base64(vault);
@@ -273,6 +302,6 @@ window.ClubCrypto = (() => {
     return id + "/deletion";
   }
 
-  return { prepareRegistration, credential, unlock, lock, deviceUnlockKey, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
+  return { prepareRegistration, rewrapIdentity, credential, unlock, lock, deviceUnlockKey, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
     sealReaction, openReaction, deletionScope, onHistoryKeyFailure };
 })();

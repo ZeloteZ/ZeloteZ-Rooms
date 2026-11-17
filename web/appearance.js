@@ -224,7 +224,7 @@ function attachmentPreference(profile) {
   };
 }
 
-export function editProfile(user, onChange, languageControl, onResetTutorials) {
+export function editProfile(user, onChange, languageControl, onResetTutorials, onPassword) {
   const signal = dialogLifetime();
   const person = { nameColor: null, autoLoadAttachments: true, autoLoadAttachmentMaxBytes: null, notifyLive: false, ...user };
   const mark = personMark(person);
@@ -247,6 +247,7 @@ export function editProfile(user, onChange, languageControl, onResetTutorials) {
   showDialog(t("Your profile", "Dein Profil"), form([
     el("div", { class: "appearance-profile-preview" }, mark,
       el("div", {}, name, el("p", { class: "subtle" }, "@" + user.username))), fields,
+    button(t("Change password", "Passwort ändern"), onPassword, { class: "ghost" }),
     onResetTutorials && el("div", { class: "inline" },
       button(t("Reset tutorials", "Rundgänge zurücksetzen"), async event => {
         const control = event.currentTarget;
