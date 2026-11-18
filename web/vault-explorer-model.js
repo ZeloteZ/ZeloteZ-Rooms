@@ -2,7 +2,7 @@ export const VAULT_EXPLORER_ROOT = "root";
 export const VAULT_EXPLORER_SHARED = "shared";
 const UNKNOWN_SENDER = "unknown-sender";
 const MAX_DEPTH = 32;
-const MAX_COLUMNS = 4;
+const MAX_COLUMNS = 3;
 const empty = Object.freeze([]);
 const identifier = value => typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
 const label = (value, fallback = "") => typeof value === "string" && value.trim() ? value : fallback;
@@ -133,11 +133,12 @@ function navigation(model, refs) {
   return model.path(VAULT_EXPLORER_ROOT);
 }
 
-export function vaultExplorerView(model, navigationRefs = []) {
+export function vaultExplorerView(model, navigationRefs = [], { maxColumns } = {}) {
   const breadcrumbs = navigation(model, navigationRefs);
   const refs = Object.freeze(breadcrumbs.map(item => item.ref));
-  const visible = breadcrumbs.length <= MAX_COLUMNS ? breadcrumbs :
-    [...breadcrumbs.slice(0, MAX_COLUMNS - 1), breadcrumbs[breadcrumbs.length - 1]];
+  const limit = Number.isInteger(maxColumns) && maxColumns >= 1 && maxColumns <= MAX_COLUMNS ? maxColumns : MAX_COLUMNS;
+  const visible = breadcrumbs.length <= limit ? breadcrumbs :
+    [...breadcrumbs.slice(0, limit - 1), breadcrumbs[breadcrumbs.length - 1]];
   const columns = visible.map(item => {
     const index = breadcrumbs.indexOf(item);
     return Object.freeze({ ref: item.ref, node: item, items: model.children(item.ref),

@@ -81,17 +81,77 @@ test('listing sorts folders first and numeric file names naturally without modif
   assert.deepEqual(entries.map(n => n.id), ['10', '2', 'z'])
 })
 
-test('full breadcrumbs retain deep paths while visible columns preserve the first three panels', () => {
+test('full breadcrumbs retain deep paths while three columns preserve root, first child and current folder', () => {
   const m = model([own('a'), own('b', 'a'), own('c', 'b'), own('d', 'c'), own('e', 'd')])
   const nav = navigateVaultExplorer(m, [], 'own:e')
   assert.deepEqual(nav, [ROOT, 'own:a', 'own:b', 'own:c', 'own:d', 'own:e'])
   const view = vaultExplorerView(m, nav)
   assert.deepEqual(view.breadcrumbs.map(n => n.ref), nav)
-  assert.deepEqual(view.columns.map(n => n.ref), [ROOT, 'own:a', 'own:b', 'own:e'])
-  assert.deepEqual(view.columns.map(n => n.selectedRef), ['own:a', 'own:b', 'own:c', null])
+  assert.deepEqual(view.columns.map(n => n.ref), [ROOT, 'own:a', 'own:e'])
+  assert.deepEqual(view.columns.map(n => n.selectedRef), ['own:a', 'own:b', null])
   assert.equal(view.selected.ref, 'own:e')
-  assert.equal(view.columns[2].node, m.node('own:b'))
+  assert.equal(view.columns[1].node, m.node('own:a'))
   assert.ok(Object.isFrozen(view.path) && Object.isFrozen(view.columns))
+})
+
+test('responsive column limits preserve the canonical path and actual next-child selection', () => {
+  const m = model([own('a'), own('b', 'a'), own('c', 'b'), own('d', 'c')])
+  const nav = navigateVaultExplorer(m, [], 'own:d')
+  const expected = new Map([[1, ['own:d']], [2, [ROOT, 'own:d']], [3, [ROOT, 'own:a', 'own:d']]])
+  for (const [maxColumns, refs] of expected) {
+    const view = vaultExplorerView(m, nav, { maxColumns })
+    assert.deepEqual(view.path, nav)
+    assert.deepEqual(view.breadcrumbs.map(n => n.ref), nav)
+    assert.equal(view.selected.ref, 'own:d')
+    assert.deepEqual(view.columns.map(n => n.ref), refs)
+    for (const column of view.columns) {
+      assert.equal(column.node, m.node(column.ref))
+      assert.equal(column.items, m.children(column.ref))
+      assert.equal(column.selectedRef, nav[nav.indexOf(column.ref) + 1] ?? null)
+    }
+  }
+})
+
+test('invalid responsive limits fall back to three columns without coercion or extra panels', () => {
+  const m = model([own('a'), own('b', 'a'), own('c', 'b')])
+  const nav = navigateVaultExplorer(m, [], 'own:c')
+  for (const maxColumns of [undefined, null, 0, -1, 4, 999, 1.5, NaN, Infinity, '1', true, {}, 1n]) {
+    assert.deepEqual(vaultExplorerView(m, nav, { maxColumns }).columns.map(n => n.ref), [ROOT, 'own:a', 'own:c'])
+  }
+})
+
+test('repeated deep navigation never grows more columns or loses full breadcrumbs at limits one to three', () => {
+  const entries = Array.from({ length: 32 }, (_, i) => own('d' + i, i ? 'd' + (i - 1) : null))
+  const m = model(entries)
+  for (const maxColumns of [1, 2, 3]) {
+    let nav = [ROOT]
+    for (const i of [...entries.keys(), ...[...entries.keys()].reverse()]) {
+      nav = navigateVaultExplorer(m, nav, 'own:d' + i)
+      const view = vaultExplorerView(m, nav, { maxColumns })
+      assert.equal(view.breadcrumbs.length, i + 2)
+      assert.deepEqual(view.path, nav)
+      assert.equal(view.columns.length, Math.min(maxColumns, i + 2))
+      assert.equal(view.columns.at(-1).ref, 'own:d' + i)
+      if (maxColumns >= 2) assert.equal(view.columns[0].ref, ROOT)
+      if (maxColumns === 3 && i >= 1) assert.equal(view.columns[1].ref, 'own:d0')
+      for (const column of view.columns) assert.equal(column.node, m.node(column.ref))
+    }
+    assert.deepEqual(vaultExplorerView(m, [ROOT], { maxColumns }).columns.map(n => n.ref), [ROOT])
+  }
+})
+
+test('Shared navigation reduces responsively without treating omitted Shared or sender folders as root', () => {
+  const m = model([], [received('a', 'file')])
+  const nav = navigateVaultExplorer(m, [], 'sender:sender-a')
+  const expected = new Map([[1, ['sender:sender-a']], [2, [ROOT, 'sender:sender-a']], [3, nav]])
+  for (const [maxColumns, refs] of expected) {
+    const view = vaultExplorerView(m, nav, { maxColumns })
+    assert.deepEqual(view.path, [ROOT, SHARED, 'sender:sender-a'])
+    assert.deepEqual(view.columns.map(n => n.ref), refs)
+    assert.equal(view.columns.at(-1).items[0].ref, 'share:a')
+    assert.equal(view.columns.at(-1).node.readOnly, true)
+    if (maxColumns >= 2) assert.equal(view.columns[0].selectedRef, SHARED)
+  }
 })
 
 test('file selection does not truncate or navigate the independent folder panels', () => {

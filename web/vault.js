@@ -119,6 +119,7 @@ export function renderVault(context) {
   let model = buildModel(snapshot);
   let navigation = ["root"];
   let view = vaultExplorerView(model, navigation);
+  let columnLimit = 3;
   let parentId = null, generation = 0, uploading = false;
   let previewRef = null, previewSession = null, previewScope = null, previewLoading = false, previewFingerprint = "", previewRequest = 0;
   let discardPrompt = null;
@@ -307,7 +308,8 @@ export function renderVault(context) {
   }
   function paint() {
     if (!current()) return;
-    closeMenu(); view = vaultExplorerView(model, navigation); navigation = view.path;
+    closeMenu(); columnLimit = visibleColumnLimit();
+    view = vaultExplorerView(model, navigation, { maxColumns: columnLimit }); navigation = view.path;
     const enabled = snapshot.enabled === true;
     parentId = ownDestination(activeFolderRef())?.parentId ?? null;
     refreshNative(); toolbar.hidden = !enabled; explorer.hidden = !enabled; quota.hidden = !enabled; breadcrumbs.hidden = !enabled;
@@ -802,13 +804,21 @@ export function renderVault(context) {
   });
   columns.addEventListener("scroll", () => closeMenu(), { capture: true, passive: true });
   const toast = document.querySelector("#toast");
+  function visibleColumnLimit() {
+    const width = explorer.clientWidth;
+    if (!width) return 3;
+    const share = Number(getComputedStyle(columns).getPropertyValue("--vault-columns-share")) || .64;
+    return Math.max(1, Math.min(3, Math.floor((width * share - 1) / 180)));
+  }
   function fitViewport() {
     if (!current()) return;
     closeMenu();
+    if (snapshot.enabled && visibleColumnLimit() !== columnLimit) paint();
     if (toast) page.style.setProperty("--vault-toast-offset", toast.hidden ? "0px" : toast.getBoundingClientRect().height + 10 + "px");
   }
   const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fitViewport) : null;
   if (toast) observer?.observe(toast);
+  observer?.observe(explorer);
   globalThis.addEventListener?.("resize", fitViewport, { signal });
   globalThis.addEventListener?.("beforeunload", event => {
     if (previewSession?.dirty) { event.preventDefault(); event.returnValue = ""; }
