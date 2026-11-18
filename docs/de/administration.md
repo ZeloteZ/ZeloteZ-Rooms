@@ -25,6 +25,8 @@ Eine Registrierung erfordert eine Einladung. Raummitgliedschaft und Gast-Zuschau
 
 Unter **Einladungen → Konten** kannst du Mitgliedskonten sperren/freigeben oder ihre Sitzungen beenden. Eine Sperre widerruft Sitzungen und Übertragungen. Das Beenden von Sitzungen erzwingt eine erneute Anmeldung, löscht aber weder Konto noch gespeicherte Nachrichten. Das Betreiberkonto lässt sich hier nicht sperren.
 
+Die Kontenliste zeigt auch den Vault-Verbrauch, das Speicherlimit und Reservierungen unvollständiger Uploads je Konto, auch bei deaktiviertem Vault. Dateinamen und Inhalte bleiben verschlüsselt.
+
 Sensible Betreiberaktionen benötigen eine aktuelle Authenticator-Bestätigung, die fünf Minuten gilt. Ein MFA-Wiederherstellungscode kann die Anmeldung ermöglichen, für sensible Betreiberänderungen ist jedoch ein aktueller Authenticator-Code erforderlich. Der Zugang zur Verwaltungsseite ist keine dauerhafte Freigabe aller Aktionen.
 
 ## Passwörter und Chatschlüssel

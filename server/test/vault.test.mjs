@@ -26,7 +26,10 @@ async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'rooms-vault-test-'))
   const db = new DatabaseSync(join(directory, 'community.sqlite'))
   db.exec('PRAGMA foreign_keys = ON')
-  const auth = createAuth(db, { publicOrigin: origin })
+  const auth = createAuth(db, { publicOrigin: origin, vaultUsageFor: id => {
+    const { enabled, quotaBytes } = vault.config()
+    return { enabled, quotaBytes, ...vault.usage(id) }
+  } })
   const people = {}
   for (const [name, admin] of [['owner', 1], ['alice', 0], ['bob', 0], ['eve', 0]]) {
     const id = randomUUID(), token = encoded(32)
@@ -59,6 +62,7 @@ async function fixture(t) {
     try {
       const url = new URL(path, origin)
       const handled = await vault.handlePublic(input, response, url) || await vault.handle(input, response, url)
+        || await auth.handle(input, response, url.pathname)
       if (!handled) json(response, 404, { error: 'Nicht gefunden.' })
     } catch (error) {
       if (!(error instanceof RequestError)) throw error
@@ -89,6 +93,51 @@ async function fixture(t) {
   return { db, auth, vault, directory, people, request, enable, entry, readyFile,
     tick: amount => { time += amount }, ownerHash }
 }
+
+test('only the configured admin receives account storage totals and public account responses omit them', async t => {
+  const f = await fixture(t)
+  assert.equal((await f.request('GET', '/api/admin/accounts', undefined, { user: null })).status, 401)
+  assert.equal((await f.request('GET', '/api/admin/accounts')).status, 403)
+  const response = await f.request('GET', '/api/admin/accounts', undefined, { user: 'owner' })
+  assert.equal(response.status, 200)
+  for (const account of response.body.accounts) {
+    assert.deepEqual(account.vault, { enabled: false, quotaBytes: vaultLimits.defaultQuotaBytes, usedBytes: 0, reservedBytes: 0 })
+    assert.deepEqual(Object.keys(account).sort(), ['admin', 'disabled', 'displayName', 'id', 'username', 'vault'])
+  }
+  const session = await f.request('GET', '/api/auth/session')
+  assert.equal(session.status, 200); assert.equal(Object.hasOwn(session.body.user, 'vault'), false)
+  f.db.prepare('DELETE FROM owner_mfa').run()
+  assert.equal((await f.request('GET', '/api/admin/accounts', undefined, { user: 'owner' })).status, 403)
+})
+
+test('admin account totals match charged encrypted usage and reservations without exposing file metadata', async t => {
+  const f = await fixture(t); await f.enable()
+  const ready = await f.readyFile({ size: 107 })
+  const pending = await f.entry({ size: 213 })
+  assert.equal(pending.status, 201)
+  const expected = f.vault.usage(f.people.alice.id)
+  assert.ok(expected.usedBytes > 107 && expected.reservedBytes > 213)
+  const result = await f.request('GET', '/api/admin/accounts', undefined, { user: 'owner' })
+  const account = result.body.accounts.find(value => value.id === f.people.alice.id)
+  assert.deepEqual(account.vault, { enabled: true, quotaBytes: vaultLimits.defaultQuotaBytes, ...expected })
+  assert.deepEqual(Object.keys(account.vault).sort(), ['enabled', 'quotaBytes', 'reservedBytes', 'usedBytes'])
+  const serialized = JSON.stringify(result.body)
+  for (const secret of [ready.id, ready.envelope.body, pending.body.entry.id]) assert.equal(serialized.includes(secret), false)
+  assert.equal(result.body.accounts.find(value => value.id === f.people.bob.id).vault.usedBytes, 0)
+})
+
+test('account mutations retain storage totals for suspended users and disabled Vault preserves over-quota usage', async t => {
+  const f = await fixture(t); await f.enable()
+  await f.readyFile({ size: vaultLimits.minQuotaBytes + 4096 })
+  await f.enable(vaultLimits.minQuotaBytes, false)
+  const expected = { enabled: false, quotaBytes: vaultLimits.minQuotaBytes, ...f.vault.usage(f.people.alice.id) }
+  assert.ok(expected.usedBytes > expected.quotaBytes)
+  const changed = await f.request('PATCH', '/api/admin/accounts/' + f.people.alice.id, { disabled: true }, { user: 'owner' })
+  assert.equal(changed.status, 200); assert.equal(changed.body.account.disabled, true)
+  assert.deepEqual(changed.body.account.vault, expected)
+  const listed = await f.request('GET', '/api/admin/accounts', undefined, { user: 'owner' })
+  assert.deepEqual(listed.body.accounts.find(value => value.id === f.people.alice.id).vault, expected)
+})
 
 test('Vault defaults off at 2GiB and only a freshly MFA-approved operator can enable or change it', async t => {
   const f = await fixture(t)

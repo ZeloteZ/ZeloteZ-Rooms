@@ -1,0 +1,26 @@
+.vault-paint { display: flex; flex-direction: column; gap: 6px; inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; padding: 8px; box-sizing: border-box; overflow: hidden; background: #141821; }
+.vault-paint-ribbon { display: grid; gap: 6px; flex: 0 1 auto; min-inline-size: 0; min-block-size: 0; max-block-size: 45%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.vault-paint-toolbar, .vault-paint-options, .vault-paint-resize { display: flex; flex-wrap: nowrap; align-items: center; gap: 5px; min-inline-size: 0; overflow-x: auto; scrollbar-width: thin; }
+.vault-paint :is(button, input, select) { min-block-size: 29px; padding: 4px 7px; font-size: .72rem; }
+.vault-paint .button { white-space: nowrap; }
+.vault-paint-toolbar > select:first-child { flex: 1 1 100px; }
+.vault-paint-toolbar > select { min-inline-size: 0; max-inline-size: 140px; }
+.vault-paint .field { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; font-size: .69rem; }
+.vault-paint .field > span { font-size: .69rem; }
+.vault-paint input[type="number"] { inline-size: 65px; min-inline-size: 0; }
+.vault-paint input[type="color"] { inline-size: 38px; padding: 2px; cursor: pointer; }
+.vault-paint-palette { display: grid; grid-template-columns: repeat(8, 16px); gap: 3px; flex: none; padding: 2px; }
+.vault-paint .vault-paint-swatch { min-inline-size: 16px; inline-size: 16px; min-block-size: 16px; block-size: 16px; padding: 0; border: 1px solid #ffffff50; border-radius: 2px; }
+.vault-paint-swatch[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vault-paint-text-options { display: flex; gap: 5px; flex: 1 1 170px; min-inline-size: 0; }
+.vault-paint-text-options > input[type="text"] { flex: 1; min-inline-size: 0; inline-size: 100px; }
+.vault-paint-viewport { flex: 1 1 0; overflow: auto; min-block-size: 0; min-inline-size: 0; overscroll-behavior: contain; scrollbar-width: thin; background: #242936; border: 1px solid var(--line); border-radius: 5px; padding: 8px; }
+.vault-paint-paper { position: relative; inline-size: max-content; max-inline-size: none; background: repeating-conic-gradient(#c7c9ce 0% 25%, #eee 0% 50%) 50% / 16px 16px; box-shadow: 0 2px 10px #0006; }
+.vault-paint-canvas { display: block; max-inline-size: none; max-block-size: none; touch-action: none; cursor: crosshair; }
+.vault-paint-selection { position: absolute; box-sizing: border-box; border: 1px dashed #fff; outline: 1px dashed #111; pointer-events: none; background: #769af11a; }
+.vault-paint-selection[data-shape="ellipse"] { border-radius: 50%; }
+.vault-paint-selection[data-shape="line"] { background: #769af133; }
+.vault-paint-status { display: flex; gap: 10px; flex: 0 1 auto; min-inline-size: 0; min-block-size: 0; max-block-size: 20%; overflow: auto; align-items: start; font-size: .66rem; }
+.vault-paint-status .status { margin: 0; font-size: .66rem; overflow-wrap: anywhere; }
+.vault-paint-dimensions { flex: none; font-variant-numeric: tabular-nums; }
+@container (max-width: 400px) { .vault-paint { padding: 5px; gap: 4px; } .vault-paint :is(button,input,select) { font-size: .65rem; padding: 3px 5px; } .vault-paint-status { flex-direction: column; gap: 2px; } }

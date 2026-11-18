@@ -25,6 +25,8 @@ Member registration is invitation-only. Room membership and guest viewer links a
 
 Open **Invites → Accounts** to suspend/re-enable a member account or end its sessions. Suspending an account revokes its sessions and broadcasts. Ending sessions forces a fresh sign-in; it does not delete the account or its stored messages. The owner account cannot be disabled through this interface.
 
+The account list also shows each account's Vault usage, storage limit, and unfinished-upload reservations, including when Vault is disabled. File names and contents stay encrypted.
+
 Sensitive owner actions use a recent authenticator approval that lasts five minutes. An ordinary login with an MFA recovery code can restore sign-in access, but owner authorization for sensitive changes requires a current authenticator code. Do not treat access to the admin page as permanent authorization.
 
 ## Passwords and chat keys

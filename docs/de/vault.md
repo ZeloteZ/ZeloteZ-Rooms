@@ -10,6 +10,8 @@ Der Betreiber öffnet **Verwaltung → ZeloteZ Vault**, bestätigt den Betreiber
 
 Verschlüsselte Daten, verschlüsselte Metadaten und Reservierungen unvollständiger Uploads zählen zum Limit. Verschlüsselung benötigt etwas zusätzlichen Platz. Ein kleiner Anteil technischer Schutzdaten kann nach einer Dateilöschung belegt bleiben. Beim Senken bleiben Dateien erhalten; Konten über dem Limit können weiterhin herunterladen und löschen, aber keinen weiteren Speicher belegen.
 
+Unter **Einladungen → Konten** sieht der Betreiber je Konto den belegten Speicher, das Limit und Reservierungen unvollständiger Uploads, auch bei deaktiviertem Vault. Dateinamen und Inhalte werden dabei nicht offengelegt.
+
 Deaktivieren sperrt Uploads, Downloads und beide Freigabearten. Fertige Dateien bleiben bis zur erneuten Aktivierung gespeichert. Unvollständige Uploads werden verworfen. Betreiber müssen ausreichend Festplattenplatz für alle Konten bereitstellen und das Anwendungsdatenvolume in die [Sicherung](operations.md) aufnehmen.
 
 ## Dateien verwalten
@@ -36,9 +38,9 @@ Die Datei wird auf deinem Gerät geprüft und entschlüsselt. Vorschau und Bearb
 
 | Dateityp | Werkzeuge | Lokale Grenzen |
 | --- | --- | --- |
-| Bilder, darunter PNG, JPEG, WebP, GIF, BMP, AVIF und geprüfte ICO-Icons | Ränder zuschneiden, drehen, horizontal oder vertikal spiegeln; als PNG, JPEG oder WebP exportieren | 10 GiB Quelldatei und höchstens 33.554.432 Bildpunkte |
+| Bilder, darunter PNG, JPEG, WebP, GIF, BMP, AVIF und geprüfte ICO-Icons | Ansehen; im Editor Bleistift, Pinsel, Radierer, Füllen, Pipette, Linien, Formen, Text, Auswahl/Zuschnitt, Größenänderung, Drehen und Spiegeln nutzen; als PNG, JPEG oder WebP exportieren | 10 GiB Quelldatei und höchstens 33.554.432 Bildpunkte |
 | Videos und Audiodateien, darunter unterstützte MKV-Dateien | Lokaler Player mit Wiedergabesteuerung | 10 GiB Quelldatei; verfügbare Codecs hängen vom Browser und Betriebssystem ab |
-| PDF | Einzelne Seiten ansehen, umordnen, drehen, löschen und Textnotizen platzieren | 64 MiB Quelldatei, höchstens 500 Seiten; mindestens eine Seite muss erhalten bleiben |
+| PDF | Durch Seiten scrollen, zoomen oder zu einer Seite springen; im Editor Seiten umordnen, drehen, löschen und Textnotizen platzieren | 64 MiB Quelldatei, höchstens 500 Seiten; mindestens eine Seite muss erhalten bleiben |
 | Text, Markdown, JSON, CSV, Konfigurationsdateien und gängiger Quellcode | UTF-8-Text oder UTF-16 mit BOM bearbeiten, Zeilenumbruch umschalten und Zeilen-/Zeichenanzahl sehen; JSON wird vor dem Speichern auf Syntaxfehler geprüft | 2 MiB einschließlich Kodierung und BOM |
 | DOCX-Dokumente und XLSX-Tabellen | Absätze, Tabellen und Tabellenzellen bearbeiten; eine vereinfachte DOCX- oder XLSX-Kopie speichern | 32 MiB Quelldatei; insgesamt 2 MiB Text, 20.000 Zellen, 2.000 Zeilen, 64 Spalten je Zeile und 20 Tabellenblätter |
 | ZIP-, TAR-, TAR.GZ- und TGZ-Archive | Ordner durchsuchen, unterstützte enthaltene Dateien lokal öffnen, einzeln herunterladen oder als neue verschlüsselte Vault-Datei speichern | 64 MiB Quelldatei, 128 MiB entpackter Inhalt, 2.000 Einträge; höchstens 32 MiB je entpackter Datei |
@@ -47,7 +49,11 @@ Medien unterstützen Quelldateien bis **10 GiB (10.737.418.240 Bytes)**, sofern 
 
 Für das erste Bild werden höchstens **512 MiB kodierte Bilddaten** dekodiert. Benötigt schon dieses erste Bild mehr Daten, lässt es sich nicht lokal öffnen. Kann dein Browser das jeweilige Bildformat nicht aus einem Datenstrom dekodieren, unterstützt der alternative Ladeweg Bilder bis **128 MiB**. Dateigröße und entpackte Bildpunkte sind getrennte Grenzen; die Eingabegrenze von 10 GiB garantiert nicht, dass jedes Bild auf jedem Gerät dekodierbar ist.
 
+Der Bildeditor bietet eine Farbpalette, freie Farbwahl, Strichbreite, Zoom sowie Rückgängig/Wiederholen. Markiere einen Bereich, bevor du **Auswahl zuschneiden** wählst. Der Verlauf hält höchstens **32 Schritte innerhalb von 32 MiB**; ältere Schritte können entfallen. Ein Vorgang über diesem Budget verwirft den bisherigen Verlauf. Füllen kann vorübergehend bis zu **128 MiB Bilddaten und 4 MiB Arbeitsspeicher** benötigen; komplexe Füllungen können an einer Sicherheitsgrenze abbrechen.
+
 Bildexporte sind statisch und entfernen die Metadaten des Quellbildes; aus animierten Bildern entsteht ein statisches Bild. Exportierte Bearbeitungskopien sind auf 128 MiB begrenzt.
+
+Klicke in der Bildvorschau auf das Bild oder auf **Kino**, um es innerhalb von Rooms größer anzuzeigen. Auch Videos bieten im Player einen **Kinomodus**. Mit **Escape** kehrst du zur normalen Ansicht zurück.
 
 Audio und Video öffnen sich in einem lokalen Player und werden im Vault nicht bearbeitet oder exportiert. MKV-Wiedergabe unterstützt Kombinationen wie H.264/AAC und VP9/Opus, wenn Browser und Betriebssystem die nötigen Codecs bereitstellen. Die Dateiendung MKV allein garantiert keine Wiedergabe. Bei nicht unterstützten Codecs oder Dateien über der Player-Grenze lädst du das Original für eine passende lokale Anwendung herunter.
 
@@ -61,7 +67,7 @@ Die Office-Bearbeitung erstellt eine vereinfachte Kopie der Absätze und Tabelle
 
 Wähle im Archiv eine Datei und anschließend **Ausgewählte Datei öffnen**, **Ausgewählte Datei herunterladen** oder **In Vault speichern**. Das Öffnen einer enthaltenen Datei bleibt lokal. Mit **Zurück zum Archiv** kehrst du aus ihrer Vorschau zum Archivinhalt zurück. **In Vault speichern** erstellt eine neue Datei mit dem enthaltenen Dateinamen und frischer Verschlüsselung im Vault-Ordner des Originalarchivs. Bei einem per Mitgliederfreigabe empfangenen Archiv landet die Kopie im Hauptordner **Dateien**. Archivordner dienen der Navigation; sie werden nicht als Vault-Ordnerbaum importiert. Originalarchiv und Freigaben bleiben unverändert. Größere enthaltene Dateien bleiben sichtbar; über 32 MiB sind lokales Öffnen, Entpacken und einzelne Downloads deaktiviert. Wähle dafür **Originalarchiv herunterladen**. Die Grenze für entpackte Inhalte begrenzt auch die während eines Öffnens entpackten Daten. ZIP64, passwortgeschützte ZIPs, symbolische oder harte Links und nicht unterstützte Kompressionsverfahren benötigen eine passende lokale Anwendung. Unsichere oder beschädigte Archive werden abgelehnt.
 
-PDF-Vorschauen sind passiv. Gespeicherte PDF-Kopien entfernen interaktive Links, Formulare, Anhänge und eingebettete Skripte. Ergänzte Notizen werden als Bild darübergelegt; ihr Text lässt sich daher nicht markieren. Der bestehende Seiteninhalt bleibt erhalten. Die Werkzeuge dienen der Seitenverwaltung und Kommentierung, nicht der vollständigen Gestaltung eines Dokuments. Passwortgeschützte oder nicht unterstützte PDFs lassen sich möglicherweise nicht öffnen.
+PDF-Vorschauen sind passiv und lassen sich innerhalb des Viewers durchgehend scrollen. Nutze **Zoom**, **Breite anpassen** oder das Feld **Seite** zur Navigation. Höchstens vier Seitenvorschauen mit zusammen **48 MiPixeln** bleiben im Speicher; weitere Seiten werden beim Scrollen geladen. Gespeicherte PDF-Kopien entfernen interaktive Links, Formulare, Anhänge und eingebettete Skripte. Ergänzte Notizen werden als Bild darübergelegt; ihr Text lässt sich daher nicht markieren. Der bestehende Seiteninhalt bleibt erhalten. Die Werkzeuge dienen der Seitenverwaltung und Kommentierung, nicht der vollständigen Gestaltung eines Dokuments. Passwortgeschützte oder nicht unterstützte PDFs lassen sich möglicherweise nicht öffnen.
 
 Bei Bildern, PDFs, Text und unterstützten Office-Dateien gibst du einen Kopienamen ein und wählst **Verschlüsselte Kopie speichern**. Jeder Speichervorgang lädt eine neue, frisch verschlüsselte Datei hoch; Original und bestehende Freigaben bleiben unverändert. Die Kopie einer eigenen Datei landet im selben Ordner. Die bearbeitete Kopie einer Mitgliederfreigabe landet im Hauptordner **Dateien** und gehört dir; sie ändert die Datei des Absenders nicht. Für die zusätzliche Datei muss ausreichend freier Vault-Speicher vorhanden sein. Teile die neue Kopie bei Bedarf gesondert.
 

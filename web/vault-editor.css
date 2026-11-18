@@ -51,6 +51,15 @@
 .vault-editor-feedback .status { margin: 0; font-size: .73rem; overflow-wrap: anywhere; }
 .vault-image-canvas, .vault-pdf-canvas { display: block; max-inline-size: 100%; max-block-size: 100%; inline-size: auto; block-size: auto; object-fit: contain; }
 .vault-image-canvas { background: repeating-conic-gradient(#1f2230 0% 25%, #151721 0% 50%) 0 0 / 18px 18px; }
+.vault-image-viewer { display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; position: relative; overflow: hidden; background: #090b11; }
+.vault-image-visual { display: flex; align-items: center; justify-content: center; inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; overflow: hidden; cursor: zoom-in; outline-offset: -4px; }
+.vault-image-visual > .vault-image-canvas { flex: none; inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; max-inline-size: 100%; max-block-size: 100%; object-fit: contain; }
+.vault-image-cinema { position: absolute; z-index: 1; inset-block-start: 10px; inset-inline-end: 10px; min-block-size: 32px; padding: 5px 10px; font-size: .75rem; background: #121722dc; border-color: #ffffff35; box-shadow: 0 2px 10px #0005; }
+.vault-image-in-cinema .vault-image-visual { cursor: zoom-out; }
+.vault-image-viewer[data-watch-cinema], .vault-player[data-watch-cinema] { inline-size: auto; block-size: auto; min-inline-size: 0; min-block-size: 0; overflow: hidden; }
+.vault-player[data-watch-cinema] .vault-player-controls { padding: 10px 16px 12px; }
+.vault-editor-stage:has(> .vault-paint) { grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: stretch; }
+
 .vault-media-preview { display: block; inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; block-size: 100%; min-block-size: 0; max-block-size: 100%; object-fit: contain; background: #07080d; }
 .vault-editor-player { grid-template-rows: auto minmax(0, 1fr) auto; }
 .vault-editor-player .vault-editor-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }

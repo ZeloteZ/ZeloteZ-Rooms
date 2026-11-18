@@ -42,7 +42,10 @@ const appearance = createAppearance(db)
 const profileFor = appearance.profile
 const desktopHandoff = createDesktopHandoff()
 const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile,
-  revokeBroadcasts: userId => streams.revokeUser(userId) })
+  revokeBroadcasts: userId => streams.revokeUser(userId), vaultUsageFor: userId => {
+    const { enabled, quotaBytes } = vault.config()
+    return { enabled, quotaBytes, ...vault.usage(userId) }
+  } })
 const { requireSession } = auth
 const vault = createVault(db, { dataDir, requireSession, requireAdmin: auth.requireAdmin })
 const setup = createSetup(db, { publicOrigin: origin.origin, setupKey: configuredSetupKey(db),

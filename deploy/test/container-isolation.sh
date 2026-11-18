@@ -53,12 +53,17 @@ editor_style=$(sed -nE 's/.*href="([^"]+\/vault-editor\.css)".*/\1/p' "$fixtures
 editor_type=$(curl --fail --silent --show-error --output "$fixtures/editor.css" \
   --write-out '%{content_type}' "http://$port$editor_style")
 [[ -s "$fixtures/editor.css" && "$editor_type" =~ ^text/css(\;.*)?$ ]]
-for module in vault-editor.js vault-explorer-model.js vault-media-edit.js vault-pdf-tools.js vault-pdf-worker.js \
+for module in vault-editor.js vault-explorer-model.js vault-image-paint.js vault-pdf-viewer.js vault-media-edit.js vault-pdf-tools.js vault-pdf-worker.js \
   vault-office.js vault-office-editor.js vault-archive.js vault-archive-worker.js vault-archive-viewer.js \
   vault-text-codec.js vault-image-inspect.js vault-language-controls.js vault-media-tracks.js vault-media-tracks-worker.js vault-media-ranges.js vault-mkv-tracks.js vault-mp4-tracks.js; do
   editor_type=$(curl --fail --silent --show-error --output "$fixtures/editor-module.js" \
     --write-out '%{content_type}' "http://$port${vault_asset%/*}/$module")
   [[ -s "$fixtures/editor-module.js" && "$editor_type" =~ ^(application|text)/(javascript|ecmascript)(\;.*)?$ ]]
+done
+for stylesheet in vault-image-paint.css vault-pdf-viewer.css; do
+  editor_type=$(curl --fail --silent --show-error --output "$fixtures/$stylesheet" \
+    --write-out '%{content_type}' "http://$port${vault_asset%/*}/$stylesheet")
+  [[ -s "$fixtures/$stylesheet" && "$editor_type" =~ ^text/css(\;.*)?$ ]]
 done
 csp=$(grep --ignore-case '^content-security-policy:' "$fixtures/index.headers")
 [[ "$csp" == *"default-src 'self'"* && "$csp" == *"object-src 'none'"* && "$csp" == *"frame-ancestors 'none'"* ]]

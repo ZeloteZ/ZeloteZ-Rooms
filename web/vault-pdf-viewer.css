@@ -1,0 +1,14 @@
+.vault-pdf-reader { display: grid; grid-template-rows: auto minmax(0, 1fr); inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; overflow: hidden; }
+.vault-pdf-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 8px 12px; border-block-end: 1px solid var(--line); background: var(--raised); min-inline-size: 0; }
+.vault-pdf-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-inline-size: 0; max-inline-size: 100%; }
+.vault-pdf-toolbar .field { display: flex; align-items: center; gap: 7px; min-inline-size: 0; max-inline-size: 100%; }
+.vault-pdf-toolbar .field > span, .vault-pdf-toolbar .subtle { font-size: .75rem; white-space: nowrap; }
+.vault-pdf-toolbar .button { padding: 4px 9px; min-block-size: 30px; }
+.vault-pdf-page-input { inline-size: 65px; min-inline-size: 0; padding: 5px 7px; }
+.vault-pdf-zoom { max-inline-size: 150px; min-inline-size: 0; padding: 5px 7px; font-size: .78rem; }
+.vault-pdf-status { flex-basis: 100%; margin: 0; font-size: .75rem; }
+.vault-pdf-scroller { min-inline-size: 0; min-block-size: 0; inline-size: 100%; block-size: 100%; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; background: #161820; outline-offset: -3px; }
+.vault-pdf-pages { position: relative; min-inline-size: 100%; }
+.vault-pdf-page { position: absolute; inset-inline-start: 50%; transform: translateX(-50%); display: grid; place-items: center; overflow: hidden; background: #fff; box-shadow: 0 2px 12px #0006; color: #4b5263; }
+.vault-pdf-placeholder { padding: 8px; font-size: .8rem; overflow-wrap: anywhere; }
+.vault-pdf-page-canvas { position: absolute; inset: 0; display: block; inline-size: 100%; block-size: 100%; }

@@ -1,5 +1,5 @@
 import { t } from "./i18n.js";
-import { renderVaultAdminPanel } from "./vault.js";
+import { renderVaultAdminPanel, vaultBytes } from "./vault.js";
 import { api, button, closeDialog, copyField, el, field, form, identifier, localizedTime, notify, openDirect, personRow, select, showDialog, status, tell } from "./ui.js";
 
 const relationships = {
@@ -238,9 +238,11 @@ function accountPanel(signal, approval) {
   const title = t("Accounts", "Konten");
   const list = peopleList(title);
   const feedback = status();
-  let cursor;
+  let cursor, generation = 0;
   const more = button(t("Load more", "Mehr laden"), load);
-  const node = el("section", { class: "panel people-panel", hidden: true }, el("h2", {}, title), list, feedback, more);
+  const refresh = button("↻", () => { generation++; cursor = undefined; more.disabled = false; more.hidden = false; list.replaceChildren(); void load(); },
+    { class: "ghost icon-button", "aria-label": t("Refresh", "Aktualisieren"), title: t("Refresh", "Aktualisieren") });
+  const node = el("section", { class: "panel people-panel", hidden: true }, el("div", { class: "section-heading" }, el("h2", {}, title), refresh), list, feedback, more);
 
   function row(account) {
     function confirm(label, explanation, body) {
@@ -271,23 +273,35 @@ function accountPanel(signal, approval) {
     ];
     const detail = account.admin ? t("Site operator", "Betreiber") : account.disabled ? t("Suspended", "Gesperrt") : "";
     const entry = personRow(account, controls.filter(Boolean).map(approval.protect), detail);
+    const usage = account.vault;
+    if (usage && Number.isSafeInteger(usage.usedBytes) && usage.usedBytes >= 0 && Number.isSafeInteger(usage.reservedBytes) && usage.reservedBytes >= 0
+        && Number.isSafeInteger(usage.quotaBytes) && usage.quotaBytes > 0) {
+      const label = t("Vault: {used} of {limit} used", "Vault: {used} von {limit} belegt", { used: vaultBytes(usage.usedBytes), limit: vaultBytes(usage.quotaBytes) });
+      const reserved = usage.reservedBytes ? " · " + t("{size} reserved", "{size} reserviert", { size: vaultBytes(usage.reservedBytes) }) : "";
+      const description = label + reserved + (usage.enabled ? "" : " · " + t("Vault disabled", "Vault deaktiviert"));
+      entry.children[1].append(el("div", { class: "account-vault-usage", "data-over-quota": String(usage.usedBytes + usage.reservedBytes > usage.quotaBytes) },
+        el("p", { class: "subtle" }, description),
+        el("progress", { max: usage.quotaBytes, value: Math.min(usage.usedBytes + usage.reservedBytes, usage.quotaBytes), "aria-label": description })));
+    }
     return entry;
   }
 
   async function load() {
     if (more.disabled || cursor === null) return;
     more.disabled = true;
+    const request = ++generation;
     tell(feedback, "");
     try {
       const { accounts, next } = await api("admin/accounts" + (cursor ? "?after=" + encodeURIComponent(cursor) : ""), { signal });
       signal.throwIfAborted();
+      if (request !== generation) return;
       list.append(...accounts.map(row));
       cursor = next ?? null;
       more.hidden = cursor === null;
     } catch (error) {
-      if (!signal.aborted) tell(feedback, error.message, "error");
+      if (!signal.aborted && request === generation) tell(feedback, error.message, "error");
     } finally {
-      more.disabled = false;
+      if (request === generation) more.disabled = false;
     }
   }
 

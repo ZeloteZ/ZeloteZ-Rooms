@@ -55,6 +55,10 @@
 }
 
 .people-list:focus-visible { outline-offset: -3px; }
+.account-vault-usage { display: grid; gap: 5px; margin-block-start: 7px; min-inline-size: 0; }
+.account-vault-usage > .subtle { font-size: .7rem; line-height: 1.45; }
+.account-vault-usage progress { display: block; inline-size: min(100%, 260px); block-size: 5px; accent-color: var(--accent); }
+.account-vault-usage[data-over-quota="true"] progress { accent-color: var(--danger); }
 .search-results { flex: 1 1 auto; min-block-size: 83px; }
 .search-results > h3 { flex: none; }
 

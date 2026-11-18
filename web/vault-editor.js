@@ -9,6 +9,9 @@ import { archiveViewer, archiveError } from "./vault-archive-viewer.js";
 import { VAULT_ARCHIVE_LIMITS } from "./vault-archive.js";
 import { downloadVaultLocalBlob } from "./vault-client.js";
 import { mountVaultMediaLanguages } from "./vault-language-controls.js";
+import { createWatchCinema } from "./watch-cinema.js";
+import { paintVaultImage } from "./vault-image-paint.js";
+import { mountVaultPdfViewer } from "./vault-pdf-viewer.js";
 
 export { vaultFileKind, editedFileName } from "./vault-media-edit.js";
 
@@ -280,7 +283,10 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
       abortEditor(contentSignal);
       const environment = { signal: contentSignal, stage, tools, filename, objectUrl, disposers, dirtyChanged, update,
         readOnly: mode === "viewer", onShare: entry.receivedShareId ? undefined : onShare };
-      if (kind === "image") builder = await imageEditor(blob, environment);
+      if (kind === "image") {
+        tools.hidden = true;
+        builder = mode === "viewer" ? await imageViewer(blob, environment) : await paintVaultImage(blob, environment);
+      }
       else if (kind === "text") builder = await textEditor(blob, entry, environment);
       else if (kind === "pdf") builder = await pdfEditor(blob, environment);
       else if (kind === "office") builder = await officeEditor(blob, entry, environment);
@@ -378,56 +384,52 @@ async function textEditor(blob, entry, { signal, stage, tools, disposers, dirtyC
   };
 }
 
-async function imageEditor(blob, { signal, stage, tools, filename, disposers, dirtyChanged, readOnly = false }) {
+async function imageViewer(blob, { signal, stage, disposers }) {
   const image = await decodeVaultImage(blob, { signal });
   if (signal?.aborted) { image.close(); abortEditor(signal); }
-  disposers.push(() => image.close());
-  abortEditor(signal);
-  imageCrop(image.width, image.height);
-  const canvas = el("canvas", { class: "vault-image-canvas", "aria-label": readOnly ? t("Image preview", "Bildvorschau") : t("Edited image preview", "Vorschau des bearbeiteten Bildes") });
+  const width = image.width, height = image.height;
+  let imageOpen = true;
+  const closeImage = () => { if (imageOpen) { imageOpen = false; image.close(); } };
+  disposers.push(closeImage);
+  imageCrop(width, height);
+  const canvas = el("canvas", { class: "vault-image-canvas", "aria-label": t("Image preview", "Bildvorschau") });
+  canvas.width = width; canvas.height = height;
   disposers.push(() => { canvas.width = 1; canvas.height = 1; });
-  if (readOnly) {
-    canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error(t("The image could not be exported.", "Das Bild konnte nicht exportiert werden."));
-    context.drawImage(image, 0, 0); stage.append(canvas); return null;
-  }
-  const rotation = select([["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], "0");
-  const flipX = el("input", { type: "checkbox" }), flipY = el("input", { type: "checkbox" });
-  const format = select([["image/png", "PNG"], ["image/jpeg", "JPEG"], ["image/webp", "WebP"]], "image/png");
-  const crops = Object.fromEntries(["left", "top", "right", "bottom"].map(key => [key, numberControl(0, 0, 95)]));
-  const cropFeedback = status();
-  function draw() {
-    const crop = imageCrop(image.width, image.height, Object.fromEntries(Object.entries(crops).map(([key, input]) => [key, checkedNumber(input)])));
-    const turn = checkedNumber(rotation);
-    canvas.width = turn % 180 ? crop.height : crop.width; canvas.height = turn % 180 ? crop.width : crop.height;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error(t("The image could not be exported.", "Das Bild konnte nicht exportiert werden."));
-    if (format.value === "image/jpeg") { context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height); }
-    context.translate(canvas.width / 2, canvas.height / 2); context.rotate(turn * Math.PI / 180);
-    context.scale(flipX.checked ? -1 : 1, flipY.checked ? -1 : 1);
-    context.drawImage(image, crop.x, crop.y, crop.width, crop.height, -crop.width / 2, -crop.height / 2, crop.width, crop.height);
-    tell(cropFeedback, "");
-  }
-  for (const input of [rotation, flipX, flipY, format, ...Object.values(crops)]) input.addEventListener("change", () => {
-    dirtyChanged();
-    if (input === format) filename.value = filename.value.replace(/\.[^.]+$/u, "") + "." + (format.value === "image/jpeg" ? "jpg" : format.value.split("/")[1]);
-    try { draw(); } catch (error) { tell(cropFeedback, error.message, "error"); }
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error(t("The image could not be exported.", "Das Bild konnte nicht exportiert werden."));
+  try { context.drawImage(image, 0, 0); } finally { closeImage(); }
+  const visual = el("div", { class: "vault-image-visual", tabindex: 0, role: "button", "aria-label": t("Cinema mode", "Kinomodus"), "aria-pressed": "false" }, canvas);
+  const viewer = el("section", { class: "vault-image-viewer", "aria-label": t("Image preview", "Bildvorschau") }, visual);
+  let opener;
+  const cinemaButton = button(t("Cinema", "Kino"), () => { opener = cinemaButton; cinema.toggle(); }, {
+    class: "vault-image-cinema watch-cinema-button", title: t("Cinema mode", "Kinomodus"), "aria-label": t("Cinema mode", "Kinomodus"), "aria-pressed": "false",
   });
-  tools.append(el("h3", {}, t("Image tools", "Bildwerkzeuge")), field(t("Rotation", "Drehung"), rotation),
-    el("div", { class: "vault-editor-pair" }, field(t("Flip horizontally", "Horizontal spiegeln"), flipX), field(t("Flip vertically", "Vertikal spiegeln"), flipY)),
-    el("h4", {}, t("Crop edges (%)", "Ränder zuschneiden (%)")), el("div", { class: "vault-editor-pair" },
-      field(t("Left", "Links"), crops.left), field(t("Right", "Rechts"), crops.right), field(t("Top", "Oben"), crops.top), field(t("Bottom", "Unten"), crops.bottom)),
-    cropFeedback, field(t("Output format", "Ausgabeformat"), format),
-    el("p", { class: "subtle" }, t("Export creates a static image and removes the source file’s metadata.", "Der Export erstellt ein statisches Bild und entfernt die Metadaten der Quelldatei.")));
-  stage.append(canvas); draw();
-  return async () => {
-    abortEditor(signal); draw();
-    const output = await canvasBlob(canvas, format.value);
-    abortEditor(signal);
-    if (output.type !== format.value) throw new Error(t("The image could not be exported.", "Das Bild konnte nicht exportiert werden."));
-    return output;
-  };
+  const cinema = createWatchCinema({ signal, target: () => viewer, trigger: () => opener ?? cinemaButton, onChange(active) {
+    const label = active ? t("Exit cinema mode", "Kinomodus verlassen") : t("Cinema mode", "Kinomodus");
+    cinemaButton.title = label; cinemaButton.setAttribute("aria-label", label); cinemaButton.setAttribute("aria-pressed", String(active));
+    visual.setAttribute("aria-label", label); visual.setAttribute("aria-pressed", String(active));
+    viewer.classList.toggle("vault-image-in-cinema", active);
+  } });
+  viewer.append(cinemaButton);
+  const toggleImage = () => { opener = visual; cinema.toggle(); };
+  visual.addEventListener("click", toggleImage, { signal });
+  visual.addEventListener("keydown", event => {
+    if (event.repeat) return;
+    if (["Enter", " "].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey) { event.preventDefault(); toggleImage(); }
+  }, { signal });
+  function fit() {
+    if (signal.aborted) return;
+    const availableWidth = visual.clientWidth, availableHeight = visual.clientHeight;
+    if (!availableWidth || !availableHeight) return;
+    const scale = Math.min(availableWidth / width, availableHeight / height);
+    canvas.style.inlineSize = width * scale + "px";
+    canvas.style.blockSize = height * scale + "px";
+  }
+  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fit) : null;
+  observer?.observe(visual);
+  globalThis.addEventListener?.("resize", fit, { signal });
+  disposers.push(() => { observer?.disconnect(); cinema.close(false); });
+  stage.append(viewer); fit(); return null;
 }
 
 function playerIcon(kind) {
@@ -435,6 +437,7 @@ function playerIcon(kind) {
     play: ["M8 5v14l11-7z"], pause: ["M7 5h3v14H7z", "M14 5h3v14h-3z"],
     sound: ["M4 9h4l5-4v14l-5-4H4z", "M16 8a6 6 0 0 1 0 8", "M19 5a10 10 0 0 1 0 14"],
     mute: ["M4 9h4l5-4v14l-5-4H4z", "m17 9 5 6", "m22 9-5 6"],
+    cinema: ["M3 6h18v12H3z", "M7 3h10", "M7 21h10"],
     fullscreen: ["M8 3H3v5", "M16 3h5v5", "M21 16v5h-5", "M8 21H3v-5"],
     pip: ["M3 5h18v14H3z", "M12 11h7v6h-7z"], music: ["M9 18V5l11-2v13", "M9 9l11-2", "M9 18a3 3 0 1 1-3-3 3 3 0 0 1 3 3z", "M20 16a3 3 0 1 1-3-3 3 3 0 0 1 3 3z"],
     room: ["M3 4h18v13H3z", "M8 21h8", "M12 17v4", "m10 8 5 3-5 3z"],
@@ -462,7 +465,7 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
   try { await mediaDuration(media, { signal }); }
   catch (error) { if (signal.aborted) throw error; try { media.currentTime = 0; } catch {} }
   abortEditor(signal);
-  let playback, languages;
+  let playback, languages, cinema;
   const player = el("section", { class: "vault-player vault-player-" + kind, "data-playing": "false", "aria-label": t("Private media player", "Privater Medienplayer") });
   const visual = el("div", { class: "vault-player-visual", tabindex: 0, "aria-label": kind === "video" ? t("Video playback", "Videowiedergabe") : t("Audio playback", "Audiowiedergabe") }, media);
   if (kind === "audio") visual.append(el("div", { class: "vault-audio-art", "aria-hidden": true }, playerIcon("music"),
@@ -517,11 +520,22 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
     else if (["ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); playback.seek(media.currentTime + (event.key === "ArrowLeft" ? -5 : 5)); }
     else if (event.key.toLowerCase() === "m") { event.preventDefault(); playback.mute(); }
   });
+  if (kind === "video") {
+    const cinemaButton = button("", () => cinema.toggle(), {
+      class: "vault-player-cinema watch-cinema-button", "aria-label": t("Cinema mode", "Kinomodus"), title: t("Cinema mode", "Kinomodus"), "aria-pressed": "false",
+    });
+    cinemaButton.append(playerIcon("cinema")); actions.append(cinemaButton);
+    cinema = createWatchCinema({ signal, target: () => player, trigger: () => cinemaButton, onChange(active) {
+      const label = active ? t("Exit cinema mode", "Kinomodus verlassen") : t("Cinema mode", "Kinomodus");
+      cinemaButton.title = label; cinemaButton.setAttribute("aria-label", label); cinemaButton.setAttribute("aria-pressed", String(active));
+    } });
+    disposers.push(() => cinema.close(false));
+  }
   if (typeof player.requestFullscreen === "function" && document.fullscreenEnabled) {
     const fullscreen = button("", async () => {
       try {
         if (document.fullscreenElement === player) await document.exitFullscreen();
-        else await player.requestFullscreen();
+        else { cinema?.close(false); await player.requestFullscreen(); }
       } catch (error) { if (!signal.aborted) tell(playerStatus, error.message, "error"); }
     }, { class: "vault-player-fullscreen", "aria-label": t("Fullscreen", "Vollbild"), title: t("Fullscreen", "Vollbild") });
     fullscreen.append(playerIcon("fullscreen")); actions.append(fullscreen);
@@ -537,7 +551,7 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
   }
   if (typeof onShare === "function") {
     const share = button("", async () => {
-      try { await onShare(); } catch (error) { if (!signal.aborted && error?.name !== "AbortError") tell(playerStatus, error.message, "error"); }
+      try { cinema?.close(false); await onShare(); } catch (error) { if (!signal.aborted && error?.name !== "AbortError") tell(playerStatus, error.message, "error"); }
     }, { class: "vault-player-room", "aria-label": t("Play in a room", "In einem Raum abspielen"), title: t("Play in a room", "In einem Raum abspielen") });
     share.append(playerIcon("room")); actions.append(share);
   }
@@ -561,7 +575,7 @@ async function pdfEditor(blob, { signal, stage, tools, objectUrl, disposers, dir
   const pdf = await boundedPdfTask(loading.promise, signal, 30000, error => { if (error) void loading.destroy().catch(() => {}); });
   abortEditor(signal);
   if (pdf.numPages > VAULT_EDITOR_LIMITS.pdfPages) throw new Error(t("The PDF editor supports documents with up to 500 pages.", "Der PDF-Editor unterstützt Dokumente mit bis zu 500 Seiten."));
-  if (readOnly) return pdfViewer(pdf, { signal, stage, disposers });
+  if (readOnly) return mountVaultPdfViewer(pdf, { signal, stage, disposers });
   const pages = Array.from({ length: pdf.numPages }, (_, original) => ({ original, rotation: 0, note: { text: "", x: 10, y: 10, size: 16 } }));
   let current = 0, renderTask, serial = 0;
   const canvas = el("canvas", { class: "vault-pdf-canvas", "aria-label": t("PDF page preview", "Vorschau der PDF-Seite") });
@@ -657,46 +671,6 @@ async function pdfEditor(blob, { signal, stage, tools, objectUrl, disposers, dir
     });
     return boundedPdfTask(operation, signal, 60000, () => worker.terminate());
   };
-}
-
-async function pdfViewer(pdf, { signal, stage, disposers }) {
-  let current = 0, serial = 0, renderTask;
-  const canvas = el("canvas", { class: "vault-pdf-canvas", "aria-label": t("PDF page preview", "Vorschau der PDF-Seite") });
-  const choice = select(Array.from({ length: pdf.numPages }, (_, index) => [String(index),
-    t("Page {number}", "Seite {number}", { number: index + 1 })]), "0");
-  choice.setAttribute("aria-label", t("Page", "Seite"));
-  const previous = button("‹", () => { current--; void render(); },
-    { "aria-label": t("Previous page", "Vorherige Seite"), class: "ghost" });
-  const next = button("›", () => { current++; void render(); },
-    { "aria-label": t("Next page", "Nächste Seite"), class: "ghost" });
-  const note = status();
-  const viewport = el("div", { class: "vault-pdf-viewer-page" }, canvas);
-  const node = el("div", { class: "vault-pdf-viewer" },
-    el("div", { class: "vault-viewer-navigation" }, previous, choice, next), viewport, note);
-  disposers.push(() => { serial++; renderTask?.cancel(); canvas.width = 1; canvas.height = 1; });
-  async function render() {
-    const generation = ++serial;
-    current = Math.max(0, Math.min(pdf.numPages - 1, current)); choice.value = String(current);
-    previous.disabled = current === 0; next.disabled = current === pdf.numPages - 1;
-    renderTask?.cancel();
-    try {
-      const page = await pdf.getPage(current + 1);
-      abortEditor(signal); if (generation !== serial) return;
-      const base = page.getViewport({ scale: 1 });
-      const bounds = page.getViewport({ scale: Math.min(2, 1800 / Math.max(base.width, base.height)) });
-      if (!Number.isFinite(bounds.width * bounds.height) || bounds.width * bounds.height > 16 * 1024 ** 2 || Math.min(bounds.width, bounds.height) < 1)
-        throw new Error(t("This PDF page exceeds the local preview limit.", "Diese PDF-Seite überschreitet die lokale Vorschaugrenze."));
-      canvas.width = Math.ceil(bounds.width); canvas.height = Math.ceil(bounds.height);
-      const task = page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: bounds, annotationMode: 0 });
-      renderTask = task;
-      await boundedPdfTask(task.promise, signal, 30000, error => { if (error) task.cancel(); });
-      if (generation === serial && !signal.aborted) tell(note, "");
-    } catch (error) {
-      if (!signal.aborted && generation === serial && error.name !== "RenderingCancelledException") tell(note, error.message, "error");
-    }
-  }
-  choice.addEventListener("change", () => { current = Number(choice.value); void render(); });
-  stage.append(node); await render(); return null;
 }
 
 function documentForCanvas() { return document.createElement("canvas"); }

@@ -236,11 +236,16 @@ function attemptLimit(maxAttempts, windowSeconds) {
   }
 }
 
-export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor = () => ({}), revokeBroadcasts = () => {} }) {
+export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor = () => ({}), revokeBroadcasts = () => {}, vaultUsageFor = () => null }) {
   initializeAuthSchema(db)
   const mfa = createAccountMfa(db, { publicOrigin })
   const owner = createOwnerAccess(db, { mfa })
   const present = user => user && { ...user, ...profileFor(user.id) }
+  // Storage accounting is attached exclusively to the existing admin responses.
+  const summarizeAccount = row => {
+    const usage = vaultUsageFor(row.id)
+    return { ...accountSummary(row), ...(usage && { vault: usage }) }
+  }
   const secure = new URL(publicOrigin).protocol === 'https:'
   const cookieName = secure ? '__Host-zelotez_session' : 'zelotez_session'
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`
@@ -627,7 +632,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       const after = cursor === null ? '' : normalizeUsername(cursor)
       if (after === null) throw new RequestError(400, 'Ungültige Auswahl.')
       const rows = listAccounts.all(after, accountsPerPage + 1)
-      const accounts = rows.slice(0, accountsPerPage).map(accountSummary)
+      const accounts = rows.slice(0, accountsPerPage).map(summarizeAccount)
       const next = rows.length > accountsPerPage ? accounts.at(-1).username : null
       json(res, 200, { accounts, next })
       return true
@@ -653,7 +658,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
           deleteAccountSessions.run(id)
           revokeBroadcasts(id)
         }
-        return accountSummary(findAccount.get(id))
+        return summarizeAccount(findAccount.get(id))
       })
       json(res, 200, { account })
       return true
