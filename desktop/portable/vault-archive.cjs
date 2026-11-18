@@ -5,13 +5,23 @@ const { constants: { O_NOFOLLOW = 0, O_NONBLOCK = 0, O_RDONLY } } = require("nod
 const { lstat, open, readdir } = require("node:fs/promises");
 const path = require("node:path");
 const { Readable } = require("node:stream");
+const { fileURLToPath } = require("node:url");
 const { ZipFile } = require("yazl");
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 1024 ** 4;
 const MAX_SELECTION = 256;
 const MAX_ENTRIES = 10000;
 const MAX_DEPTH = 32;
-const fail = () => new Error("The selected files cannot be archived safely or changed during the transfer.");
+const fail = (code = "VAULT_SELECTION_CHANGED") => Object.assign(
+  new Error("The selected files cannot be archived safely or changed during the transfer."), { code });
+function failure(error) {
+  if (error?.name === "AbortError" || /^VAULT_(?:SELECTION_CHANGED|UNREADABLE|INVALID_NAME|SYMLINK|LIMIT|ARCHIVE_FAILED)$/u.test(error?.code ?? "")) return error;
+  const code = error?.code === "EACCES" || error?.code === "EPERM" ? "VAULT_UNREADABLE"
+    : error?.code === "ENOENT" || error?.code === "ENOTDIR" ? "VAULT_SELECTION_CHANGED"
+      : error?.code === "ELOOP" ? "VAULT_SYMLINK" : error?.code === "ENAMETOOLONG" ? "VAULT_INVALID_NAME" : "VAULT_ARCHIVE_FAILED";
+  // Native paths and filesystem error details stay outside renderer-facing errors.
+  return fail(code);
+}
 const abortError = () => Object.assign(new Error("The archive transfer was cancelled."), { name: "AbortError" });
 const same = (a, b) => ["dev", "ino", "size", "mtimeNs", "ctimeNs"].every(key => a[key] === b[key]);
 
@@ -22,37 +32,56 @@ function parseVaultArguments(args, cwd = process.cwd(), platform = process.platf
   const input = args.slice(index + 2), paths = platform === "win32" ? path.win32 : path;
   if (typeof cwd !== "string" || cwd.length > 32768 || /[\p{Cc}]/u.test(cwd) || !paths.isAbsolute(cwd) || !input.length || input.length > MAX_SELECTION || input.some(value =>
     typeof value !== "string" || !value || value.length > 32768 || /[\p{Cc}]/u.test(value))) return null;
-  const selected = [...new Set(input.map(value => paths.resolve(cwd, value)))];
-  return selected.length ? selected : null;
+  const selected = [];
+  for (const value of input) {
+    let file = value;
+    if (/^file:/iu.test(value)) {
+      // File managers can supply GFile URIs instead of native paths. Never
+      // reinterpret a URI as a relative filename or accept a remote authority.
+      if (!/^file:\/\/(?:localhost)?\//iu.test(value) || /[?#]/u.test(value) || /%(?:2f|5c)/iu.test(value)) return null;
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "file:" || url.hostname || url.username || url.password || url.port || url.search || url.hash || url.pathname.startsWith("//")) return null;
+        file = fileURLToPath(url, { windows: platform === "win32" });
+      } catch { return null; }
+      if (!paths.isAbsolute(file) || /[\p{Cc}]/u.test(file)) return null;
+    } else if (!paths.isAbsolute(value) && /^[a-z][a-z0-9+.-]*:/iu.test(value)) {
+      return null;
+    }
+    selected.push(paths.resolve(cwd, file));
+  }
+  const unique = [...new Set(selected)];
+  return unique.length ? unique : null;
 }
 function safeName(value) {
   if (!value || value === "." || value === ".." || /[\/\\:*?"<>|\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(value) ||
-      /[. ]$/u.test(value) || /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/iu.test(value) || Buffer.byteLength(value) > 255) throw fail();
+      /[. ]$/u.test(value) || /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/iu.test(value) || Buffer.byteLength(value) > 255) throw fail("VAULT_INVALID_NAME");
   return value;
 }
 async function planArchive(selected, { signal, maxBytes = MAX_ARCHIVE_BYTES, maxEntries = MAX_ENTRIES, maxDepth = MAX_DEPTH } = {}) {
   if (!Array.isArray(selected) || !selected.length || selected.length > MAX_SELECTION ||
-      selected.some(value => typeof value !== "string" || !path.isAbsolute(value))) throw fail();
+      selected.some(value => typeof value !== "string" || !path.isAbsolute(value))) throw fail("VAULT_ARCHIVE_FAILED");
   const entries = [], names = [], seen = new Set();
   let totalBytes = 0, metadataBytes = 0;
   const check = () => { signal?.throwIfAborted(); };
   async function walk(file, name, depth, ancestors) {
     check();
-    if (depth > maxDepth || entries.length >= maxEntries) throw fail();
+    if (depth > maxDepth || entries.length >= maxEntries) throw fail("VAULT_LIMIT");
     const parts = name.split("/"); parts.forEach(safeName);
     const folded = name.normalize("NFC").toLocaleLowerCase("en-US");
-    if (seen.has(folded)) throw fail();
+    if (seen.has(folded)) throw fail("VAULT_INVALID_NAME");
     seen.add(folded);
     metadataBytes += Buffer.byteLength(name);
-    if (metadataBytes > 1024 * 1024) throw fail();
+    if (metadataBytes > 1024 * 1024) throw fail("VAULT_LIMIT");
     const info = await lstat(file, { bigint: true }); check();
-    if (info.isSymbolicLink() || (!info.isFile() && !info.isDirectory())) throw fail();
+    if (info.isSymbolicLink()) throw fail("VAULT_SYMLINK");
+    if (!info.isFile() && !info.isDirectory()) throw fail("VAULT_ARCHIVE_FAILED");
     const entry = { file, name, info, ancestors };
     entries.push(entry);
     if (info.isFile()) {
-      if (info.size > BigInt(maxBytes)) throw fail();
+      if (info.size > BigInt(maxBytes)) throw fail("VAULT_LIMIT");
       totalBytes += Number(info.size);
-      if (!Number.isSafeInteger(totalBytes) || totalBytes > maxBytes) throw fail();
+      if (!Number.isSafeInteger(totalBytes) || totalBytes > maxBytes) throw fail("VAULT_LIMIT");
     } else {
       const children = await readdir(file); check();
       children.sort();
@@ -68,19 +97,22 @@ async function planArchive(selected, { signal, maxBytes = MAX_ARCHIVE_BYTES, max
       await walk(file, name, 0, []);
     }
     return { entries, names, totalBytes };
-  } catch (error) { if (error.name === "AbortError") throw error; throw fail(); }
+  } catch (error) { throw failure(error); }
 }
 async function createVaultArchive(plan, { signal } = {}) {
-  if (!plan || !Array.isArray(plan.entries) || !plan.entries.length || plan.entries.length > MAX_ENTRIES) throw fail();
+  if (!plan || !Array.isArray(plan.entries) || !plan.entries.length || plan.entries.length > MAX_ENTRIES) throw fail("VAULT_ARCHIVE_FAILED");
   signal?.throwIfAborted();
   const zip = new ZipFile(), sources = new Set(), handles = new Set();
   let closed = false, error = null, position = 0, reading = false, pending = null;
   const controller = new AbortController();
-  const check = () => { if (closed || signal?.aborted || controller.signal.aborted) throw abortError(); };
+  const check = () => {
+    if (closed) throw error || abortError();
+    if (signal?.aborted || controller.signal.aborted) throw abortError();
+  };
   function stop(reason) {
     if (closed) return;
     closed = true;
-    error ||= reason || abortError();
+    error ||= reason ? failure(reason) : abortError();
     controller.abort();
     for (const source of sources) source.destroy(error);
     zip.outputStream.destroy(error);
@@ -115,7 +147,7 @@ async function createVaultArchive(plan, { signal } = {}) {
       const after = await handle.stat({ bigint: true }); check();
       if (!same(before, after)) throw fail();
       await verifyAncestors(entry);
-    } catch (caught) { throw caught.name === "AbortError" ? caught : fail(); }
+    } catch (caught) { throw failure(caught); }
     finally { if (handle) { handles.delete(handle); await handle.close().catch(() => {}); } }
   }
   try {
@@ -134,14 +166,14 @@ async function createVaultArchive(plan, { signal } = {}) {
       zip.end(total => { zip.off("error", reject); resolve(total); });
     });
     check();
-    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_ARCHIVE_BYTES) throw fail();
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_ARCHIVE_BYTES) throw fail("VAULT_LIMIT");
     const iterator = zip.outputStream[Symbol.asyncIterator]();
     const archive = {
       id: randomUUID(), name: `ZeloteZ-Vault-${new Date().toISOString().slice(0, 10)}.zip`, type: "application/zip", size,
       async read(offset, length) {
         check();
         if (reading || offset !== position || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length) ||
-            length < 1 || length > MAX_READ_BYTES || offset + length > size) throw fail();
+            length < 1 || length > MAX_READ_BYTES || offset + length > size) throw fail("VAULT_ARCHIVE_FAILED");
         reading = true;
         const result = Buffer.alloc(length); let written = 0;
         try {
@@ -180,7 +212,7 @@ async function createVaultArchive(plan, { signal } = {}) {
     return archive;
   } catch (caught) {
     signal?.removeEventListener("abort", onAbort); stop(caught);
-    throw caught.name === "AbortError" ? caught : fail();
+    throw failure(caught);
   }
 }
 module.exports = { parseVaultArguments, planArchive, createVaultArchive, MAX_READ_BYTES, MAX_ARCHIVE_BYTES, MAX_SELECTION };

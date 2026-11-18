@@ -7,6 +7,7 @@ const { access, lstat, stat, mkdir, open, rename, rm, writeFile } = require("nod
 const { homedir } = require("node:os");
 const path = require("node:path");
 const { promisify } = require("node:util");
+const { providerMarker, pythonMenuEntry, detectPythonProvider } = require("./vault-menu-provider.cjs");
 const run = promisify(execFile);
 const label = "Share securely via Vault";
 const marker = "X-ZeloteZ-Vault-Managed=v1";
@@ -16,7 +17,6 @@ const registryMarker = "ZeloteZVaultManaged";
 const registryKeys = ["HKCU\\Software\\Classes\\*\\shell\\ZeloteZVault", "HKCU\\Software\\Classes\\Directory\\shell\\ZeloteZVault"];
 const managers = ["nautilus", "nemo", "caja", "dolphin", "thunar"];
 const invalid = () => new Error("The Vault desktop integration could not be changed safely.");
-function shellQuote(value) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
 function commandQuote(value) { return '"' + value.replace(/["`$\\]/gu, c => "\\" + c) + '"'; }
 function desktopQuote(value) { return commandQuote(value).replaceAll("\\", "\\\\").replaceAll("%", "%%"); }
 function xml(value) { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;"); }
@@ -44,8 +44,10 @@ async function save(file, body, previous, mode) {
 }
 function owned(value, manager) {
   if (manager === "thunar") return value.includes(begin) && value.includes(end) && value.split(begin).length === 2 && value.split(end).length === 2;
-  return value.split(/\r?\n/u).includes(manager === "nautilus" || manager === "caja" ? "# " + marker : marker);
+  return value.split(/\r?\n/u).includes(manager === "nautilus" || manager === "caja" ? "# " + providerMarker : marker);
 }
+const pythonManager = manager => manager === "nautilus" || manager === "caja";
+const legacyOwned = value => value.split(/\r?\n/u).includes("# " + marker);
 function thunarBlock(command) {
   return `${begin}\n<action>\n<icon>folder-locked</icon>\n<name>${label}</name>\n<unique-id>zelotez-vault-v1</unique-id>\n<command>${xml(command)}</command>\n<description>Share an encrypted ZIP using ZeloteZ Vault</description>\n<patterns>*</patterns>\n<directories/>\n<audio-files/>\n<image-files/>\n<other-files/>\n<text-files/>\n<video-files/>\n</action>\n${end}`;
 }
@@ -65,18 +67,28 @@ function linuxFiles(env) {
   const data = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path.join(home, ".local", "share");
   const config = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path.join(home, ".config");
   return {
-    nautilus: path.join(data, "nautilus", "scripts", label),
-    caja: path.join(config, "caja", "scripts", label),
+    nautilus: path.join(data, "nautilus-python", "extensions", "zelotez_vault.py"),
+    caja: path.join(data, "caja-python", "extensions", "zelotez_vault.py"),
     nemo: path.join(data, "nemo", "actions", "zelotez-vault.nemo_action"),
     dolphin: path.join(data, "kio", "servicemenus", "zelotez-vault.desktop"),
     thunar: path.join(config, "Thunar", "uca.xml"),
   };
 }
+function legacyLinuxFiles(env) {
+  const home = env.HOME || homedir();
+  const data = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path.join(home, ".local", "share");
+  const config = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path.join(home, ".config");
+  return { nautilus: path.join(data, "nautilus", "scripts", label), caja: path.join(config, "caja", "scripts", label) };
+}
 function linuxEntry(manager, image) {
-  if (manager === "nautilus" || manager === "caja") return `#!/bin/sh\n# ${marker}\nexec ${shellQuote(image)} --vault-share -- "$@"\n`;
+  if (pythonManager(manager)) return pythonMenuEntry(manager, image);
   const command = `/usr/bin/env -- ${desktopQuote(image)} --vault-share -- %F`;
   if (manager === "nemo") return `[Nemo Action]\nName=${label}\nComment=Share an encrypted ZIP using ZeloteZ Vault\nExec=${command}\nSelection=notnone\nExtensions=any;\nQuote=double\nUriScheme=file\n${marker}\n`;
   return `[Desktop Entry]\nType=Service\nMimeType=all/all;inode/directory;\nActions=ZeloteZVault;\nX-KDE-Priority=TopLevel\n${marker}\n\n[Desktop Action ZeloteZVault]\nName=${label}\nIcon=folder-locked\nExec=${command}\n`;
+}
+const thunarCommand = image => `/usr/bin/env -- ${commandQuote(image).replaceAll("%", "%%")} --vault-share -- %F`;
+function currentEntry(manager, body, image) {
+  return manager === "thunar" ? body.includes(thunarBlock(thunarCommand(image))) : body === linuxEntry(manager, image);
 }
 async function detectedManagers(env) {
   const found = [];
@@ -90,7 +102,8 @@ async function detectedManagers(env) {
   }
   return found;
 }
-function createVaultIntegration({ platform = process.platform, env = process.env, executable = process.execPath, execute = run } = {}) {
+function createVaultIntegration({ platform = process.platform, env = process.env, executable = process.execPath, execute = run,
+  providerStatus = manager => detectPythonProvider(manager, env, execute) } = {}) {
   const registryTool = path.win32.join(env.SystemRoot || env.WINDIR || "C:\\Windows", "System32", "reg.exe");
   const command = (file, args) => execute(file === "reg.exe" ? registryTool : file, args, { windowsHide: true, timeout: 5000, maxBuffer: 16384 });
   async function windowsOwned(registryKey) {
@@ -109,19 +122,39 @@ function createVaultIntegration({ platform = process.platform, env = process.env
       return { supported: true, installed: ownedStates.every(Boolean), anyInstalled: ownedStates.some(Boolean), managers: ["windows"], conflicts: existing.flatMap((v, i) => v && !ownedStates[i] ? [registryKeys[i]] : []) };
     }
     if (platform !== "linux") return { supported: false, installed: false, managers: [], conflicts: [] };
-    const available = await detectedManagers(env), files = linuxFiles(env);
-    const conflicts = [], installed = [];
+    const detected = await detectedManagers(env), files = linuxFiles(env), legacy = legacyLinuxFiles(env), image = env.APPIMAGE;
+    const validImage = typeof image === "string" && path.isAbsolute(image) && !/[\p{Cc}]/u.test(image);
+    const conflicts = [], configured = [], migrationManagers = [], legacyManagers = [], available = [], missingDependencies = [];
+    for (const manager of detected) {
+      if (!pythonManager(manager)) { available.push(manager); continue; }
+      const capability = await providerStatus(manager);
+      if (capability?.python === true && capability?.loader === true) available.push(manager);
+      else missingDependencies.push({ manager, component: manager === "nautilus" ? "nautilus-python" : "python-caja",
+        python: capability?.python === true, loader: capability?.loader === true });
+    }
     for (const manager of managers) {
       let body;
       try { body = await contents(files[manager]); }
       catch { conflicts.push(manager); continue; }
-      if (body !== null && owned(body, manager)) installed.push(manager);
+      if (body !== null && owned(body, manager)) {
+        configured.push(manager);
+        if (available.includes(manager) && validImage && !currentEntry(manager, body, image)) migrationManagers.push(manager);
+      }
       else if (body !== null && manager !== "thunar") conflicts.push(manager);
     }
-    const image = env.APPIMAGE;
-    const supported = typeof image === "string" && path.isAbsolute(image) && !/[\p{Cc}]/u.test(image) && available.length > 0 &&
+    for (const [manager, file] of Object.entries(legacy)) {
+      const body = await contents(file).catch(() => null);
+      if (body !== null && legacyOwned(body)) {
+        legacyManagers.push(manager);
+        if (available.includes(manager) && !migrationManagers.includes(manager)) migrationManagers.push(manager);
+      }
+    }
+    const installed = configured.filter(manager => available.includes(manager));
+    const supported = validImage && available.length > 0 &&
       (await stat(image).catch(() => null))?.isFile() === true && await access(image, X_OK).then(() => true, () => false);
-    return { supported, installed: installed.length > 0, managers: available, installedManagers: installed, conflicts };
+    return { supported, installed: detected.length > 0 && detected.every(manager => installed.includes(manager)) && !migrationManagers.length,
+      anyInstalled: configured.length > 0 || legacyManagers.length > 0, managers: detected, availableManagers: available,
+      installedManagers: installed, configuredManagers: configured, migrationManagers, missingDependencies, conflicts };
   }
   async function install() {
     const current = await status();
@@ -138,11 +171,17 @@ function createVaultIntegration({ platform = process.platform, env = process.env
       return status();
     }
     const files = linuxFiles(env), image = env.APPIMAGE;
-    for (const manager of current.managers) {
+    for (const manager of current.availableManagers) {
       const file = files[manager], previous = await contents(file);
       if (manager !== "thunar" && previous !== null && !owned(previous, manager)) throw invalid();
-      const body = manager === "thunar" ? editThunar(previous, `/usr/bin/env -- ${commandQuote(image).replaceAll("%", "%%")} --vault-share -- %F`) : linuxEntry(manager, image);
-      if (body !== previous) await save(file, body, previous, manager === "nautilus" || manager === "caja" || manager === "dolphin" ? 0o700 : 0o600);
+      const body = manager === "thunar" ? editThunar(previous, thunarCommand(image)) : linuxEntry(manager, image);
+      if (body !== previous) await save(file, body, previous, manager === "dolphin" ? 0o700 : 0o600);
+      // Remove only our marked old Scripts action after its direct provider is
+      // installed. Foreign scripts and other providers remain untouched.
+      if (pythonManager(manager)) {
+        const oldFile = legacyLinuxFiles(env)[manager], old = await contents(oldFile).catch(() => null);
+        if (old !== null && legacyOwned(old) && await contents(oldFile) === old) await rm(oldFile);
+      }
     }
     return status();
   }
@@ -158,9 +197,13 @@ function createVaultIntegration({ platform = process.platform, env = process.env
         if (manager === "thunar") await save(file, editThunar(previous, null), previous, 0o600);
         else if (await contents(file) === previous) await rm(file);
       }
+      for (const file of Object.values(legacyLinuxFiles(env))) {
+        const previous = await contents(file).catch(() => null);
+        if (previous !== null && legacyOwned(previous) && await contents(file) === previous) await rm(file);
+      }
     }
     return status();
   }
   return { status, install, remove };
 }
-module.exports = { createVaultIntegration, detectedManagers, linuxFiles, label, marker, editThunar };
+module.exports = { createVaultIntegration, detectedManagers, linuxFiles, legacyLinuxFiles, label, marker, providerMarker, editThunar };

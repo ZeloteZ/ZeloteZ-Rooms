@@ -81,13 +81,19 @@ Use the share list to **revoke** access. Deleting the original file also ends it
 
 In the Windows or Linux desktop app, open the gear button **Vault settings → File manager integration**. Installation and removal are explicit actions with a native confirmation. A browser alone cannot install an operating-system context menu.
 
-The entry is named **Share securely via Vault**. Windows Explorer is supported. On Linux, available **Files/Nautilus, Nemo, Caja, Dolphin, and Thunar** installations are detected automatically. GNOME Files and Caja expose scripts in their **Scripts** submenu; Windows 11 may place the entry under **Show more options**. Reopen the file-manager window if its menu has not refreshed.
+The entry is named **Share securely via Vault**. Windows Explorer is supported. On Linux, available **Files/Nautilus, Nemo, Caja, Dolphin, and Thunar** installations are detected automatically. Nautilus and Caja show the action directly in the file-selection context menu. Windows 11 may place the entry under **Show more options**.
+
+Nautilus and Caja require their Python extension support: `nautilus-python` or `python-caja`. Package names vary by distribution. If support is missing, Vault shows the required component; install the corresponding distribution package and restart Rooms and the file manager.
+
+If an earlier Rooms version installed a managed entry under **Scripts**, choose **Update context menu**. This installs the direct entry and removes the old managed script. Other scripts, extensions, and custom actions are preserved.
+
+After installing, updating, or removing the integration, **completely restart the Linux file manager**. Opening another window alone may not load or remove its context-menu extension.
 
 Select a local file or folder and invoke the entry. Rooms opens Vault, shows the destination instance and selection for confirmation, creates a ZIP locally, and encrypts it in chunks before uploading. No unencrypted temporary ZIP is written to disk. The originals remain unchanged. After uploading, choose a recipient or create a link in the sharing dialog. If another dialog is still open, a notification directs you to the uploaded ZIP’s file menu instead.
 
 Folders include their regular contents, including hidden files. Symbolic links and special files are rejected; changed files, unsafe archive paths, and selections exceeding the configured limits abort the operation. Keep selected files unchanged until completion.
 
-Select **Remove context menu** to remove the managed entries. Other custom actions are preserved. Keep a Linux AppImage in its permanent location; after moving it or updating to a different path, install the integration again to update the launcher.
+Select **Remove context menu** to remove the managed entries. Keep a Linux AppImage in its permanent location. After moving it or updating to a different path, open the new AppImage and choose **Update context menu** to update the launcher, then restart the file manager.
 
 ## Privacy and recovery
 

@@ -24,6 +24,32 @@ function installVaultIpc({ ipcMain, dialog, allowed, current, text = en => en, p
   const safeError = () => new Error(text("The local Vault operation failed or the selected files changed. Select them again and retry.",
     "Der lokale Vault-Vorgang ist fehlgeschlagen oder die Auswahl wurde verändert. Wähle sie erneut aus und versuche es noch einmal.",
     "本地 Vault 操作失败或所选文件已更改。请重新选择后重试。"));
+  function operationError(error) {
+    const messages = {
+      VAULT_UNREADABLE: ["A selected file or folder is unavailable or cannot be read. Check its location and access permissions.",
+        "Eine ausgewählte Datei oder ein Ordner ist nicht verfügbar oder kann nicht gelesen werden. Prüfe Speicherort und Zugriffsrechte.",
+        "所选文件或文件夹不可用或无法读取。请检查位置和访问权限。"],
+      VAULT_SELECTION_CHANGED: ["The selected files changed during preparation or transfer. Select them again and retry.",
+        "Die ausgewählten Dateien wurden während der Vorbereitung oder Übertragung verändert. Wähle sie erneut aus.",
+        "所选文件在准备或传输期间发生了变化。请重新选择后重试。"],
+      VAULT_INVALID_NAME: ["The selection contains a filename that cannot be stored safely in a portable ZIP. Rename it and retry.",
+        "Die Auswahl enthält einen Dateinamen, der nicht sicher in einem portablen ZIP gespeichert werden kann. Benenne ihn um und versuche es erneut.",
+        "所选内容包含无法安全存入跨平台 ZIP 的文件名。请重命名后重试。"],
+      VAULT_SYMLINK: ["Symbolic links and special files cannot be archived. Select regular files or folders instead.",
+        "Symbolische Links und Spezialdateien können nicht archiviert werden. Wähle reguläre Dateien oder Ordner.",
+        "无法归档符号链接或特殊文件。请选择普通文件或文件夹。"],
+      VAULT_LIMIT: ["The selection exceeds the archive limits. Select fewer files or a smaller folder.",
+        "Die Auswahl überschreitet die Archivgrenzen. Wähle weniger Dateien oder einen kleineren Ordner.",
+        "所选内容超出归档限制。请选择更少的文件或更小的文件夹。"],
+      VAULT_ARCHIVE_FAILED: ["The local ZIP could not be prepared. Select the files again or restart the desktop app.",
+        "Das lokale ZIP konnte nicht vorbereitet werden. Wähle die Dateien erneut aus oder starte die Desktop-App neu.",
+        "无法准备本地 ZIP。请重新选择文件或重启桌面应用。"],
+      VAULT_CONFIRM_FAILED: ["The file confirmation could not be opened. Restart the desktop app and retry.",
+        "Die Dateibestätigung konnte nicht geöffnet werden. Starte die Desktop-App neu und versuche es erneut.",
+        "无法打开文件确认窗口。请重启桌面应用后重试。"],
+    };
+    return Object.hasOwn(messages, error?.code ?? "") ? new Error(text(...messages[error.code])) : safeError();
+  }
   function selection() {
     return pending?.length ? { available: true, count: pending.length } : null;
   }
@@ -60,7 +86,9 @@ function installVaultIpc({ ipcMain, dialog, allowed, current, text = en => en, p
       }
       return true;
     }
-    const combined = [...new Set([...(pending || []), ...files])];
+    // File managers may launch once per selected item in a short burst. A later
+    // context-menu action is a new selection, including after a failed prepare.
+    const combined = [...new Set([...(announcementTimer !== null ? pending || [] : []), ...files])];
     if (combined.length > MAX_SELECTION) return false;
     pending = combined;
     void reset({ keepPending: true });
@@ -77,17 +105,19 @@ function installVaultIpc({ ipcMain, dialog, allowed, current, text = en => en, p
     return receiveFiles(parseVaultArguments(["--vault-share", "--", ...value.paths], value.cwd, platform));
   }
   async function confirm(context, message, detail) {
-    const result = await dialog.showMessageBox(context.window, {
-      type: "question", message, detail, noLink: true, defaultId: 1, cancelId: 1,
-      buttons: [text("Continue", "Fortfahren", "继续"), text("Cancel", "Abbrechen", "取消")],
-    });
-    return result.response === 0;
+    try {
+      const result = await dialog.showMessageBox(context.window, {
+        type: "question", message, detail, noLink: true, defaultId: 1, cancelId: 1,
+        buttons: [text("Continue", "Fortfahren", "继续"), text("Cancel", "Abbrechen", "取消")],
+      });
+      return result.response === 0;
+    } catch { throw Object.assign(new Error("Vault confirmation unavailable."), { code: "VAULT_CONFIRM_FAILED" }); }
   }
   function handle(name, action) {
     ipcMain.handle(name, async (event, ...args) => {
       if (!allowed(event)) return null;
       try { return await action(event, ...args); }
-      catch { throw safeError(); }
+      catch (error) { throw operationError(error); }
     });
   }
   handle("rooms:vault-integration-status", async () => {

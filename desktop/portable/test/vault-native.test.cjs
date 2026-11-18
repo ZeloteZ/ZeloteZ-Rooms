@@ -47,14 +47,14 @@ test("CLI requires an explicit separator and resolves second-instance relative p
 test("Linux integration detects all installed managers and preserves exact hostile path arguments", async t => {
   const f = await fixture(t);
   for (const manager of ["nautilus", "nemo", "caja", "dolphin", "thunar"]) await f.addManager(manager);
-  const integration = createVaultIntegration({ platform: "linux", env: f.env });
+  const integration = createVaultIntegration({ platform: "linux", env: f.env, providerStatus: async () => ({ python: true, loader: true }) });
   const status = await integration.install();
   assert.deepEqual(status.managers, ["nautilus", "nemo", "caja", "dolphin", "thunar"]);
   assert.equal(status.installed, true);
-  const files = linuxFiles(f.env), argsFile = path.join(f.home, "args");
-  const supplied = ["/tmp/a space", "/tmp/$(touch NEVER)", "/tmp/a'quote", "/tmp/a\"quote", "/tmp/back\\slash"];
-  await execute(files.nautilus, supplied, { env: { ...process.env, VAULT_ARGUMENTS: argsFile } });
-  assert.deepEqual((await readFile(argsFile)).toString().split("\0").slice(0, -1), ["--vault-share", "--", ...supplied]);
+  const files = linuxFiles(f.env);
+  const provider = await readFile(files.nautilus, "utf8");
+  assert.ok(provider.includes("Nautilus.MenuProvider"));
+  assert.ok(provider.includes("subprocess.Popen([_APPIMAGE, \"--vault-share\", \"--\", *paths]"));
   assert.ok((await readFile(files.dolphin, "utf8")).includes(" %F\n"));
   assert.ok((await readFile(files.dolphin, "utf8")).includes("100%%.AppImage"));
   assert.ok((await readFile(files.nemo, "utf8")).includes("Quote=double"));
@@ -87,7 +87,7 @@ test("foreign manager files, symlinks and unrelated Thunar actions are preserved
 
 test("removal also cleans owned entries for managers no longer present", async t => {
   const f = await fixture(t); await f.addManager("nautilus");
-  const integration = createVaultIntegration({ platform: "linux", env: f.env });
+  const integration = createVaultIntegration({ platform: "linux", env: f.env, providerStatus: async () => ({ python: true, loader: true }) });
   await integration.install();
   await unlink(path.join(f.env.PATH, "nautilus"));
   await integration.remove();

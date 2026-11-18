@@ -328,6 +328,9 @@ test('partial file-manager integration remains removable and offers updating new
     { any: true, complete: false, partial: true })
   assert.deepEqual(helpers.vaultIntegrationState({ managers: ['windows'], installed: false, anyInstalled: true }),
     { any: true, complete: false, partial: true })
+  assert.deepEqual(helpers.vaultIntegrationState({ managers: ['nautilus'], installed: true,
+    installedManagers: ['nautilus'], migrationManagers: ['nautilus'] }),
+    { any: true, complete: false, partial: true })
 })
 
 test('save-file suggestions neutralize Windows reserved names and characters without changing file data', async t => {

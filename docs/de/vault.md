@@ -81,13 +81,19 @@ Mit **Widerrufen** in der Freigabeliste beendest du den Zugriff. Auch das Lösch
 
 Öffne in der Desktop-App unter Windows oder Linux das Zahnrad **Vault-Einstellungen → Dateimanager-Integration**. Installation und Entfernen erfolgen ausdrücklich über die zugehörigen Buttons und eine native Bestätigung. Ein Browser allein kann kein Kontextmenü im Betriebssystem installieren.
 
-Der Eintrag heißt **Share securely via Vault**. Unterstützt werden Windows Explorer und unter Linux automatisch erkannte Installationen von **Dateien/Nautilus, Nemo, Caja, Dolphin und Thunar**. Bei GNOME Dateien und Caja liegt der Eintrag im Untermenü **Skripte**; Windows 11 zeigt ihn gegebenenfalls unter **Weitere Optionen anzeigen**. Öffne das Dateimanager-Fenster erneut, falls das Menü noch nicht aktualisiert wurde.
+Der Eintrag heißt **Share securely via Vault**. Unterstützt werden Windows Explorer und unter Linux automatisch erkannte Installationen von **Dateien/Nautilus, Nemo, Caja, Dolphin und Thunar**. Bei Nautilus und Caja erscheint die Aktion direkt im Kontextmenü der Dateiauswahl. Windows 11 zeigt sie gegebenenfalls unter **Weitere Optionen anzeigen**.
+
+Nautilus und Caja benötigen ihre Python-Erweiterungsunterstützung: `nautilus-python` beziehungsweise `python-caja`. Die Paketnamen können je nach Distribution abweichen. Fehlt die Unterstützung, zeigt Vault die benötigte Komponente an. Installiere das entsprechende Paket deiner Distribution und starte Rooms sowie den Dateimanager neu.
+
+Hat eine frühere Rooms-Version einen verwalteten Eintrag unter **Skripte** angelegt, wähle **Kontextmenü aktualisieren**. Dabei wird der direkte Eintrag installiert und das alte verwaltete Skript entfernt. Andere Skripte, Erweiterungen und eigene Aktionen bleiben erhalten.
+
+Starte den Linux-Dateimanager nach dem Installieren, Aktualisieren oder Entfernen der Integration **vollständig neu**. Ein weiteres Fenster allein lädt oder entfernt die Kontextmenü-Erweiterung möglicherweise nicht.
 
 Wähle eine lokale Datei oder einen Ordner und rufe den Eintrag auf. Rooms öffnet Vault, zeigt Zielinstanz und Auswahl zur Bestätigung, erstellt lokal ein ZIP und verschlüsselt es vor dem Upload stückweise. Es wird keine unverschlüsselte ZIP-Zwischendatei auf die Festplatte geschrieben. Die Originale bleiben unverändert. Nach dem Upload wählst du im Freigabedialog Empfänger oder Link. Ist noch ein anderer Dialog geöffnet, verweist eine Benachrichtigung stattdessen auf das Dateimenü des hochgeladenen ZIPs.
 
 Ordner enthalten ihre regulären Inhalte einschließlich versteckter Dateien. Symbolische Links und Spezialdateien werden abgewiesen. Geänderte Dateien, unsichere Archivpfade und eine Auswahl über den vorgesehenen Grenzen brechen den Vorgang ab. Verändere die Auswahl bis zum Abschluss nicht.
 
-Mit **Kontextmenü entfernen** entfernst du die verwalteten Einträge wieder. Andere eigene Aktionen bleiben erhalten. Bewahre ein Linux-AppImage am dauerhaften Ort auf. Nach Verschieben oder Update auf einen anderen Pfad installierst du die Integration erneut, um den Starter zu aktualisieren.
+Mit **Kontextmenü entfernen** entfernst du die verwalteten Einträge wieder. Bewahre ein Linux-AppImage am dauerhaften Ort auf. Nach Verschieben oder Update auf einen anderen Pfad öffnest du das neue AppImage und wählst **Kontextmenü aktualisieren**, um den Starter zu aktualisieren. Starte anschließend den Dateimanager neu.
 
 ## Datenschutz und Wiederherstellung
 

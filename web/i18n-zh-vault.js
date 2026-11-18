@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "Completely restart your file manager after installing, updating or removing its context-menu integration.": "安装、更新或移除右键菜单集成后，请完全重启文件管理器。",
+  "Python support is missing for a direct context-menu entry: {components}. Install the corresponding package for your distribution.": "直接右键菜单项缺少 Python 支持：{components}。请安装发行版对应的软件包。",
   "Administration": "管理",
   "Previous encryption password": "原加密密码",
   "Unlock encrypted data": "解锁加密数据",

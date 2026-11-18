@@ -32,7 +32,8 @@ export function vaultIntegrationState(value = {}) {
   const managers = Array.isArray(value.managers) ? value.managers : [];
   const installed = Array.isArray(value.installedManagers) ? value.installedManagers : null;
   const any = value.anyInstalled === true || value.installed === true || !!installed?.length;
-  const complete = installed ? managers.length > 0 && managers.every(manager => installed.includes(manager)) : value.installed === true;
+  const complete = installed ? managers.length > 0 && managers.every(manager => installed.includes(manager))
+    && !value.migrationManagers?.length : value.installed === true;
   return { any, complete, partial: any && !complete };
 }
 
@@ -525,18 +526,23 @@ export function renderVault(context) {
       el("h2", {}, t("File manager integration", "Dateimanager-Integration")),
       el("p", { class: "muted" }, t("Add “Share securely via Vault” to your file manager. Selected files and folders are compressed into a ZIP and encrypted on this device before upload.",
         "Ergänze „Share securely via Vault“ im Dateimanager. Ausgewählte Dateien und Ordner werden auf diesem Gerät als ZIP zusammengefasst und vor dem Upload verschlüsselt.")),
+      el("p", { class: "subtle" }, t("Completely restart your file manager after installing, updating or removing its context-menu integration.",
+        "Starte deinen Dateimanager nach dem Installieren, Aktualisieren oder Entfernen der Kontextmenü-Integration vollständig neu.")),
       info, el("div", { class: "inline" }, install, remove), pendingNote, create);
     async function statusIntegration() {
       try {
         const state = await desktop.integrationStatus();
         if (!current()) return;
         const integrationState = vaultIntegrationState(state);
+        const missing = [...new Set((state.missingDependencies ?? []).map(item => item.component).filter(item => typeof item === "string"))];
         install.disabled = !state.supported || !!state.conflicts?.length;
         remove.hidden = !integrationState.any;
         install.hidden = integrationState.complete;
         install.textContent = integrationState.partial ? t("Update context menu", "Kontextmenü aktualisieren") : t("Install context menu", "Kontextmenü installieren");
-        tell(info, !state.supported ? t("No supported file manager was found.", "Es wurde kein unterstützter Dateimanager gefunden.")
-          : state.conflicts?.length ? t("An existing context-menu entry could not be replaced safely.", "Ein vorhandener Kontextmenüeintrag konnte nicht sicher ersetzt werden.")
+        tell(info, state.conflicts?.length ? t("An existing context-menu entry could not be replaced safely.", "Ein vorhandener Kontextmenüeintrag konnte nicht sicher ersetzt werden.")
+          : missing.length ? t("Python support is missing for a direct context-menu entry: {components}. Install the corresponding package for your distribution.",
+            "Für einen direkten Kontextmenüeintrag fehlt die Python-Unterstützung: {components}. Installiere das entsprechende Paket deiner Distribution.", { components: missing.join(", ") })
+            : !state.supported ? t("No supported file manager was found.", "Es wurde kein unterstützter Dateimanager gefunden.")
             : (integrationState.partial ? t("Context menu installed for some file managers", "Kontextmenü für einige Dateimanager installiert")
               : integrationState.complete ? t("Context menu installed", "Kontextmenü installiert") : t("Context menu not installed", "Kontextmenü nicht installiert"))
               + (state.managers?.length ? " · " + state.managers.join(", ") : ""));
