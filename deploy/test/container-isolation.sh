@@ -37,6 +37,12 @@ if [[ "$status" != 'running healthy' ]]; then
 fi
 
 port=$(docker port "$container" 8080/tcp)
+[[ $(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "http://$port/api/vault") == 401 ]]
+curl --fail --silent --show-error "http://$port/vault" > "$fixtures/vault.html"
+vault_asset=$(sed -nE 's/.*src="([^"]+\/vault-share\.js)".*/\1/p' "$fixtures/vault.html")
+[[ "$vault_asset" =~ ^/assets/[a-f0-9]{32}/vault-share\.js$ ]]
+curl --fail --silent --show-error "http://$port$vault_asset" > "$fixtures/vault-share.js"
+[[ -s "$fixtures/vault-share.js" ]]
 curl --fail --silent --show-error -H 'X-Real-IP: 192.0.2.24' "http://$port/api/setup" | jq -e '.available == true'
 curl --fail --silent --show-error "http://$port/api/desktop/release" |
   jq -e '.product == "zelotez-rooms" and .protocol == 1 and (.version | (type == "string" and . != "999.0.0"))'
