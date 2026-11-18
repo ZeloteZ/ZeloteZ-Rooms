@@ -199,4 +199,3 @@ export function createVaultPlayback(media, { signal, onState, onError } = {}) {
     dispose,
   };
 }
-
