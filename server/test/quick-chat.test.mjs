@@ -74,7 +74,7 @@ test('temporary live chat delivers only the authorized device wrap and binds sen
   assert.equal(deviceId, guest.id)
   assert.equal(cursor, 1)
   assert.equal(messages.length, 1)
-  assert.deepEqual(messages[0], { id: messageId, from: owner.id, guest: false, name: 'Signed-in friend',
+  assert.deepEqual(messages[0], { id: messageId, from: owner.id, own: false, guest: false, name: 'Signed-in friend',
     sentAt: messages[0].sentAt, publicKey: owner.publicKey,
     envelope: { nonce: encryptedMessage.nonce, blob: encryptedMessage.blob, key: encryptedMessage.keys[guest.id] } })
   assert.deepEqual((await read(guest, cursor)).body.messages, [])
@@ -125,6 +125,31 @@ test('browser chat keys encrypt messages for each current device', async t => {
   assert.equal(await guestKeys.open(received), content)
   await assert.rejects(outsideKeys.open(received))
   await assert.rejects(guestKeys.open({ ...received, id: randomUUID() }))
+})
+
+test('temporary chat encrypts quote references without copying the original text', async t => {
+  const { viewer, join, read, send } = fixture(t)
+  const roomId = randomUUID()
+  const [hostKeys, guestKeys] = await Promise.all([createQuickChatCrypto(roomId), createQuickChatCrypto(roomId)])
+  const host = { ...viewer(roomId), id: hostKeys.deviceId, publicKey: hostKeys.publicKey }
+  const guest = { ...viewer(roomId, true), id: guestKeys.deviceId, publicKey: guestKeys.publicKey }
+  await join(host)
+  const { peers } = (await join(guest)).body
+  const original = randomUUID()
+  await send(host, await hostKeys.seal(original, 'Original message', peers), original)
+  const id = randomUUID()
+  const reply = await guestKeys.seal(id, 'My reply', peers, original)
+  await assert.rejects(send(guest, { ...reply, reply: { nonce: data(12), blob: data(53) } }, id), { status: 400 })
+  const posted = (await send(guest, reply, id)).body.messages[0]
+  assert.equal(posted.own, true)
+  const received = (await read(host, 1)).body.messages[0]
+  assert.equal(received.own, false)
+  assert.ok(!JSON.stringify(received).includes(original))
+  assert.equal(await hostKeys.open(received), 'My reply')
+  assert.deepEqual(await hostKeys.open(received, { includeReply: true }), { text: 'My reply', replyTo: original })
+  const unrelated = await guestKeys.seal(randomUUID(), 'Unrelated reply', peers, original)
+  received.envelope.reply = unrelated.reply
+  assert.deepEqual(await hostKeys.open(received, { includeReply: true }), { text: 'My reply', replyTo: undefined })
 })
 
 test('revoked credentials cannot access chat and replacement devices only see later messages', async t => {

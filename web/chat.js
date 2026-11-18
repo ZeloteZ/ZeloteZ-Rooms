@@ -3,6 +3,7 @@ import { locale, t } from "./i18n.js";
 import { createMentionDirectory, mentionComposer, renderMentionText } from "./mentions.js";
 import { createReactions } from "./reactions.js";
 import { canPreviewChatImage } from "./chat-media.js";
+import { foldMessageText, textPrefix } from "./message-overflow.js";
 
 const maxFiles = 4;
 const maxFileSize = 12 * 1024 * 1024;
@@ -10,7 +11,8 @@ const encryptedFileOverhead = 28; // 12-byte nonce and 16-byte authentication ta
 const automaticLoadSlots = 2;
 const maxCachedAttachments = 16;
 const maxCachedAttachmentBytes = 96 * 1024 * 1024;
-const attachmentId = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u;
+const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u;
+const httpLink = /https?:\/\/[^\s<>"']+/giu;
 const initialHistoryRows = 80;
 const imageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
 const videoTypes = new Set(["video/mp4", "video/webm", "video/ogg"]);
@@ -25,13 +27,13 @@ function updateMessageGroup(row) {
     row.dataset.authorId === previous?.dataset.authorId && distance >= 0 && distance <= messageGroupWindow);
 }
 
-function messageText(content, directory) {
+function renderedMessageText(content, directory, clipped) {
   const paragraph = el("p", { class: "message-text" });
   let preview;
   function linkify(text) {
     const parts = [];
     let offset = 0;
-    for (const match of text.matchAll(/https?:\/\/[^\s<>"']+/giu)) {
+    for (const match of text.matchAll(httpLink)) {
       const candidate = match[0].replace(/[.,!?;:)\]}]+$/u, "");
       const href = validHttpLink(candidate);
       if (!href) continue;
@@ -50,7 +52,31 @@ function messageText(content, directory) {
     return parts;
   }
   paragraph.append(...renderMentionText(content, directory, linkify));
-  return [paragraph, preview];
+  if (clipped) paragraph.append("…");
+  return preview ? [paragraph, preview] : [paragraph];
+}
+
+function messageText(content, directory) {
+  return foldMessageText(content.text, (text, clipped) => renderedMessageText({ ...content, text }, directory, clipped),
+    (text, end) => {
+      // Never turn a partial URL into a different destination or truncate a mention.
+      const boundary = end;
+      for (const match of text.matchAll(httpLink)) {
+        if (match.index >= boundary) break;
+        if (match.index + match[0].length > boundary) end = match.index;
+      }
+      for (const mark of Array.isArray(content.mentions) ? content.mentions.slice(0, 48) : []) {
+        if (Number.isSafeInteger(mark?.start) && mark.start >= 0 && mark.start < end && mark.end > end) end = mark.start;
+      }
+      return end;
+    });
+}
+
+function quotedText(text, attachments) {
+  const compact = typeof text === "string" ? text.trim().replace(/\s+/gu, " ") : "";
+  if (!compact) return attachments.length ? t("Attachment", "Anhang") : t("Quoted message", "Zitat");
+  const prefix = textPrefix(compact, 170);
+  return prefix === compact ? compact : prefix + "…";
 }
 
 function sizeLabel(bytes) {
@@ -69,7 +95,7 @@ function normalizeAttachments(entries) {
   if (!Array.isArray(entries)) return [];
   const files = new Map();
   for (const entry of entries) {
-    if (typeof entry?.id !== "string" || !attachmentId.test(entry.id) || files.has(entry.id)) continue;
+    if (typeof entry?.id !== "string" || !uuid.test(entry.id) || files.has(entry.id)) continue;
     files.set(entry.id, entry);
     if (files.size >= maxFiles) break;
   }
@@ -184,15 +210,20 @@ function renderAttachment(signal, file, key, fileEndpoint, retain) {
   return attachment;
 }
 
-export function renderChat(context, channel, edit) {
+export function renderChat(context, channel) {
   const { signal } = context;
   const timeFormat = new Intl.DateTimeFormat(locale(), { timeStyle: "short" });
   const messageEndpoint = "channels/" + identifier(channel.id) + "/messages";
   const fileEndpoint = "channels/" + identifier(channel.id) + "/files/";
   const rows = new Map();
   const tombstones = new Set();
+  const hiddenNotices = new Set();
   const departedSequences = new Map();
+  const quoteSources = new Map();
+  const quoteViews = new Map();
+  const rowQuotes = new WeakMap();
   const fileViews = new Map();
+  const canModerateRoom = !context.direct && ["owner", "admin"].includes(context.room?.role);
   const list = el("ol", { class: "message-list", role: "log", tabindex: "0", "aria-label": t("Messages", "Nachrichten"), "aria-live": "off" });
   const reactions = createReactions({ endpoint: messageEndpoint, scope: channel.id, user: context.user, signal, scroll: list });
   const attachmentJobs = new WeakMap();
@@ -223,8 +254,16 @@ export function renderChat(context, channel, edit) {
   const attach = button(el("span", { class: "composer-clip", "aria-hidden": "true" }), () => fileInput.click(),
     { class: "icon-button composer-attach", "aria-label": t("Attach files", "Dateien anhängen"), title: t("Attach files", "Dateien anhängen"), disabled: true });
   const attachments = el("ul", { class: "composer-attachments", hidden: true, "aria-label": t("Selected attachments", "Ausgewählte Anhänge") });
+  const quoteDraft = el("div", { class: "quote-draft", hidden: true });
+  const quoteDraftAuthor = el("strong", { class: "quote-author" });
+  const quoteDraftText = el("span", { class: "quote-excerpt" });
+  const removeQuote = button("×", () => {
+    selectQuote();
+    input.focus({ preventScroll: true });
+  }, { class: "ghost icon-button", "aria-label": t("Remove quote", "Zitat entfernen"), title: t("Remove quote", "Zitat entfernen") });
+  quoteDraft.append(el("div", { class: "quote-draft-copy" }, quoteDraftAuthor, quoteDraftText), removeQuote);
   const send = el("button", { class: "button primary", type: "submit", disabled: true }, t("Send", "Senden"));
-  const composer = el("form", { class: "message-form stack" }, attachments,
+  const composer = el("form", { class: "message-form stack" }, quoteDraft, attachments,
     el("div", { class: "write-row" }, attach, mentions.node, send),
     fileInput, feedback, el("p", { class: "composer-shortcuts", id: "message-shortcuts" },
       t("Enter to send · Shift + Enter for a new line", "Enter zum Senden · Umschalt + Enter für eine neue Zeile")));
@@ -246,10 +285,12 @@ export function renderChat(context, channel, edit) {
   let historyGeneration = 0;
   let timer;
   let pendingFocus;
+  let pendingQuoteJump = false;
   let locating = false;
   let highlighted;
   let highlightTimer;
   let canSend = context.direct?.canSend ?? true;
+  let quotedId;
 
   function releaseAttachment(attachment) {
     loadedBytes -= loadedAttachments.get(attachment) ?? 0;
@@ -292,7 +333,47 @@ export function renderChat(context, channel, edit) {
     send.disabled = busy || (!input.value.trim() && !files.length);
     fileInput.disabled = busy || files.length >= maxFiles;
     attach.disabled = fileInput.disabled;
+    removeQuote.disabled = busy;
     for (const remove of attachments.querySelectorAll("button")) remove.disabled = busy;
+  }
+
+  function selectQuote(id) {
+    const source = quoteSources.get(id);
+    quotedId = source ? id : undefined;
+    quoteDraft.hidden = !source;
+    quoteDraftAuthor.textContent = source?.author ?? "";
+    quoteDraftText.textContent = source?.excerpt ?? "";
+    updateSend();
+  }
+
+  function quoteView(id) {
+    const author = el("span", { class: "quote-author" }, t("Quoted message", "Zitat"));
+    const excerpt = el("span", { class: "quote-excerpt" });
+    const jump = button([author, excerpt], () => requestMessage(id, true),
+      { class: "message-quote-jump", title: t("Open quoted message", "Zitierte Nachricht öffnen") });
+    return { id, author, excerpt, jump, node: el("blockquote", { class: "message-quote" }, jump) };
+  }
+
+  function refreshQuoteViews(id) {
+    const source = quoteSources.get(id);
+    const unavailable = !source && (tombstones.has(id) || departedSequences.has(id) || rows.has(id));
+    for (const view of quoteViews.get(id) ?? []) {
+      view.author.textContent = source?.author ?? t("Quoted message", "Zitat");
+      view.excerpt.textContent = source?.excerpt ?? (unavailable
+        ? t("Quoted message is unavailable.", "Die zitierte Nachricht ist nicht verfügbar.")
+        : t("Open quoted message", "Zitierte Nachricht öffnen"));
+      view.jump.disabled = unavailable;
+    }
+    if (quotedId === id) selectQuote(id);
+  }
+
+  function stopTrackingQuote(row) {
+    const view = rowQuotes.get(row);
+    if (!view) return;
+    const references = quoteViews.get(view.id);
+    references.delete(view);
+    if (!references.size) quoteViews.delete(view.id);
+    rowQuotes.delete(row);
   }
 
   function updateDirect(canWrite) {
@@ -300,6 +381,7 @@ export function renderChat(context, channel, edit) {
     input.disabled = !canWrite;
     composer.hidden = !canWrite;
     unavailable.hidden = canWrite;
+    for (const quote of list.querySelectorAll(".message-quote-action")) quote.disabled = !canWrite;
     updateSend();
   }
 
@@ -361,15 +443,16 @@ export function renderChat(context, channel, edit) {
     tell(feedback, files.length ? t("Encrypting the message and attachments…", "Nachricht und Dateien werden verschlüsselt …") : "");
     const draft = mentions.finish();
     const pendingFiles = [...files];
+    const pendingQuote = quotedId;
     try {
       let result;
       try {
-        result = await sendMessage(draft, pendingFiles);
+        result = await sendMessage(draft, pendingFiles, pendingQuote);
       } catch (error) {
         if (error.status !== 409) throw error;
         const fresh = await api(messageEndpoint + "?after=" + newest, { signal });
         recipients = fresh.recipients ?? [];
-        result = await sendMessage(draft, pendingFiles);
+        result = await sendMessage(draft, pendingFiles, pendingQuote);
       }
       if (signal.aborted) return;
       input.value = "";
@@ -377,6 +460,7 @@ export function renderChat(context, channel, edit) {
       sizeInput();
       files = [];
       updateAttachments();
+      selectQuote();
       if (result?.message) await addMessages([result.message]);
       list.scrollTop = list.scrollHeight;
       tell(feedback, "");
@@ -394,7 +478,7 @@ export function renderChat(context, channel, edit) {
     }
   });
 
-  async function sendMessage(draft, fileList) {
+  async function sendMessage(draft, fileList, quoteId) {
     const id = crypto.randomUUID();
     const named = fileList.map(file => ({ id: crypto.randomUUID(), name: readableFilename(file.name), type: file.type || "application/octet-stream", size: file.size }));
     if (!recipients.length) {
@@ -404,6 +488,7 @@ export function renderChat(context, channel, edit) {
     if (!recipients.length) throw new Error(t("The members’ encryption keys are unavailable right now.", "Die Schlüssel der Mitglieder sind gerade nicht verfügbar."));
     const content = { text: draft.text, attachments: named };
     if (draft.mentions.length) content.mentions = draft.mentions;
+    if (quoteId) content.quoteId = quoteId;
     const { envelope, key } = await ClubCrypto.sealMessage(channel.id, id, content, recipients);
     for (const [index, file] of fileList.entries()) {
       const fileId = named[index].id;
@@ -441,6 +526,23 @@ export function renderChat(context, channel, edit) {
             rows.get(message.id)?.focus({ preventScroll: true });
           }
         }
+      }));
+  }
+
+  function confirmNoticeRemoval(message) {
+    showDialog(t("Remove deletion notice?", "Löschhinweis entfernen?"),
+      form([
+        el("p", { class: "muted" }, t("Remove this notice from the chat for everyone.", "Entferne diesen Hinweis für alle aus dem Chat.")),
+        button(t("Cancel", "Abbrechen"), closeDialog, { class: "ghost" }),
+      ], t("Remove notice", "Hinweis entfernen"), async () => {
+        const row = rows.get(message.id);
+        const next = row?.nextElementSibling ?? row?.previousElementSibling;
+        const result = await api(messageEndpoint + "/" + identifier(message.id) + "/notice", { method: "DELETE", signal });
+        if (signal.aborted) return;
+        await addMessages([result.message], { keepPosition: true });
+        if (signal.aborted) return;
+        closeDialog();
+        (next?.isConnected ? next : list).focus({ preventScroll: true });
       }));
   }
 
@@ -509,15 +611,7 @@ export function renderChat(context, channel, edit) {
     fileViews.delete(id);
   }
 
-  function removeMovedMessages(moves, focusId = null) {
-    const removed = new Set();
-    for (const { messageId, seq } of moves) {
-      if (typeof messageId !== "string" || !Number.isSafeInteger(seq) || seq < 1) continue;
-      const latest = Math.max(departedSequences.get(messageId) ?? 0, seq);
-      departedSequences.set(messageId, latest);
-      const row = rows.get(messageId);
-      if (row && Number(row.dataset.sequence) <= latest) removed.add(row);
-    }
+  function removeRows(removed, focusId = null) {
     if (!removed.size) return;
     const retained = Array.from(list.children).filter(row => !removed.has(row));
     const viewTop = list.getBoundingClientRect().top;
@@ -532,13 +626,48 @@ export function renderChat(context, channel, edit) {
       const next = row.nextElementSibling;
       releaseFiles(id);
       reactions.remove(id);
+      stopTrackingQuote(row);
+      quoteSources.delete(id);
       rows.delete(id);
       row.remove();
       updateMessageGroup(next);
     }
+    for (const row of removed) refreshQuoteViews(row.dataset.messageId);
     if (!rows.size) list.append(empty);
     if (anchor) list.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
     nextFocus?.focus({ preventScroll: true });
+  }
+
+  function removeMovedMessages(moves, focusId = null) {
+    const removed = new Set();
+    for (const { messageId, seq } of moves) {
+      if (typeof messageId !== "string" || !Number.isSafeInteger(seq) || seq < 1) continue;
+      const latest = Math.max(departedSequences.get(messageId) ?? 0, seq);
+      departedSequences.set(messageId, latest);
+      const row = rows.get(messageId);
+      if (row && Number(row.dataset.sequence) <= latest) removed.add(row);
+      else refreshQuoteViews(messageId);
+    }
+    removeRows(removed, focusId);
+  }
+
+  function recordDeletions(messages) {
+    const removed = new Set();
+    for (const message of messages) {
+      if (!message?.deleted) continue;
+      const { id } = message;
+      if (message.deleted.noticeHidden === true && !hiddenNotices.has(id)) {
+        hiddenNotices.add(id);
+        const row = rows.get(id);
+        if (row) removed.add(row);
+      }
+      if (!tombstones.has(id)) {
+        tombstones.add(id);
+        quoteSources.delete(id);
+        refreshQuoteViews(id);
+      }
+    }
+    removeRows(removed);
   }
 
   function resetMessageWindow() {
@@ -549,7 +678,11 @@ export function renderChat(context, channel, edit) {
     }
     rows.clear();
     tombstones.clear();
+    hiddenNotices.clear();
     departedSequences.clear();
+    quoteSources.clear();
+    quoteViews.clear();
+    selectQuote();
     oldest = Infinity;
     newest = 0;
     list.replaceChildren(empty);
@@ -569,19 +702,28 @@ export function renderChat(context, channel, edit) {
     let fileView;
     let reactionKey;
     let actions;
+    let source;
+    let quote;
     const cryptoScope = message.cryptoChannelId ?? channel.id;
     if (message.deleted) {
       body.append(await deletionNote(message, author));
+      if (canModerateRoom) {
+        const removeNotice = button(t("Remove notice", "Hinweis entfernen"), () => confirmNoticeRemoval(message),
+          { class: "ghost message-delete" });
+        actions = el("div", { class: "message-actions" }, removeNotice);
+      }
     } else {
       const own = context.user?.id === message.author?.id;
-      if (own || edit) {
+      actions = el("div", { class: "message-actions" });
+      if (own || canModerateRoom) {
         const remove = button(t("Delete", "Löschen"), () => confirmRemoval(message, own), { class: "ghost message-delete",
           "aria-label": own ? t("Delete your message", "Eigene Nachricht löschen")
             : t("Delete message from {name}", "Nachricht von {name} löschen", { name: author.displayName }) });
         const move = !context.direct && context.moveDestinations?.().length &&
           button(t("Move", "Verschieben"), () => confirmMove(message), { class: "ghost message-move", "aria-haspopup": "dialog",
             "aria-label": t("Move message from {name}", "Nachricht von {name} verschieben", { name: author.displayName }) });
-        actions = el("div", { class: "message-actions" }, move || null, remove);
+        if (move) actions.append(move);
+        actions.append(remove);
       }
       try {
         const result = await ClubCrypto.openMessage(cryptoScope, message.id, message.envelope, channel.id);
@@ -589,14 +731,30 @@ export function renderChat(context, channel, edit) {
           body.append(el("p", { class: "subtle" }, t("Your account does not have a key for this message.", "Für diese Nachricht ist auf deinem Konto kein Schlüssel verfügbar.")));
         } else {
           reactionKey = result.key;
-          const text = result.content?.text;
-          if (typeof text === "string" && text) body.append(...messageText(result.content, mentionDirectory).filter(Boolean));
-          const attachments = normalizeAttachments(result.content?.attachments);
+          const content = result.content;
+          const text = content?.text;
+          const quoteId = content?.quoteId;
+          if (typeof quoteId === "string" && uuid.test(quoteId) && quoteId !== message.id) {
+            quote = quoteView(quoteId);
+            body.append(quote.node);
+          }
+          if (typeof text === "string" && text) body.append(...messageText(content, mentionDirectory));
+          const attachments = normalizeAttachments(content?.attachments);
           if (attachments.length) {
             fileView = { controller: new AbortController() };
             const fileSignal = AbortSignal.any([signal, fileView.controller.signal]);
             fileView.attachments = attachments.map(attachment => renderAttachment(fileSignal, attachment, result.key, fileEndpoint, retainAttachment));
             body.append(...fileView.attachments.map(attachment => attachment.node));
+          }
+          if (message.author?.id && ((typeof text === "string" && text.trim()) || attachments.length || quote)) {
+            const name = message.author.displayName || t("Unknown", "Unbekannt");
+            source = { author: name, excerpt: quotedText(text, attachments) };
+            if (!own) actions.prepend(button(t("Quote", "Zitieren"), () => {
+              if (!canSend || sending || input.disabled || !quoteSources.has(message.id)) return;
+              selectQuote(message.id);
+              input.focus({ preventScroll: true });
+            }, { class: "ghost message-quote-action", disabled: !canSend,
+              "aria-label": t("Quote message from {name}", "Nachricht von {name} zitieren", { name }) }));
           }
         }
       } catch {
@@ -607,13 +765,14 @@ export function renderChat(context, channel, edit) {
       "data-author-id": !message.deleted && message.author?.id, "data-deleted": Boolean(message.deleted),
       "data-reason-granted": Boolean(message.deleted?.reason?.historyGrant),
       "data-history-grant-revision": historyGrant(message)?.revision,
-      tabindex: "-1", "data-sent-at": date.getTime() }, personMark(author), body, actions);
-    return { row, fileView, reactionKey, reactionMount: body, cryptoScope };
+      tabindex: "-1", "data-sent-at": date.getTime() }, personMark(author), body, actions?.childElementCount ? actions : null);
+    return { row, fileView, reactionKey, reactionMount: body, cryptoScope, source, quote };
   }
 
   async function addMessages(messages, { olderBatch = false, keepPosition = false } = {}) {
     const generation = historyGeneration;
     const canRender = message => {
+      if (hiddenNotices.has(message.id)) return false;
       const current = rows.get(message.id);
       const sequence = Number(message.seq);
       const currentSequence = Number(current?.dataset.sequence ?? 0);
@@ -626,7 +785,7 @@ export function renderChat(context, channel, edit) {
       }
       return !tombstones.has(message.id) && (!current || sequence > currentSequence || newerGrant);
     };
-    for (const message of messages) if (message?.deleted) tombstones.add(message.id);
+    recordDeletions(messages);
     const incoming = messages.filter(msg => msg && canRender(msg) && Number.isSafeInteger(Number(msg.seq)));
     if (!incoming.length) return;
     const elements = await Promise.all(incoming.map(async msg => [msg, await messageRow(msg)]));
@@ -639,7 +798,7 @@ export function renderChat(context, channel, edit) {
       row !== empty && row.getBoundingClientRect().bottom > viewTop);
     const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
     empty.remove();
-    for (const [msg, { row, fileView, reactionKey, reactionMount, cryptoScope }] of elements) {
+    for (const [msg, { row, fileView, reactionKey, reactionMount, cryptoScope, source, quote }] of elements) {
       if (!canRender(msg)) continue;
       const previous = rows.get(msg.id);
       const sequence = Number(msg.seq);
@@ -650,6 +809,8 @@ export function renderChat(context, channel, edit) {
       if (previous) {
         releaseFiles(msg.id);
         reactions.remove(msg.id);
+        stopTrackingQuote(previous);
+        quoteSources.delete(msg.id);
         const hadFocus = previous.contains(document.activeElement);
         previous.remove();
         if (hadFocus) row.focus({ preventScroll: true });
@@ -660,6 +821,14 @@ export function renderChat(context, channel, edit) {
       updateMessageGroup(row);
       updateMessageGroup(row.nextElementSibling);
       rows.set(msg.id, row);
+      if (source) quoteSources.set(msg.id, source);
+      if (quote) {
+        if (!quoteViews.has(quote.id)) quoteViews.set(quote.id, new Set());
+        quoteViews.get(quote.id).add(quote);
+        rowQuotes.set(row, quote);
+        refreshQuoteViews(quote.id);
+      }
+      refreshQuoteViews(msg.id);
       if (reactionKey) reactions.track(msg.id, reactionKey, row, reactionMount, cryptoScope);
       if (fileView) {
         fileViews.set(msg.id, fileView);
@@ -669,6 +838,7 @@ export function renderChat(context, channel, edit) {
         }
       }
     }
+    if (!rows.size) list.append(empty);
     if (anchor) list.scrollTop += (rows.get(anchor.dataset.messageId) ?? anchor).getBoundingClientRect().top - anchorTop;
     else if (olderBatch) list.scrollTop = preservedScroll + list.scrollHeight - preservedHeight;
     else if (wasNearEnd) list.scrollTop = list.scrollHeight;
@@ -696,9 +866,10 @@ export function renderChat(context, channel, edit) {
     }
   }
 
-  function requestMessage(id) {
-    if (typeof id !== "string" || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(id)) return;
+  function requestMessage(id, fromQuote = false) {
+    if (typeof id !== "string" || !uuid.test(id)) return;
     pendingFocus = id;
+    pendingQuoteJump = fromQuote;
     void locateMessage();
   }
 
@@ -719,7 +890,12 @@ export function renderChat(context, channel, edit) {
           highlightTimer = setTimeout(() => row.removeAttribute("data-mention-focus"), 4500);
           break;
         }
-        if (older.hidden || !await loadOlder()) break;
+        if (older.hidden || !await loadOlder()) {
+          if (pendingFocus === target && pendingQuoteJump && !signal.aborted) {
+            notify(t("Quoted message is unavailable.", "Die zitierte Nachricht ist nicht verfügbar."));
+          }
+          break;
+        }
       }
     } finally {
       locating = false;
@@ -779,10 +955,11 @@ export function renderChat(context, channel, edit) {
       removeMovedMessages(result.moves ?? []);
       if (Number.isSafeInteger(result.nextMovementVersion)) movementVersion = result.nextMovementVersion;
       const deletions = result.deletions ?? [];
-      for (const message of deletions) tombstones.add(message.id);
-      const visibleDeletions = deletions.filter(message => rows.has(message.id) || message.seq >= oldest);
+      recordDeletions(deletions);
+      const notices = deletions.filter(message => message.deleted?.noticeHidden !== true);
+      const visibleDeletions = notices.filter(message => rows.has(message.id) || message.seq >= oldest);
       await addMessages(visibleDeletions, { keepPosition: true });
-      if (visibleDeletions.length < deletions.length) older.hidden = false;
+      if (visibleDeletions.length < notices.length) older.hidden = false;
       if (Number.isSafeInteger(result.nextDeletionVersion)) deletionVersion = result.nextDeletionVersion;
       if (result.moreDeletions || result.moreMoves) delay = 1000;
       await addMessages(messages);
@@ -828,11 +1005,13 @@ export function renderChat(context, channel, edit) {
   }, { once: true });
 
   const liveLabel = context.liveChat ? t("Live chat", "Livechat") : undefined;
+  const roomTextChat = !context.direct && !context.liveChat;
+  const encryptionLabel = el("span", { class: "tag" }, t("End-to-end encrypted", "Ende-zu-Ende-verschlüsselt"));
   const pane = el("section", { class: "panel conversation" + (context.liveChat ? " live-channel-conversation" : ""), "aria-label": liveLabel },
-    el("div", { class: "conversation-heading section-heading" },
+    el("div", { class: "conversation-heading section-heading" + (roomTextChat ? " room-chat-heading" : "") },
       el("div", { class: "stack chat-title" }, el("h2", {}, context.direct?.name ?? liveLabel ?? "# " + channel.title),
-        el("span", { class: "tag" }, t("End-to-end encrypted", "Ende-zu-Ende-verschlüsselt"))),
-      edit),
+        !roomTextChat && encryptionLabel),
+      roomTextChat && encryptionLabel),
     el("div", { class: "chat-controls stack" }, older, connection),
     list,
     composer, context.direct && unavailable);

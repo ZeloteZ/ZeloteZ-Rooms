@@ -4,6 +4,7 @@ import { renderQuickChat } from "./quick-chat.js";
 import { watchQueue } from "./watch-queue.js";
 import { createWatchControls } from "./watch-controls.js";
 import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
+import { mountViewSidebar } from "./view-sidebar.js";
 
 const messages = {
   opening: ["Opening the live room…", "Live-Raum wird geöffnet …"],
@@ -105,6 +106,7 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
   const heading = find(".guest-heading");
   const title = find(".guest-room-title");
   const support = find(".quick-view-support");
+  const sidebar = mountViewSidebar(find(".quick-view-layout"), support, signal);
   const supportToolbar = find(".quick-view-support-toolbar");
   const supportTabs = find(".quick-view-support-tabs");
   const chatTab = find("button[data-pane=chat]");
@@ -222,6 +224,7 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
   const base = "/api/guest/" + publicId;
 
   function updateLabels() {
+    sidebar.updateLabels();
     gateTitle.textContent = t("Live room", "Live-Raum");
     setText(gateStatus, copy(gateState));
     passwordLabel.textContent = t("Password", "Passwort");

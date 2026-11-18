@@ -6,6 +6,7 @@ import { renderStreamChat } from "./stream-chat.js";
 import { createChannelCapture } from "./channel-capture.js";
 import { createWatchParty } from "./watch-party.js";
 import { canPlayDirectly, startWhep } from "./whep.js";
+import { mountViewSidebar } from "./view-sidebar.js";
 
 const viewerHeartbeat = 8000;
 const startupTimeout = 24000;
@@ -609,6 +610,7 @@ export function renderLive(context, channel, player, voiceMount, playerMount = e
 
   function showChatTarget(target) {
     if (!target?.messageId) return;
+    sidebar.open();
     setPanel("chat");
     showChannelChat();
     if (!target.streamId) {
@@ -888,16 +890,16 @@ export function renderLive(context, channel, player, voiceMount, playerMount = e
     setPanel(panel);
     tab.focus();
   }, { signal });
+  const body = el("div", { class: "live-channel-body" },
+    el("div", { class: "live-channel-watch" }, playerMount, preview,
+      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint));
+  const sidebar = mountViewSidebar(body, el("div", { class: "live-channel-support" },
+    el("div", { class: "live-channel-support-toolbar" }, watchActions, tablist), people, chatPanel, queuePanel), signal);
   const node = el("section", {
     class: "panel live-channel", "aria-label": channel.title,
   }, el("header", { class: "live-channel-toolbar" },
     el("div", { class: "live-channel-title" }, liveTitle),
-    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish), feedback),
-  el("div", { class: "live-channel-body" },
-    el("div", { class: "live-channel-watch" }, playerMount, preview,
-      nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint),
-    el("div", { class: "live-channel-support" },
-      el("div", { class: "live-channel-support-toolbar" }, watchActions, tablist), people, chatPanel, queuePanel)));
+    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish), feedback), body);
   updatePanels();
   node.addEventListener("open-message", event => {
     if (event.detail?.messageId) showChatTarget(event.detail);

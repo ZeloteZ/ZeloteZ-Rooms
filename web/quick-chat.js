@@ -1,5 +1,7 @@
 import { language, locale, t } from "./i18n.js";
 import { createQuickChatCrypto, forgetQuickChatDevice } from "./quick-chat-crypto.js";
+import { foldMessageText, textPrefix } from "./message-overflow.js";
+import { button, el } from "./ui.js";
 
 const messages = {
   connecting: ["Connecting to live chat…", "Livechat wird verbunden …"],
@@ -51,7 +53,10 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
   const form = pane.querySelector("form");
   const input = pane.querySelector("input");
   const send = pane.querySelector("button");
+  const quotePreview = el("div", { class: "quick-chat-quote-draft", hidden: true });
+  form.prepend(quotePreview);
   const endpoint = "/api/guest/" + encodeURIComponent(publicId) + "/chat";
+  const displayed = new Map();
 
   let connection = "connecting";
   let sendProblem = "";
@@ -66,10 +71,14 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
   let pending;
   let refreshing;
   let timer;
+  let quotedId;
 
   function update() {
     input.disabled = stopped || peers.length === 0;
     send.disabled = input.disabled || posting || !input.value.trim();
+    for (const { quoteAction } of displayed.values()) {
+      if (quoteAction) quoteAction.disabled = input.disabled || posting;
+    }
     empty.hidden = Boolean(connection || log.childElementCount);
     const message = messages[sendProblem || connection];
     const label = message ? t(...message) : "";
@@ -115,11 +124,67 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
     const format = timeFormat();
     for (const time of log.querySelectorAll("time")) time.textContent = format.format(new Date(time.dateTime));
     for (const name of log.querySelectorAll("[data-guest-name]")) name.textContent = guestName(name.dataset.guestName);
+    for (const record of displayed.values()) {
+      if (record.quoteAction) record.quoteAction.textContent = t("Quote", "Zitieren");
+    }
+    for (const toggle of log.querySelectorAll(".message-text-toggle")) {
+      toggle.textContent = toggle.getAttribute("aria-expanded") === "true" ? t("Less", "Weniger") : t("More…", "Mehr …");
+    }
+    refreshQuotes(true);
+    showQuote();
     update();
   }
 
   function guestName(name) {
     return t("Guest {name}", "Gast {name}", { name });
+  }
+
+  function quoteContent(record) {
+    const excerpt = textPrefix(record.text, 150, 2);
+    return [
+      el("strong", {}, record.guest ? guestName(record.name) : record.name),
+      el("span", {}, excerpt + (excerpt.length < record.text.length ? "…" : "")),
+    ];
+  }
+
+  function showQuote() {
+    const source = displayed.get(quotedId);
+    quotePreview.hidden = !source;
+    quotePreview.replaceChildren();
+    if (!source) return;
+    const remove = t("Remove quote", "Zitat entfernen");
+    quotePreview.append(el("blockquote", { class: "quick-chat-quote" }, ...quoteContent(source)),
+      button("×", () => { chooseQuote(); input.focus(); },
+        { class: "ghost quick-chat-quote-remove", "aria-label": remove, title: remove }));
+  }
+
+  function chooseQuote(id) {
+    if (quotedId === id) return;
+    quotedId = id;
+    pending = undefined;
+    showQuote();
+  }
+
+  function refreshQuotes(force = false) {
+    for (const record of displayed.values()) {
+      if (!record.quote) continue;
+      const source = displayed.get(record.replyTo);
+      if (!force && record.quoteSource === source && record.quote.hasChildNodes()) continue;
+      record.quoteSource = source;
+      if (source) {
+        record.quote.replaceChildren(button(quoteContent(source), () => {
+          source.row.scrollIntoView({ block: "nearest" });
+          source.row.focus({ preventScroll: true });
+        }, { class: "ghost quick-chat-quote-link" }));
+      } else record.quote.textContent = t("Quoted message is unavailable.", "Die zitierte Nachricht ist nicht verfügbar.");
+    }
+    if (quotedId && !displayed.has(quotedId)) chooseQuote();
+  }
+
+  function clearMessages() {
+    displayed.clear();
+    log.replaceChildren();
+    chooseQuote();
   }
 
   function stop(invalidate = false) {
@@ -133,7 +198,7 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
     device = undefined;
     pending = undefined;
     input.value = "";
-    log.replaceChildren();
+    clearMessages();
     update();
     pane.hidden = true;
   }
@@ -164,31 +229,40 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
 
   async function display(batch) {
     const format = timeFormat();
-    const rows = await Promise.all(batch.map(async message => {
+    const records = await Promise.all(batch.map(async message => {
       try {
-        const text = await device.open(message);
-        const row = document.createElement("li");
-        const byline = document.createElement("div");
-        const name = document.createElement("strong");
-        const time = document.createElement("time");
-        const body = document.createElement("p");
-        byline.className = "quick-chat-byline";
-        name.textContent = message.guest ? guestName(message.name) : message.name;
-        if (message.guest) name.dataset.guestName = message.name;
-        time.dateTime = message.sentAt;
-        time.textContent = format.format(new Date(time.dateTime));
-        body.textContent = text;
-        byline.append(name, time);
-        row.append(byline, body);
-        return row;
+        const { text, replyTo } = await device.open(message, { includeReply: true });
+        const { id, name, guest, sentAt } = message;
+        const author = el("strong", { "data-guest-name": guest ? name : undefined }, guest ? guestName(name) : name);
+        const time = el("time", { datetime: sentAt }, format.format(new Date(sentAt)));
+        const own = message.own ?? message.from === device.deviceId;
+        const quoteAction = !own && button(t("Quote", "Zitieren"), () => {
+          if (input.disabled || posting) return;
+          chooseQuote(id);
+          input.focus();
+        }, { class: "ghost quick-chat-quote-action" });
+        const quote = replyTo && el("blockquote", { class: "quick-chat-quote" });
+        const body = foldMessageText(text, (visible, clipped) => [el("p", {}, visible + (clipped ? "…" : ""))]);
+        const row = el("li", { tabindex: -1, "data-message-id": id },
+          el("div", { class: "quick-chat-byline" }, author, time, quoteAction), quote, body);
+        return { id, name, guest, row, text, replyTo, quote, quoteAction };
       } catch {
         return null;
       }
     }));
-    if (stopped) return;
+    if (stopped || !records.some(Boolean)) return;
     const nearEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
-    log.append(...rows.filter(Boolean));
-    while (log.childElementCount > 200) log.firstElementChild.remove();
+    for (const record of records) {
+      if (!record || displayed.has(record.id)) continue;
+      displayed.set(record.id, record);
+      log.append(record.row);
+    }
+    while (log.childElementCount > 200) {
+      const first = log.firstElementChild;
+      displayed.delete(first.dataset.messageId);
+      first.remove();
+    }
+    refreshQuotes();
     if (nearEnd) scroll.scrollTop = scroll.scrollHeight;
   }
 
@@ -249,7 +323,7 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
       if (stopped) return;
       if (batch.deviceId !== device.deviceId || !batch.peers.some(peer => peer.id === device.deviceId)
         || !Number.isSafeInteger(batch.cursor) || batch.cursor < (joined ? cursor : 0)) throw new Error("Invalid live chat state");
-      if (!joined) log.replaceChildren();
+      if (!joined) clearMessages();
       await display(batch.messages);
       if (stopped) return;
       cursor = batch.cursor;
@@ -278,18 +352,19 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
     event.preventDefault();
     const draft = input.value;
     if (stopped || posting || !draft.trim() || !peers.length) return;
+    const replyTo = quotedId;
     posting = true;
     sendProblem = "";
     clearTimeout(timer);
     update();
-    if (pending?.draft !== draft) pending = { id: crypto.randomUUID(), draft };
+    if (pending?.draft !== draft || pending.replyTo !== replyTo) pending = { id: crypto.randomUUID(), draft, replyTo };
     const { id } = pending;
     let sent = false;
 
     async function submit() {
       if (stopped || !peers.length) return;
       const { deviceId, seal } = device;
-      const envelope = await seal(id, draft, peers);
+      const envelope = await seal(id, draft, peers, replyTo);
       if (stopped) return;
       await request("", { deviceId, id, envelope });
       sent = true;
@@ -306,6 +381,7 @@ export function renderQuickChat({ publicId, signal, member = false, accountId, o
       }
       if (sent) {
         if (input.value === draft) input.value = "";
+        if (quotedId === replyTo) chooseQuote();
         pending = undefined;
       }
     } catch (error) {

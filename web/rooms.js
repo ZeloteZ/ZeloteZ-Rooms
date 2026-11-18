@@ -611,13 +611,15 @@ function roomHeading(topic, title = topic.title) {
   const channelCrumb = el("li", { class: "room-breadcrumb-channel", hidden: true }, separator(), channelLabel);
   const breadcrumb = el("nav", { class: "room-breadcrumb", "aria-label": t("Breadcrumb", "Navigationspfad") },
     el("ol", { class: "room-breadcrumb-list", role: "list" },
-      el("li", { class: "room-breadcrumb-home" }, el("a", { href: "#/rooms" }, t("Home", "Home"))),
-      el("li", { class: "room-breadcrumb-room" }, separator(), heading),
+      el("li", { class: "room-breadcrumb-room" }, heading),
       channelCrumb));
-  const header = el("div", { class: "room-hero section-heading", "data-tutorial": "room-hero" },
+  const hero = el("div", { class: "room-hero section-heading", "data-tutorial": "room-hero" },
     el("div", { class: "room-title" }, breadcrumb, !topic.temporary && tag(topic)));
-  applyTopicDesign(header, topic.appearance);
-  return { header, setTitle(title) {
+  const home = el("a", { class: "room-home-link", href: "#/rooms" },
+    el("span", { "aria-hidden": "true" }, "←"), t("Home", "Home"));
+  const header = el("div", { class: "room-header-content" }, home, hero);
+  applyTopicDesign(hero, topic.appearance);
+  return { header, hero, setTitle(title) {
     if (roomLabel.textContent !== title) roomLabel.textContent = heading.title = title;
   }, setChannel(channel) {
     channelCrumb.hidden = !channel;
@@ -690,14 +692,14 @@ export async function renderTopic(context, topicId, selectedId, target) {
   const owner = topic.role === "owner";
   const manager = owner || topic.role === "admin";
   const room = el("div", { class: "topic-view", "data-joined": topic.joined === true });
-  const { header, setChannel } = roomHeading(topic);
+  const { header, hero, setChannel } = roomHeading(topic);
   applyTopicDesign(room, topic.appearance);
-  if (topic.joined) header.append(el("div", { class: "inline room-actions" }, favoriteControl(topic, context),
+  if (topic.joined) hero.append(el("div", { class: "inline room-actions" }, favoriteControl(topic, context),
       button(t("Members", "Mitglieder"), () => membersDialog(context, topic, members)),
       topic.canDesign && button(t("Design", "Design"), () => editTopicDesign(context, topic, appearance => {
         topic.appearance = appearance;
         applyTopicDesign(room, appearance);
-        applyTopicDesign(header, appearance);
+        applyTopicDesign(hero, appearance);
       }), { "aria-haspopup": "dialog", title: t("Edit room design", "Raumdesign bearbeiten") }),
       owner ? button([
         el("span", { class: "room-action-label" }, t("Settings", "Einstellungen")),
@@ -725,16 +727,17 @@ export async function renderTopic(context, topicId, selectedId, target) {
 
   const channelList = el("nav", { "aria-label": t("Channels", "Channels"), class: "channel-list" });
   const picker = el("select", { class: "room-channel-picker", "aria-label": t("Switch channel", "Channel wechseln") });
+  const channelKind = channel => channel.type === "live" ? t("Streaming", "Streaming") : t("Chat", "Chat");
   let links;
   function drawChannels() {
     links = channels.map(channel => el("a", {
       href: topicHref(topic.id, channel.id), class: "channel-link", "data-channel-id": channel.id,
     },
-    el("span", { class: "channel-symbol", "aria-hidden": "true" }, channel.type === "live" ? "◉" : "#"),
-    el("span", {}, channel.title), channel.type === "live" && el("span", { class: "sr-only" }, t("Live channel", "Live-Channel"))));
+    el("span", { class: "channel-link-title" }, channel.title),
+    el("span", { class: "channel-kind", "data-kind": channel.type }, channelKind(channel))));
     channelList.replaceChildren(...links);
     picker.replaceChildren(...(channels.length ? channels.map(channel =>
-      el("option", { value: channel.id }, (channel.type === "live" ? "◉ " : "# ") + channel.title)) :
+      el("option", { value: channel.id }, channel.title + " · " + channelKind(channel))) :
       [el("option", {}, t("No channels", "Keine Channels"))]));
     picker.disabled = channels.length === 0;
   }
@@ -844,10 +847,9 @@ export async function renderTopic(context, topicId, selectedId, target) {
       context.videoDock?.refreshPlacement();
       context.voice.setLocation(channel, topic, voiceMount);
     } else {
-      const edit = manager ? button(t("Edit", "Bearbeiten"), () => channelDialog(childContext, topic, channel)) : null;
       const moveDestinations = manager ? () => channels.filter(candidate =>
         candidate.type === "chat" && !sameId(candidate.id, channel.id)) : undefined;
-      channelNode = renderChat({ ...childContext, moveDestinations }, channel, edit);
+      channelNode = renderChat({ ...childContext, moveDestinations }, channel);
       content.replaceChildren(channelNode);
     }
   }

@@ -60,6 +60,25 @@
   gap: 4px;
 }
 
+.conversation { container: chat / inline-size; }
+
+.room-chat-heading {
+  gap: 5px 12px;
+  padding-block: 9px;
+}
+
+.room-chat-heading .chat-title {
+  flex: 1 1 8rem;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.room-chat-heading > .tag {
+  margin-inline-start: auto;
+  max-inline-size: 100%;
+  white-space: normal;
+}
+
 .message-row {
   --message-avatar: 34px;
   grid-template-columns: var(--message-avatar) minmax(0, 1fr);
@@ -94,6 +113,7 @@
 .message-actions {
   display: flex;
   align-items: start;
+  flex-wrap: wrap;
   gap: 2px;
   grid-column: 3;
 }
@@ -105,19 +125,57 @@
 }
 
 .message-move:hover:not(:disabled) { color: var(--accent); }
+.message-quote-action:hover:not(:disabled) { color: var(--accent); }
 .message-delete:hover:not(:disabled) { color: var(--danger); }
 .message-removed { color: var(--muted); overflow-wrap: anywhere; }
 
-@media (max-width: 520px) {
-  .message-row:has(> .message-actions .message-move) {
+@container chat (max-width: 480px) {
+  .message-row:has(> .message-actions) {
     grid-template-columns: var(--message-avatar) minmax(0, 1fr);
   }
 
-  .message-actions:has(.message-move) {
+  .message-actions {
     grid-column: 2;
     justify-self: end;
   }
 }
+
+.message-quote, .quote-draft {
+  margin: 0;
+  min-inline-size: 0;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--raised) 72%, transparent);
+}
+
+.message-quote .message-quote-jump, .quote-draft-copy {
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
+  padding: 5px 8px;
+  text-align: start;
+}
+
+.message-quote .message-quote-jump {
+  inline-size: 100%;
+  min-block-size: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+}
+
+.message-quote .message-quote-jump:hover:not(:disabled) { background: var(--raised); }
+.message-quote .message-quote-jump:disabled { opacity: .85; }
+.quote-author, .quote-excerpt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quote-author { color: var(--accent); font-size: .78rem; font-weight: 650; }
+.quote-excerpt { color: var(--muted); font-size: .8rem; }
+.quote-draft { display: flex; align-items: center; }
+.quote-draft-copy { flex: 1 1 auto; }
+.quote-draft > .button { flex: none; margin-inline-end: 3px; }
 
 .message-reactions {
   display: flex;

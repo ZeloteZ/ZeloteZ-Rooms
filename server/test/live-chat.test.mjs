@@ -293,6 +293,97 @@ test('temporary stream rooms do not expose persistent chat APIs even to their ow
   await assert.rejects(request('GET', '/api/mentions?channelId=' + live.id, owner), { status: 404 })
 })
 
+test('room owners and admins can remove deletion notices in text and persistent live chat', async t => {
+  const { db, user, request } = fixture(t)
+  const owner = user('Owner')
+  const moderator = user('Moderator')
+  const author = user('Member')
+  const outsider = user('Outsider')
+  const { body: { topic } } = await request('POST', '/api/topics', owner, { title: 'Moderated', visibility: 'public' })
+  const room = '/api/topics/' + topic.id
+  await request('POST', room + '/join', author, {})
+  await request('POST', room + '/join', moderator, {})
+  await request('POST', room + '/members', owner, { action: 'promote', userId: moderator.id })
+  const { body: { channels } } = await request('GET', room, owner)
+  const members = [author, owner, moderator]
+  for (const channel of channels) {
+    const channelPath = '/api/channels/' + channel.id
+    const path = channelPath + '/messages'
+    const id = randomUUID()
+    const envelope = envelopeFor(...members)
+    const payload = { id, envelope, attachmentIds: [] }
+    const { body: { message } } = await request('POST', path, author, payload)
+    const notice = path + '/' + id + '/notice'
+    await assert.rejects(request('DELETE', notice, owner), { status: 404 })
+
+    const reason = envelopeFor(...members)
+    const { body: { message: deleted } } = await request('DELETE', path + '/' + id, owner, { reason })
+    assert.deepEqual(deleted.deleted.reason, reason)
+    await assert.rejects(request('DELETE', notice, author), { status: 403 })
+    await assert.rejects(request('DELETE', notice, outsider), { status: 404 })
+
+    const { body: before } = await request('GET', path, author)
+    assert.deepEqual(before.messages.map(entry => entry.id), [id])
+    const newcomer = user('Late ' + channel.type)
+    await request('POST', room + '/join', newcomer, {})
+    members.push(newcomer)
+    const historyGrant = {
+      grantorId: owner.id, recipientId: newcomer.id,
+      grants: [{ messageId: id, wrapper: { v: 1, ephemeral: point(), ...keyBox() }, deletionRevision: before.deletionVersion }],
+    }
+    assert.equal((await request('POST', channelPath + '/history-grants', owner, historyGrant)).body.granted, 1)
+    assert.equal((await request('GET', path + '?grantsAfter=0', newcomer)).body.messages.length, 1)
+    const actor = channel.type === 'live' ? owner : moderator
+    const { body: { message: hidden } } = await request('DELETE', notice, actor)
+    assert.equal(hidden.id, id)
+    assert.equal(hidden.seq, message.seq)
+    assert.deepEqual(hidden.deleted, { ...deleted.deleted, reason: null, noticeHidden: true })
+    assert.equal(db.prepare('SELECT envelope FROM messages WHERE id = ?').get(id).envelope, 'null')
+    assert.equal(db.prepare('SELECT notice_hidden FROM message_deletions WHERE message_id = ?').get(id).notice_hidden, 1)
+
+    const { body: polled } = await request('GET',
+      path + '?after=' + message.seq + '&deletionsAfter=' + before.deletionVersion, author)
+    assert.deepEqual(polled.deletions, [hidden])
+    assert(polled.nextDeletionVersion > before.deletionVersion)
+    assert.equal(polled.nextDeletionVersion, polled.deletionVersion)
+    assert.deepEqual((await request('GET', path, author)).body.messages, [])
+    assert.deepEqual((await request('GET', path + '?before=' + (message.seq + 1), author)).body.messages, [])
+    assert.deepEqual((await request('GET', path + '?grantsAfter=0', newcomer)).body.messages, [])
+    await assert.rejects(request('POST', channelPath + '/history-grants', owner, historyGrant), { status: 409 })
+    assert.deepEqual((await request('POST', path, author, payload)).body.message, hidden)
+
+    assert.deepEqual((await request('DELETE', notice, actor)).body.message, hidden)
+    assert.equal((await request('GET', path, author)).body.deletionVersion, polled.deletionVersion)
+  }
+})
+
+test('participants cannot remove deletion notices in direct messages', async t => {
+  const { user, request } = fixture(t)
+  const first = user('First')
+  const second = user('Second')
+  await request('POST', '/api/friends/' + second.id, first, { action: 'request' })
+  await request('POST', '/api/friends/' + first.id, second, { action: 'accept' })
+  const { body: { conversation } } = await request('POST', '/api/direct', first, { userId: second.id })
+  const path = '/api/channels/' + conversation.channel.id + '/messages'
+  const id = randomUUID()
+  await request('POST', path, first, { id, envelope: envelopeFor(first, second), attachmentIds: [] })
+  await request('DELETE', path + '/' + id, first, {})
+  await assert.rejects(request('DELETE', path + '/' + id + '/notice', first), { status: 403 })
+  assert.deepEqual((await request('GET', path, second)).body.messages.map(entry => entry.id), [id])
+})
+
+test('upgrading an existing deletion table preserves its notices until an admin removes them', async t => {
+  const { db, request, owner, viewer, channel, message, post } = await attachmentFixture(t)
+  const path = channel + '/messages'
+  await post([])
+  const { body: { message: notice } } = await request('DELETE', path + '/' + message, owner, {})
+  db.exec('ALTER TABLE message_deletions DROP COLUMN notice_hidden')
+  createCommunity(db, { requireSession: () => owner, appearance: { profile: () => ({}) } }).close()
+  assert.deepEqual((await request('GET', path, viewer)).body.messages, [notice])
+  const { body: { message: hidden } } = await request('DELETE', path + '/' + message + '/notice', owner)
+  assert.equal(hidden.deleted.noticeHidden, true)
+})
+
 test('chat attachments stream the exact uploaded bytes to current recipients and are deleted with their message', async t => {
   const { db, user, request, owner, viewer, room, channel, id, file, message, post } = await attachmentFixture(t)
   const bytes = randomBytes(2 * 256 * 1024 + 117)

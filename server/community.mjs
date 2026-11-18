@@ -31,7 +31,8 @@ const joinHistory = 'LEFT JOIN message_history_grants g ON g.message_id = m.id A
 const originalAccess = `EXISTS (SELECT 1 FROM json_each(m.envelope, '$.keys') WHERE key = ?)`
 const historyFields = 'g.wrapper AS history_wrapper, g.grantor_id AS history_grantor, g.revision AS history_revision'
 const joinDeletion = 'LEFT JOIN message_deletions d ON d.message_id = m.id LEFT JOIN users moderator ON moderator.id = d.user_id'
-const deletionFields = 'd.deleted_at, d.user_id AS deleted_by, moderator.display_name AS deleted_by_name'
+const deletionFields = 'd.deleted_at, d.user_id AS deleted_by, moderator.display_name AS deleted_by_name, d.notice_hidden'
+const visibleNotice = 'coalesce(d.notice_hidden, 0) = 0'
 const undeleted = 'NOT EXISTS (SELECT 1 FROM message_deletions WHERE message_id = m.id)'
 
 function name(value, max) {
@@ -75,7 +76,10 @@ function messageView(row, profileFor) {
   if (row.deleted_at) {
     return {
       id: row.id, seq: row.seq, author, at: row.created_at, ...scope,
-      deleted: { at: row.deleted_at, by: { id: row.deleted_by, displayName: row.deleted_by_name, ...profileFor(row.deleted_by) }, reason: envelope },
+      deleted: {
+        at: row.deleted_at, by: { id: row.deleted_by, displayName: row.deleted_by_name, ...profileFor(row.deleted_by) },
+        reason: envelope, ...(row.notice_hidden && { noticeHidden: true }),
+      },
     }
   }
   return {
@@ -197,7 +201,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
       channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL REFERENCES users(id),
-      deleted_at TEXT NOT NULL
+      deleted_at TEXT NOT NULL,
+      notice_hidden INTEGER NOT NULL DEFAULT 0 CHECK (notice_hidden IN (0, 1))
     ) STRICT;
     CREATE INDEX IF NOT EXISTS channel_message_deletions ON message_deletions(channel_id, revision);
     CREATE TABLE IF NOT EXISTS attachments (
@@ -221,6 +226,9 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'crypto_channel_id')) {
       // Preserve the AEAD scope even if the empty original channel is later deleted.
       db.exec('ALTER TABLE messages ADD COLUMN crypto_channel_id TEXT')
+    }
+    if (!db.prepare('PRAGMA table_info(message_deletions)').all().some(column => column.name === 'notice_hidden')) {
+      db.exec('ALTER TABLE message_deletions ADD COLUMN notice_hidden INTEGER NOT NULL DEFAULT 0 CHECK (notice_hidden IN (0, 1))')
     }
   })
   initializeChatStorage(db)
@@ -290,6 +298,11 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     FROM message_deletions d JOIN messages m ON m.id = d.message_id JOIN users u ON u.id = m.user_id
     JOIN users moderator ON moderator.id = d.user_id
     WHERE d.channel_id = ? AND d.revision > ? ORDER BY d.revision LIMIT 41`)
+  // Allocate a fresh deletion cursor without replacing the existing tombstone.
+  const hideDeletionNotice = db.prepare(`INSERT INTO message_deletions(message_id, channel_id, user_id, deleted_at, notice_hidden)
+    SELECT message_id, channel_id, user_id, deleted_at, 1 FROM message_deletions
+    WHERE message_id = ? AND notice_hidden = 0
+    ON CONFLICT(message_id) DO UPDATE SET revision = excluded.revision, notice_hidden = 1`)
   const expiredAttachments = db.prepare('DELETE FROM attachments WHERE message_id IS NULL AND created_at < ?')
   const cleanup = setInterval(() => {
     try { expiredAttachments.run(Date.now() - stagingTime) } catch (error) {
@@ -551,7 +564,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       }
       const granted = db.prepare(`SELECT m.*, u.display_name, ${historyFields}, ${deletionFields}, g.revision FROM message_history_grants g
         JOIN messages m ON m.id = g.message_id JOIN users u ON u.id = m.user_id ${joinDeletion}
-        WHERE g.recipient_id = ? AND g.revision > ? AND m.channel_id = ? ORDER BY g.revision LIMIT 41`)
+        WHERE g.recipient_id = ? AND g.revision > ? AND m.channel_id = ? AND ${visibleNotice} ORDER BY g.revision LIMIT 41`)
         .all(user.id, afterGrant, channel.id)
       const page = granted.slice(0, 40)
       return { messages: page.map(showMessage), more: granted.length > 40, historyVersion,
@@ -589,7 +602,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     const rows = db.prepare(`SELECT m.*, u.display_name, ${historyFields}, ${deletionFields}
       FROM messages m JOIN users u ON u.id = m.user_id
       ${joinHistory} ${joinDeletion}
-      WHERE m.channel_id = ? AND m.seq ${after === null ? '<' : '>'} ? AND
+      WHERE m.channel_id = ? AND m.seq ${after === null ? '<' : '>'} ? AND ${visibleNotice} AND
       (d.revision IS NOT NULL OR g.revision IS NOT NULL OR ${originalAccess})
       ORDER BY m.seq ${after === null ? 'DESC' : 'ASC'} LIMIT 41`)
       .all(user.id, channel.id, cursor, user.id)
@@ -695,6 +708,23 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
       db.prepare('DELETE FROM message_history_grants WHERE message_id = ?').run(row.id)
       db.prepare('INSERT INTO message_deletions(message_id,channel_id,user_id,deleted_at) VALUES (?,?,?,?)')
         .run(row.id, channel.id, actor.id, new Date().toISOString())
+      return showMessage(directMessage.get(row.id))
+    })
+  }
+
+  function removeNotice(user, channelId, messageId) {
+    assertId(messageId)
+    return transaction(db, () => {
+      const channel = getMessageChannel(user.id, channelId)
+      if (channel.is_direct) throw forbidden()
+      requireManager(channel.role)
+      const row = directMessage.get(messageId)
+      if (!row || row.channel_id !== channel.id || !row.deleted_at) throw missing()
+      if (row.notice_hidden) return showMessage(row)
+      db.prepare("UPDATE messages SET envelope = 'null' WHERE id = ?").run(row.id)
+      db.prepare('DELETE FROM message_history_grants WHERE message_id = ?').run(row.id)
+      db.prepare('DELETE FROM message_history_rejections WHERE message_id = ?').run(row.id)
+      hideDeletionNotice.run(row.id)
       return showMessage(directMessage.get(row.id))
     })
   }
@@ -830,7 +860,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     const method = request.method
     const [api, resource, id, action, file, extra, rest] = path.slice(1).split('/')
     const moving = method === 'POST' && resource === 'channels' && id && action === 'messages' && file && extra === 'move'
-    if (api !== 'api' || rest !== undefined || (extra !== undefined && !moving)) return false
+    const hidingNotice = method === 'DELETE' && resource === 'channels' && id && action === 'messages' && file && extra === 'notice'
+    if (api !== 'api' || rest !== undefined || (extra !== undefined && !moving && !hidingNotice)) return false
     requireSession(request)
     const body = ['POST', 'PATCH'].includes(method) ? await readJson(request, action === 'messages' && !moving ? 65536 : 8192) : null
     const user = requireSession(request)
@@ -892,6 +923,8 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
         json(response, 200, { channel: changeChannel(channel.topic_id, channel, body) })
       } else if (moving) {
         json(response, 200, moveMessage(request, id, file, body))
+      } else if (hidingNotice) {
+        json(response, 200, { message: removeNotice(user, id, file) })
       } else if (action === 'messages' && file && method === 'DELETE') {
         getMessageChannel(user.id, id)
         const deletion = await readJson(request, 16384)

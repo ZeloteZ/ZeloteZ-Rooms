@@ -58,6 +58,12 @@ function sameCredential(a, b) {
   return a.token ? a.token === b.token : !b.token && a.session === b.session && a.userId === b.userId
 }
 
+function subject(credential) {
+  return credential.token
+    ? 'guest:' + createHash('sha256').update(credential.token).digest('hex')
+    : 'member:' + credential.userId
+}
+
 function consumeBurst(counter, limit, at) {
   if (counter.resetAt <= at) {
     counter.used = 0
@@ -102,6 +108,7 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
 
   function snapshot(room, viewer, after, at) {
     const participants = new Map()
+    const viewerSubject = subject(viewer.credential)
     const peers = [...room.peers.values()].map(({ id, credential, publicKey, name, guest, presentUntil }) => {
       const identity = guest ? `guest:${credential.token}` : `account:${credential.userId}`
       if (presentUntil > at) participants.set(identity, { name, guest })
@@ -110,8 +117,9 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     return { deviceId: viewer.id,
       peers, participants: [...participants.values()],
       messages: room.messages.filter(message => message.seq > Math.max(after, viewer.joinedSeq) && message.keys.has(viewer.id))
-        .map(({ id, from, name, guest, sentAt, publicKey, nonce, blob, keys }) => ({
-          id, from, name, guest, sentAt, publicKey, envelope: { nonce, blob, key: keys.get(viewer.id) },
+        .map(({ id, from, senderSubject, name, guest, sentAt, publicKey, nonce, blob, reply, keys }) => ({
+          id, from, own: senderSubject === viewerSubject, name, guest, sentAt, publicKey,
+          envelope: { nonce, blob, key: keys.get(viewer.id), ...(reply && { reply }) },
         })),
       cursor: room.seq,
     }
@@ -165,11 +173,13 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
 
   async function post(request, response, scope) {
     const input = await readJson(request, 24576)
-    if (!fields(input, ['deviceId', 'id', 'envelope']) || !validId(input.deviceId) || !validId(input.id) ||
-        !fields(input.envelope, ['nonce', 'blob', 'keys'])) throw invalid()
-    const { nonce, blob, keys } = input.envelope
+    if (!fields(input, ['deviceId', 'id', 'envelope']) || !validId(input.deviceId) || !validId(input.id)) throw invalid()
+    const hasReply = input.envelope && Object.hasOwn(input.envelope, 'reply')
+    if (!fields(input.envelope, hasReply ? ['nonce', 'blob', 'keys', 'reply'] : ['nonce', 'blob', 'keys'])) throw invalid()
+    const { nonce, blob, keys, reply } = input.envelope
     if (!encoded(nonce, 12) || !encoded(blob, 17, maxMessageBytes) || !keys || typeof keys !== 'object' || Array.isArray(keys) ||
         Object.keys(keys).length > maxPeers) throw invalid()
+    if (hasReply && (!fields(reply, ['nonce', 'blob']) || !encoded(reply.nonce, 12) || !encoded(reply.blob, 52))) throw invalid()
     assertAccess(scope)
     const at = now()
     const room = roomFor(scope)
@@ -189,8 +199,8 @@ export function createQuickChat({ isGuestActive, now = Date.now }) {
     consumeBurst(sender.burst, 5, at)
     consumeBurst(room.burst, 20, at)
     const { name, guest, publicKey } = sender
-    room.messages.push({ id: input.id, seq: ++room.seq, from: sender.id, name, guest, publicKey, sentAt: new Date(at).toISOString(),
-      nonce, blob, keys: deliveries })
+    room.messages.push({ id: input.id, seq: ++room.seq, from: sender.id, senderSubject: subject(sender.credential),
+      name, guest, publicKey, sentAt: new Date(at).toISOString(), nonce, blob, reply, keys: deliveries })
     if (room.messages.length > maxMessages) room.messages.shift()
     return json(response, 201, snapshot(room, sender, room.seq - 1, at))
   }

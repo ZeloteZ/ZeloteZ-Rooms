@@ -48,7 +48,43 @@
 .quick-chat-log li p { color: #e8e8f2; font-size: .89rem; white-space: pre-wrap; }
 .quick-chat-byline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; font-size: .82rem; }
 .quick-chat-byline time { color: var(--faint); font-size: .72rem; }
+.quick-chat-byline > .quick-chat-quote-action {
+  margin-inline-start: auto;
+  min-block-size: 26px;
+  padding: 2px 6px;
+  font-size: .73rem;
+}
+.quick-chat-quote {
+  min-inline-size: 0;
+  margin: 4px 0;
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--accent);
+  color: var(--muted);
+  font-size: .79rem;
+  overflow-wrap: anywhere;
+}
+.quick-chat-quote > *,
+.quick-chat-quote-link > * { display: block; }
+.quick-chat-quote .quick-chat-quote-link {
+  display: block;
+  min-block-size: 0;
+  padding: 2px 4px;
+  text-align: start;
+  white-space: normal;
+  font-size: inherit;
+}
 .quick-chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.quick-chat-quote-draft {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  padding: 3px 5px;
+  border-radius: 7px;
+  background: var(--raised);
+}
+.quick-chat-quote-remove { min-block-size: 30px; padding: 1px 8px; }
 .quick-chat-form input { min-block-size: 38px; font-size: .9rem; }
 .quick-chat-feedback { font-size: .81rem; }
 @media (hover: none) and (pointer: coarse) {

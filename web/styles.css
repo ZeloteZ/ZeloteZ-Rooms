@@ -158,7 +158,6 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
 .channel-link { display: flex; align-items: center; gap: 9px; padding: 9px 10px; min-height: 36px; border: 1px solid transparent; border-radius: 9px; overflow-wrap: anywhere; color: #d6d6e2; }
 .channel-link:hover { background: var(--raised); }
 .channel-link[aria-current] { background: #242947; border-color: #4c5694; color: #f7f7fd; }
-.channel-symbol { flex: none; width: 21px; text-align: center; color: #b4c1ff; font-weight: 700; }
 .channel-content { grid-area: content; min-width: 0; }
 .live-player { grid-area: player; min-width: 0; }
 .live-player[data-mode="mini"] { padding: 12px; gap: 10px; }
@@ -182,6 +181,14 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
 .message-meta time { color: var(--faint); font-size: .75rem; }
 .message-text { color: #e8e8f2; font-size: .94rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message-text a, a.attachment { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.message-text-fold, .message-text-copy { display: grid; gap: 4px; min-inline-size: 0; }
+.message-text-fold .message-text-toggle {
+  justify-self: start;
+  min-block-size: 28px;
+  padding: 2px 5px;
+  color: var(--accent);
+  font-size: .78rem;
+}
 .attachment { display: block; width: fit-content; max-width: 100%; overflow-wrap: anywhere; font-size: .88rem; }
 .attachment-preview { max-height: 270px; object-fit: contain; border-radius: 9px; margin-bottom: 4px; }
 .attached-file { width: min(100%, 360px); gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }

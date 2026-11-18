@@ -108,8 +108,8 @@ const dialog = document.querySelector("#dialog");
 const dialogHeading = document.querySelector("#dialog-heading");
 const dialogContent = document.querySelector("#dialog-content");
 const dialogClose = document.querySelector("#dialog-close");
-dialogClose.addEventListener("click", () => dialog.close());
-dialog.addEventListener("close", () => {
+dialogClose?.addEventListener("click", () => dialog?.close());
+dialog?.addEventListener("close", () => {
   if (!dialog.open) dialogContent.replaceChildren();
 });
 

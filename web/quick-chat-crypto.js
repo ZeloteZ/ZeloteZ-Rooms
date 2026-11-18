@@ -5,6 +5,7 @@ const curve = { name: "ECDH", namedCurve: "P-256" };
 const keyLifetime = 12 * 60 * 60_000;
 const keyStore = "devices";
 const resident = new Map();
+const messageId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 
 function encode(bytes) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
@@ -184,33 +185,44 @@ export async function createQuickChatCrypto(roomId, options) {
     }
   }
 
-  async function seal(id, text, peers) {
+  async function seal(id, text, peers, replyTo) {
     const plaintext = encoder.encode(text);
     if (plaintext.length > 4096) throw new Error("Chat message is too long");
+    if (replyTo !== undefined && !messageId.test(replyTo)) throw new Error("Invalid quoted message");
     const rawKey = crypto.getRandomValues(new Uint8Array(32));
     try {
       const key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt"]);
       const ciphertext = await encrypt(key, plaintext, context("message", roomId, id, deviceId));
+      const reply = replyTo && await encrypt(key, encoder.encode(replyTo), context("reply", roomId, id, deviceId));
       const wraps = await Promise.all(peers.map(async peer => {
         const additionalData = context("recipient", roomId, id, deviceId, peer.id);
         const key = await wrappingKey(peer.publicKey, additionalData, "encrypt");
         return [peer.id, await encrypt(key, rawKey, additionalData)];
       }));
-      return { ...ciphertext, keys: Object.fromEntries(wraps) };
+      return { ...ciphertext, keys: Object.fromEntries(wraps), ...(reply && { reply }) };
     } finally {
       rawKey.fill(0);
       plaintext.fill(0);
     }
   }
 
-  async function open({ id, from, publicKey, envelope }) {
+  async function open({ id, from, publicKey, envelope }, { includeReply = false } = {}) {
     const additionalData = context("recipient", roomId, id, from, deviceId);
     const wrapping = await wrappingKey(publicKey, additionalData, "decrypt");
     const rawKey = new Uint8Array(await decrypt(wrapping, envelope.key, additionalData));
     try {
       if (rawKey.length !== 32) throw new Error("Invalid chat key");
       const key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["decrypt"]);
-      return decoder.decode(await decrypt(key, envelope, context("message", roomId, id, from)));
+      const text = decoder.decode(await decrypt(key, envelope, context("message", roomId, id, from)));
+      if (!includeReply) return text;
+      let replyTo;
+      if (envelope.reply) {
+        try {
+          const candidate = decoder.decode(await decrypt(key, envelope.reply, context("reply", roomId, id, from)));
+          if (messageId.test(candidate) && candidate !== id) replyTo = candidate;
+        } catch { /* Keep the text readable if optional reply metadata cannot be authenticated. */ }
+      }
+      return { text, replyTo };
     } finally {
       rawKey.fill(0);
     }
