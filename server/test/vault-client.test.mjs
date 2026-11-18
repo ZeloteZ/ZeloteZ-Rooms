@@ -18,7 +18,7 @@ function storage() {
   const values = new Map()
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key) }
 }
-async function fixture(t, data = encode('Private file contents')) {
+async function fixture(t, data = encode('Private file contents'), { name = 'private-plan-计划.txt', type = 'text/plain' } = {}) {
   vault.clearVaultKeys()
   const window = {}
   runInNewContext(accountScript, { window, crypto: webcrypto, TextEncoder, TextDecoder, EventTarget, atob, btoa,
@@ -29,7 +29,7 @@ async function fixture(t, data = encode('Private file contents')) {
   globalThis.ClubCrypto = window.ClubCrypto
   const priorFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = priorFetch; vault.clearVaultKeys(); delete globalThis.ClubCrypto })
-  const file = new File([data], 'private-plan-计划.txt', { type: 'text/plain', lastModified: 1700000000000 })
+  const file = new File([data], name, { type, lastModified: 1700000000000 })
   const created = await vault.createFile(user, randomUUID(), file)
   const entry = { id: created.descriptor.id, ownerId: user.id, parentId: null, kind: 'file', state: 'ready',
     descriptor: created.descriptor, envelope: created.envelope }
@@ -839,4 +839,123 @@ test('edited copy names keep their extension inside the final UTF-8 byte limit',
   assert.ok(name.endsWith(' (edited).txt'))
   assert.ok(new TextEncoder().encode(name).byteLength <= 240)
   assert.equal(client.editedVaultName('CON.txt'), '_CON (edited).txt')
+})
+
+test('media previews build authenticated Blob fragments without reading or retaining a full plaintext array', async t => {
+  const f = await fixture(t, new Uint8Array(vault.CHUNK_SIZE + 13).fill(73), { name: 'Clip.mp4', type: 'video/mp4' })
+  const encrypted = [await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data.subarray(0, vault.CHUNK_SIZE)),
+    await vault.encryptChunk(f.created.secret, f.created.descriptor, 1, f.data.subarray(vault.CHUNK_SIZE))]
+  const service = client.createVaultClient({ user: f.user }); t.after(() => service.close())
+  const originalRead = Blob.prototype.arrayBuffer, originalDecrypt = crypto.subtle.decrypt
+  const plaintext = [], probes = []; let reads = 0
+  crypto.subtle.decrypt = async function(...args) {
+    const buffer = await originalDecrypt.apply(this, args)
+    if ([vault.CHUNK_SIZE, 13].includes(buffer.byteLength)) plaintext.push(new Uint8Array(buffer))
+    return buffer
+  }
+  Blob.prototype.arrayBuffer = function() { assert.equal(this.size, 1, 'construction barriers read one real byte only'); probes.push(this.size); return originalRead.call(this) }
+  t.after(() => { Blob.prototype.arrayBuffer = originalRead; crypto.subtle.decrypt = originalDecrypt })
+  globalThis.fetch = async () => {
+    assert.ok(plaintext.every(bytes => bytes.every(value => value === 0)), 'previous plaintext is wiped before the next chunk starts')
+    return new Response(encrypted[reads++])
+  }
+  const blob = await service.readMediaBlob({ ...f.entry, type: 'text/plain', name: 'untrusted.txt' })
+  assert.equal(blob.type, 'video/mp4'); assert.equal(blob.size, f.data.length); assert.equal(reads, 2)
+  assert.equal(probes.length, 3); assert.equal(plaintext.length, 2); assert.ok(plaintext.every(bytes => bytes.every(value => value === 0)))
+  Blob.prototype.arrayBuffer = originalRead
+  assert.deepEqual(new Uint8Array(await blob.arrayBuffer()), f.data)
+})
+
+test('media limits are separate from generic previews and cannot trust a spoofed row MIME', async t => {
+  const f = await fixture(t), service = client.createVaultClient({ user: f.user }); t.after(() => service.close())
+  let requests = 0; globalThis.fetch = async () => { requests++; throw new Error('must not fetch an unsupported media file') }
+  assert.equal(client.MEDIA_BLOB_LIMIT, 10 * 1024 ** 3)
+  await assert.rejects(service.readMediaBlob({ ...f.entry, type: 'video/mp4', name: 'fake.mp4' }), /image, video or audio/u)
+  for (const maxBytes of [-1, Infinity, .5, client.MEDIA_BLOB_LIMIT + 1]) await assert.rejects(service.readMediaBlob(f.entry, { maxBytes }), /memory limit/u)
+  const large = await vault.createFile(f.user, randomUUID(), { name: 'large.mp4', type: 'video/mp4', size: client.MEDIA_BLOB_LIMIT + 1, lastModified: 0 })
+  const entry = { id: large.descriptor.id, kind: 'file', state: 'ready', descriptor: large.descriptor, envelope: large.envelope }
+  await assert.rejects(service.readMediaBlob(entry), /too large/u)
+  await assert.rejects(service.readBlob(entry, {}, true), /too large/u)
+  assert.equal(requests, 0)
+})
+
+test('the 10 GiB media boundary accepts authenticated chunks and aborts before fetching the next one', async t => {
+  const f = await fixture(t), service = client.createVaultClient({ user: f.user }); t.after(() => service.close())
+  const created = await vault.createFile(f.user, randomUUID(), { name: 'large.mkv', type: 'video/x-matroska', size: client.MEDIA_BLOB_LIMIT, lastModified: 0 })
+  const entry = { id: created.descriptor.id, kind: 'file', state: 'ready', descriptor: created.descriptor, envelope: created.envelope }
+  const first = await vault.encryptChunk(created.secret, created.descriptor, 0, new Uint8Array(vault.CHUNK_SIZE).fill(7))
+  let requests = 0; globalThis.fetch = async () => { requests++; return new Response(first) }
+  const controller = new AbortController()
+  await assert.rejects(service.readMediaBlob(entry, { signal: controller.signal, onProgress() { controller.abort() } }), { name: 'AbortError' })
+  assert.equal(requests, 1)
+})
+
+test('public media previews keep recipient credentials and keys out of chunk requests and honor close', async t => {
+  const f = await fixture(t, encode('private media fixture'), { name: 'image.png', type: 'image/png' }), shareId = randomUUID()
+  const shared = await vault.createShare(f.entry, f.created.opened, shareId)
+  const share = { id: shareId, entryId: f.entry.id, ownerId: f.user.id, descriptor: f.entry.descriptor, envelope: shared.envelope }
+  const ciphertext = await vault.encryptChunk(f.created.secret, f.entry.descriptor, 0, f.data)
+  let requests = 0
+  globalThis.fetch = async (path, options) => {
+    assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer'); assert.ok(!JSON.stringify(options).includes(shared.keyFragment))
+    if (path === '/api/vault/public/open') return json({ share })
+    assert.equal(path, '/api/vault/public/' + shareId + '/chunks/0'); assert.equal(options.headers.Authorization, 'Bearer ' + shared.token)
+    requests++; return new Response(ciphertext)
+  }
+  const remote = await client.openPublicVault({ id: shareId, token: shared.token, keyFragment: shared.keyFragment })
+  try {
+    assert.equal(await (await remote.readMediaBlob()).text(), 'private media fixture')
+    remote.close(); await assert.rejects(remote.readMediaBlob(), { name: 'AbortError' }); assert.equal(requests, 1)
+  } finally { remote.close() }
+})
+
+test('Blob construction failure is reported as local storage failure before another chunk is requested', async t => {
+  const f = await fixture(t, new Uint8Array(vault.CHUNK_SIZE + 3).fill(19), { name: 'audio.mp3', type: 'audio/mpeg' })
+  const first = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data.subarray(0, vault.CHUNK_SIZE))
+  const service = client.createVaultClient({ user: f.user }); t.after(() => service.close())
+  const original = Blob.prototype.slice; t.after(() => { Blob.prototype.slice = original })
+  Blob.prototype.slice = function() { return { arrayBuffer: () => Promise.reject(new DOMException('temporary storage unavailable', 'NotReadableError')) } }
+  let requests = 0; globalThis.fetch = async () => { requests++; return new Response(first) }
+  await assert.rejects(service.readMediaBlob(f.entry), error => error.code === 'VAULT_LOCAL_STORAGE' && /temporary storage/u.test(error.message))
+  assert.equal(requests, 1)
+})
+
+test('abort during a Blob construction barrier wipes a late probe and stops subsequent chunk requests', async t => {
+  const f = await fixture(t, new Uint8Array(vault.CHUNK_SIZE + 3).fill(11), { name: 'audio.mp3', type: 'audio/mpeg' })
+  const first = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data.subarray(0, vault.CHUNK_SIZE))
+  const service = client.createVaultClient({ user: f.user }); t.after(() => service.close())
+  const original = Blob.prototype.arrayBuffer; t.after(() => { Blob.prototype.arrayBuffer = original })
+  let release, requests = 0
+  Blob.prototype.arrayBuffer = function() { assert.equal(this.size, 1); return new Promise(resolve => { release = resolve }) }
+  globalThis.fetch = async () => { requests++; return new Response(first) }
+  const controller = new AbortController(), pending = service.readMediaBlob(f.entry, { signal: controller.signal })
+  while (!release) await new Promise(resolve => setImmediate(resolve))
+  controller.abort(); await assert.rejects(pending, { name: 'AbortError' })
+  const late = new Uint8Array([77]); release(late.buffer); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(late[0], 0); assert.equal(requests, 1)
+})
+
+test('received media uses authenticated recipient access and the account lifetime', async t => {
+  const f = await fixture(t, encode('private received media'), { name: 'Shared-video.webm', type: 'video/webm' })
+  const encrypted = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data)
+  const window = {}
+  runInNewContext(accountScript, { window, crypto: webcrypto, TextEncoder, TextDecoder, EventTarget, atob, btoa,
+    sessionStorage: storage(), localStorage: storage(), location: { origin: 'https://rooms.example.test' } })
+  const prepared = await window.ClubCrypto.prepareRegistration('media-recipient', 'A long recipient media passphrase')
+  const user = { id: randomUUID(), username: 'media-recipient', publicKey: prepared.publicKey, identity: prepared.identity }
+  await window.ClubCrypto.unlock(user, 'A long recipient media passphrase')
+  const shareId = randomUUID(), envelope = await vault.sealMemberShare(f.user, f.entry, f.created.opened, shareId, user)
+  globalThis.ClubCrypto = window.ClubCrypto
+  const share = { id: shareId, entryId: f.entry.id, ownerId: f.user.id, recipientId: user.id, descriptor: f.entry.descriptor, envelope,
+    owner: { id: f.user.id, publicKey: f.user.publicKey } }
+  const entry = { ...share, id: share.entryId, receivedShareId: shareId, share, kind: 'file', state: 'ready', parentId: null }
+  const account = new AbortController(), service = client.createVaultClient({ user, signal: account.signal }); t.after(() => service.close())
+  let requests = 0
+  globalThis.fetch = async (path, options) => {
+    assert.equal(path, '/api/vault/received/' + shareId + '/chunks/0'); assert.equal(options.credentials, 'same-origin')
+    requests++; return new Response(encrypted)
+  }
+  assert.equal(await (await service.readMediaBlob(entry)).text(), 'private received media')
+  await assert.rejects(service.readMediaBlob({ ...entry, share: { ...share, recipientId: randomUUID() } }), /unavailable/u)
+  account.abort(); await assert.rejects(service.readMediaBlob(entry), { name: 'AbortError' }); assert.equal(requests, 1)
 })

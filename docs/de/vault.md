@@ -30,18 +30,24 @@ Wähle einen Dateinamen, **Abspielen** für Audio/Video oder **Öffnen und bearb
 
 | Dateityp | Werkzeuge | Lokale Grenzen |
 | --- | --- | --- |
-| Bilder, darunter PNG, JPEG, WebP, GIF, BMP, AVIF und geprüfte ICO-Icons | Ränder zuschneiden, drehen, horizontal oder vertikal spiegeln; als PNG, JPEG oder WebP exportieren | 128 MiB Quelldatei und höchstens 33.554.432 Bildpunkte |
-| Videos und Audiodateien, darunter unterstützte MKV-Dateien | Lokaler Player mit Wiedergabesteuerung | 128 MiB Quelldatei; verfügbare Codecs hängen vom Browser und Betriebssystem ab |
+| Bilder, darunter PNG, JPEG, WebP, GIF, BMP, AVIF und geprüfte ICO-Icons | Ränder zuschneiden, drehen, horizontal oder vertikal spiegeln; als PNG, JPEG oder WebP exportieren | 10 GiB Quelldatei und höchstens 33.554.432 Bildpunkte |
+| Videos und Audiodateien, darunter unterstützte MKV-Dateien | Lokaler Player mit Wiedergabesteuerung | 10 GiB Quelldatei; verfügbare Codecs hängen vom Browser und Betriebssystem ab |
 | PDF | Einzelne Seiten ansehen, umordnen, drehen, löschen und Textnotizen platzieren | 64 MiB Quelldatei, höchstens 500 Seiten; mindestens eine Seite muss erhalten bleiben |
 | Text, Markdown, JSON, CSV, Konfigurationsdateien und gängiger Quellcode | UTF-8-Text oder UTF-16 mit BOM bearbeiten, Zeilenumbruch umschalten und Zeilen-/Zeichenanzahl sehen; JSON wird vor dem Speichern auf Syntaxfehler geprüft | 2 MiB einschließlich Kodierung und BOM |
 | DOCX-Dokumente und XLSX-Tabellen | Absätze, Tabellen und Tabellenzellen bearbeiten; eine vereinfachte DOCX- oder XLSX-Kopie speichern | 32 MiB Quelldatei; insgesamt 2 MiB Text, 20.000 Zellen, 2.000 Zeilen, 64 Spalten je Zeile und 20 Tabellenblätter |
 | ZIP-, TAR-, TAR.GZ- und TGZ-Archive | Ordner durchsuchen, unterstützte enthaltene Dateien lokal öffnen, einzeln herunterladen oder als neue verschlüsselte Vault-Datei speichern | 64 MiB Quelldatei, 128 MiB entpackter Inhalt, 2.000 Einträge; höchstens 32 MiB je entpackter Datei |
+
+Medien unterstützen Quelldateien bis **10 GiB (10.737.418.240 Bytes)**, sofern dein Vault-Speicherlimit ausreicht. Dateien werden vor dem Öffnen stückweise verifiziert und entschlüsselt; große Dateien benötigen entsprechend Vorbereitungszeit. Der Browser verwaltet die lokalen Daten und kann dafür temporäre Dateien auf deinem Gerät verwenden. Dafür müssen genügend lokaler Speicher und Browser-Kontingent verfügbar sein; auch Gerät und Decoder setzen Grenzen. Beim Schließen der Vorschau werden ihre Referenzen freigegeben; ein sicheres Löschen des temporären Browserspeichers lässt sich nicht garantieren. Der Server erhält weder Klartext noch Entschlüsselungsschlüssel. Bildmaße werden vor dem Dekodieren geprüft; die separate Auflösungsgrenze bleibt bestehen.
+
+Für das erste Bild werden höchstens **512 MiB kodierte Bilddaten** dekodiert. Benötigt schon dieses erste Bild mehr Daten, lässt es sich nicht lokal öffnen. Kann dein Browser das jeweilige Bildformat nicht aus einem Datenstrom dekodieren, unterstützt der alternative Ladeweg Bilder bis **128 MiB**. Dateigröße und entpackte Bildpunkte sind getrennte Grenzen; die Eingabegrenze von 10 GiB garantiert nicht, dass jedes Bild auf jedem Gerät dekodierbar ist.
 
 Bildexporte sind statisch und entfernen die Metadaten des Quellbildes; aus animierten Bildern entsteht ein statisches Bild. Exportierte Bearbeitungskopien sind auf 128 MiB begrenzt.
 
 Audio und Video öffnen sich in einem lokalen Player und werden im Vault nicht bearbeitet oder exportiert. MKV-Wiedergabe unterstützt Kombinationen wie H.264/AAC und VP9/Opus, wenn Browser und Betriebssystem die nötigen Codecs bereitstellen. Die Dateiendung MKV allein garantiert keine Wiedergabe. Bei nicht unterstützten Codecs oder Dateien über der Player-Grenze lädst du das Original für eine passende lokale Anwendung herunter.
 
 Bei unterstützten MKV- und MP4-Dateien erscheinen **Audio** und **Untertitel**, wenn mehrere Audiospuren oder eingebettete Untertitel vorhanden sind. **Originalton (Standard)** stellt die ursprüngliche Tonwahl der Datei wieder her; **Aus** schaltet Untertitel ab. Eingebettete SRT- und einfache ASS-Texte in MKV sowie `mov_text`-Untertitel in MP4 werden als passive Textuntertitel angezeigt. ASS-Layout und Formatierung werden nicht übernommen. Bildbasierte Untertitel wie PGS sind nicht verfügbar und als Auswahl deaktiviert; lade dafür das Original für einen passenden lokalen Player herunter. Die Spuren stammen aus der lokal entschlüsselten Datei, ohne einen externen Untertiteldienst zu kontaktieren. Deine Auswahl gilt nur auf deinem Gerät, auch bei Vault-Wiedergabe in einem Raum: Jeder Zuschauer wählt unabhängig. Der gemeinsame Wiedergabestatus des Raums und die Sprachwahl anderer Zuschauer bleiben unverändert.
+
+Für die Spurauswertung gelten eigene Sicherheitsgrenzen: **64 Spuren**, **16 MiB Metadaten** und **32 MiB lokal gelesene Dateidaten je Auswertung**. Textuntertitel sind auf **20.000 Einblendungen und 2 MiB Text** begrenzt. MKV-Untertitel werden erst beim Auswählen ihrer Spur gelesen. Werden diese Grenzen überschritten, können einzelne Untertitel oder die zusätzliche Spurauswahl fehlen, obwohl die normale Wiedergabe funktioniert. Nutze dann den Originalton oder lade die Datei für einen passenden lokalen Player herunter.
 
 Textkopien behalten die erkannte UTF-8- oder UTF-16-LE/BE-Kodierung, die BOM und den Zeilenumbruchstil. Für die automatische Erkennung benötigt UTF-16 eine BOM. Ungültiger Unicode-Text und Binärdaten werden abgelehnt. Andere Textkodierungen musst du zunächst in einer passenden lokalen Anwendung umwandeln.
 
@@ -63,7 +69,7 @@ Downloads werden auf deinem Gerät entschlüsselt und als gewöhnliche Dateien g
 
 ## Gemeinsam in einem Raum abspielen
 
-Wähle bei einer Audio- oder Videodatei in deinem eigenen Vault **In einem Raum abspielen** im Dateimenü oder Player. Unterstützt werden Dateien bis **128 MiB**. Wähle einen Raum, dem du beigetreten bist, und einen seiner Live-Kanäle. Dein Konto benötigt dort die Berechtigung, eine Wiedergabe zu starten.
+Wähle bei einer Audio- oder Videodatei in deinem eigenen Vault **In einem Raum abspielen** im Dateimenü oder Player. Unterstützt werden Dateien bis **10 GiB**. Wähle einen Raum, dem du beigetreten bist, und einen seiner Live-Kanäle. Dein Konto benötigt dort die Berechtigung, eine Wiedergabe zu starten.
 
 - Läuft keine Watchparty, bereitest du mit **Hier gemeinsam abspielen** eine synchronisierte Watchparty vor.
 - Läuft bereits eine Watchparty, wählst du **Zur Warteschlange hinzufügen**, damit deine Datei nach dem aktuellen Eintrag abgespielt wird.

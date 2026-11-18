@@ -1,3 +1,5 @@
+import { createMediaRangeReader } from "./vault-media-ranges.js";
+
 const LIMIT = 128 * 1024 ** 2;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const unsupported = () => new Error("This media container cannot provide local track selection.");
@@ -145,4 +147,225 @@ export function parseMkvMediaTracks(input, { deadline = performance.now() + 1500
   check();
   return { container: "matroska", audio: audioTracks.map(track => ({ id: track.id, language: track.language, label: track.label, default: track.default && track.enabled })),
     audioPatches, subtitles };
+}
+
+function joined(parts) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  if (length > 16 * 1024 ** 2) throw unsupported();
+  const result = new Uint8Array(length); let offset = 0;
+  for (const part of parts) { result.set(part, offset); offset += part.length; }
+  return result;
+}
+function ebmlHeader(id, byteLength) {
+  let hex = id.toString(16); if (hex.length % 2) hex = "0" + hex;
+  const name = Uint8Array.from(hex.match(/../gu), part => parseInt(part, 16));
+  let length = 1;
+  while (byteLength >= 2 ** (length * 7) - 1) length++;
+  const size = new Uint8Array(length); let remaining = byteLength;
+  for (let index = length - 1; index >= 0; index--) { size[index] = remaining % 256; remaining = Math.floor(remaining / 256); }
+  size[0] |= 1 << (8 - length);
+  return joined([name, size]);
+}
+const ebmlElement = (id, data) => joined([ebmlHeader(id, data.length), data]);
+function uintElement(id, value) {
+  const bytes = [];
+  do { bytes.unshift(value % 256); value = Math.floor(value / 256); } while (value);
+  return ebmlElement(id, new Uint8Array(bytes));
+}
+
+export async function parseMkvBlobMediaTracks(blob, { deadline = performance.now() + 14000, signal, subtitleId } = {}) {
+  const reader = createMediaRangeReader(blob, { deadline, signal });
+  const owned = [], clusters = [], cueNodes = [], globalCrc = [];
+  let nodes = 0, ebml, segment, info, tracks, selectedBytes = 0, selectedCount = 0, usedIndex = false;
+  async function element(start, end) {
+    if (++nodes > 2000000 || start >= end) throw unsupported();
+    const bytes = await reader.header(start, Math.min(16, end - start));
+    try {
+      function vint(offset, id = false) {
+        if (offset >= bytes.length || !bytes[offset]) throw unsupported();
+        let marker = 128, length = 1;
+        while (!(bytes[offset] & marker)) { marker >>= 1; length++; }
+        if (length > (id ? 4 : 8) || offset + length > bytes.length) throw unsupported();
+        let value = id ? bytes[offset] : bytes[offset] & (marker - 1), unknown = !id && value === marker - 1;
+        for (let index = 1; index < length; index++) { value = value * 256 + bytes[offset + index]; unknown &&= bytes[offset + index] === 255; }
+        if (!unknown && !Number.isSafeInteger(value)) throw unsupported();
+        return { value, length, unknown };
+      }
+      const id = vint(0, true), size = vint(id.length), body = start + id.length + size.length;
+      if (size.unknown && id.value !== 0x18538067) throw unsupported();
+      const stop = size.unknown ? end : body + size.value;
+      if (!Number.isSafeInteger(stop) || stop > end || stop < body) throw unsupported();
+      return { id: id.value, start, body, end: stop };
+    } finally { bytes.fill(0); }
+  }
+  async function walk(start, end, visit) {
+    for (let offset = start; offset < end;) {
+      reader.check(); const node = await element(offset, end);
+      if (await visit(node) === false) return;
+      offset = node.end;
+    }
+  }
+  async function copy(node, maximum) {
+    if (node.end - node.start > maximum) throw unsupported();
+    const bytes = await reader.read(node.start, node.end - node.start); owned.push(bytes); return bytes;
+  }
+  function compact(captionClusters = []) {
+    const body = [...(info ? [info.bytes] : []), tracks.bytes, ...captionClusters];
+    const header = ebmlHeader(0x18538067, body.reduce((total, part) => total + part.length, 0));
+    const bytes = joined([ebml.bytes, header, ...body]);
+    const tracksStart = ebml.bytes.length + header.length + (info?.bytes.length || 0);
+    try {
+      const result = parseMkvMediaTracks(bytes, { deadline, signal });
+      for (const patches of Object.values(result.audioPatches)) {
+        for (const patch of patches) {
+          if (patch.offset < tracksStart || patch.offset + patch.bytes.length > tracksStart + tracks.bytes.length) throw unsupported();
+          patch.offset += tracks.start - tracksStart;
+        }
+        patches.push(...globalCrc.map(offset => ({ offset, bytes: new Uint8Array([0xec]) })));
+        patches.sort((a, b) => a.offset - b.offset);
+      }
+      return { ...result, lazySubtitles: true, readBytes: reader.readBytes, indexedSubtitles: usedIndex };
+    } finally { bytes.fill(0); }
+  }
+  try {
+    await walk(0, reader.size, async node => {
+      if (node.id === 0x1a45dfa3) { if (ebml) throw unsupported(); ebml = { ...node, bytes: await copy(node, 4096) }; }
+      else if (node.id === 0x18538067) { if (segment) throw unsupported(); segment = node; }
+    });
+    if (!ebml || !segment) throw unsupported();
+    await walk(segment.body, segment.end, async node => {
+      if (node.id === 0x1549a966) { if (info) throw unsupported(); info = { ...node, bytes: await copy(node, 1024 ** 2) }; }
+      else if (node.id === 0x1654ae6b) { if (tracks) throw unsupported(); tracks = { ...node, bytes: await copy(node, 8 * 1024 ** 2) }; }
+      else if (node.id === 0x1f43b675) { if (clusters.length >= 100000) throw unsupported(); clusters.push(node); }
+      else if (node.id === 0x1c53bb6b) { if (cueNodes.length >= 4) throw unsupported(); cueNodes.push(node); }
+      else if (node.id === 0xbf) { if (globalCrc.length >= 128) throw unsupported(); globalCrc.push(node.start); }
+    });
+    if (!tracks) throw unsupported();
+    const metadata = compact();
+    if (subtitleId === undefined) return metadata;
+    const selected = metadata.subtitles.find(track => track.id === subtitleId);
+    if (!selected?.supported) return metadata;
+    const captionClusters = [];
+    const clusterByStart = new Map(clusters.map(cluster => [cluster.start, cluster]));
+    async function cueIndex() {
+      if (cueNodes.length !== 1 || cueNodes[0].end - cueNodes[0].start > 8 * 1024 ** 2) return null;
+      const node = cueNodes[0], bytes = await copy(node, 8 * 1024 ** 2), references = [], seen = new Set();
+      let incomplete = false;
+      function each(start, end, visit) {
+        for (let position = start; position < end;) {
+          if (++nodes > 2000000) throw unsupported();
+          if (nodes % 256 === 0) reader.check();
+          function vint(offset, id) {
+            if (offset >= end || !bytes[offset]) throw unsupported();
+            let marker = 128, length = 1;
+            while (!(bytes[offset] & marker)) { marker >>= 1; length++; }
+            if (length > (id ? 4 : 8) || offset + length > end) throw unsupported();
+            let value = id ? bytes[offset] : bytes[offset] & (marker - 1);
+            for (let index = 1; index < length; index++) value = value * 256 + bytes[offset + index];
+            if (!Number.isSafeInteger(value)) throw unsupported();
+            return { value, length };
+          }
+          const id = vint(position, true), size = vint(position + id.length, false), body = position + id.length + size.length, stop = body + size.value;
+          if (stop > end || stop < body) throw unsupported();
+          visit({ id: id.value, body, end: stop }); position = stop;
+        }
+      }
+      function integer(field) {
+        if (field.end - field.body < 1 || field.end - field.body > 8) throw unsupported();
+        let value = 0;
+        for (let offset = field.body; offset < field.end; offset++) value = value * 256 + bytes[offset];
+        if (!Number.isSafeInteger(value)) throw unsupported();
+        return value;
+      }
+      each(node.body - node.start, bytes.length, point => {
+        if (point.id !== 0xbb) return;
+        const positions = []; let time;
+        each(point.body, point.end, field => {
+          if (field.id === 0xb3) time = integer(field);
+          else if (field.id === 0xb7) {
+            const value = {};
+            each(field.body, field.end, entry => {
+              if (entry.id === 0xf7) value.track = String(integer(entry));
+              else if (entry.id === 0xf1) value.cluster = integer(entry);
+              else if (entry.id === 0xf0) value.relative = integer(entry);
+              else if (entry.id === 0xb2) value.duration = integer(entry);
+              else if (entry.id === 0xea && integer(entry) !== 0) value.codecState = true;
+            });
+            if (positions.length >= 64) throw unsupported(); positions.push(value);
+          }
+        });
+        for (const value of positions) if (value.track === subtitleId) {
+          if (time === undefined || value.cluster === undefined || value.relative === undefined || value.duration === undefined || value.codecState) { incomplete = true; continue; }
+          const clusterStart = segment.body + value.cluster, key = clusterStart + ":" + value.relative;
+          if (!Number.isSafeInteger(clusterStart) || !clusterByStart.has(clusterStart)) throw unsupported();
+          if (!seen.has(key)) { if (references.length >= 20000) throw unsupported(); references.push({ clusterStart, relative: value.relative }); seen.add(key); }
+        }
+      });
+      return !incomplete && references.length ? references : null;
+    }
+    const index = await cueIndex(), indexed = index ? new Map() : null;
+    usedIndex = indexed !== null;
+    if (index) for (const reference of index) {
+      const values = indexed.get(reference.clusterStart) || []; values.push(reference.relative); indexed.set(reference.clusterStart, values);
+    }
+    async function selectedBlock(node) {
+      const header = await reader.header(node.body, Math.min(12, node.end - node.body));
+      try {
+        if (!header[0]) throw unsupported();
+        let marker = 128, length = 1;
+        while (!(header[0] & marker)) { marker >>= 1; length++; }
+        if (length > 8 || length + 3 > header.length) throw unsupported();
+        let id = header[0] & (marker - 1);
+        for (let index = 1; index < length; index++) id = id * 256 + header[index];
+        if (!Number.isSafeInteger(id)) throw unsupported();
+        if (String(id) !== subtitleId) return null;
+        const size = node.end - node.body - length - 3;
+        if (size > 65536 || ++selectedCount > 20000 || (selectedBytes += size) > 2 * 1024 ** 2) throw unsupported();
+        return copy(node, 65560);
+      } finally { header.fill(0); }
+    }
+    for (const cluster of clusters) {
+      if (indexed && !indexed.has(cluster.start)) continue;
+      let timestamp;
+      await walk(cluster.body, cluster.end, async node => {
+        if (node.id !== 0xe7) return;
+        if (node.end - node.body < 1 || node.end - node.body > 7) throw unsupported();
+        const bytes = await reader.read(node.body, node.end - node.body);
+        try {
+          if (!bytes.length || bytes.length > 7) throw unsupported(); timestamp = 0;
+          for (const byte of bytes) timestamp = timestamp * 256 + byte;
+          if (!Number.isSafeInteger(timestamp)) throw unsupported();
+        } finally { bytes.fill(0); }
+        return false;
+      });
+      if (timestamp === undefined) throw unsupported();
+      const packets = [];
+      const readPacket = async node => {
+        if (node.id === 0xa3) { const block = await selectedBlock(node); if (block) packets.push(block); }
+        else if (node.id === 0xa0) {
+          let block, duration;
+          await walk(node.body, node.end, async child => {
+            if (child.id === 0xa1) block = await selectedBlock(child);
+            else if (child.id === 0x9b) duration = await copy(child, 16);
+          });
+          if (block) { const parts = joined(duration ? [block, duration] : [block]); const group = ebmlElement(0xa0, parts); owned.push(group); parts.fill(0); packets.push(group); }
+        }
+      };
+      if (indexed) {
+        for (const relative of indexed.get(cluster.start)) {
+          const offset = cluster.body + relative;
+          if (!Number.isSafeInteger(offset) || offset < cluster.body || offset >= cluster.end) throw unsupported();
+          const packet = await element(offset, cluster.end);
+          if (packet.id !== 0xa0 && packet.id !== 0xa3) throw unsupported();
+          const before = selectedCount; await readPacket(packet);
+          if (selectedCount === before) throw unsupported();
+        }
+      } else await walk(cluster.body, cluster.end, readPacket);
+      if (packets.length) {
+        const time = uintElement(0xe7, timestamp), body = joined([time, ...packets]), result = ebmlElement(0x1f43b675, body);
+        owned.push(result); captionClusters.push(result); time.fill(0); body.fill(0);
+      }
+    }
+    return compact(captionClusters);
+  } finally { reader.dispose(); for (const bytes of owned) bytes.fill(0); }
 }

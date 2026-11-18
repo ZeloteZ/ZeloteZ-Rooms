@@ -1,6 +1,6 @@
 import { t } from "./i18n.js";
 
-export const VAULT_MEDIA_TRACK_LIMITS = Object.freeze({ inputBytes: 128 * 1024 ** 2, milliseconds: 15000, tracks: 64, cues: 20000, textBytes: 2 * 1024 ** 2 });
+export const VAULT_MEDIA_TRACK_LIMITS = Object.freeze({ inputBytes: 10 * 1024 ** 3, milliseconds: 15000, tracks: 64, cues: 20000, textBytes: 2 * 1024 ** 2 });
 const subtitleHandles = new WeakMap();
 const unavailable = () => new Error(t("Track selection is unavailable for this media container. Playback can still use the device’s default tracks.",
   "Die Spurauswahl ist für diesen Mediencontainer nicht verfügbar. Die Wiedergabe kann weiterhin die Standardspuren des Geräts verwenden."));
@@ -54,17 +54,14 @@ function validate(result, size) {
   return result;
 }
 
-export async function inspectMediaTracks(blob, { signal } = {}) {
+async function readTrackWorker(blob, { signal, subtitleId } = {}) {
   signal?.throwIfAborted();
   if (!(blob instanceof Blob) || !blob.size || blob.size > VAULT_MEDIA_TRACK_LIMITS.inputBytes || typeof Worker !== "function") throw unavailable();
-  const buffer = await blob.arrayBuffer();
-  if (signal?.aborted) { new Uint8Array(buffer).fill(0); throw aborted(); }
-  let parsed = await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     let worker, timer, finished = false;
     const done = (error, value) => {
       if (finished) { wipeParsedResult(value); return; } finished = true;
       clearTimeout(timer); signal?.removeEventListener("abort", cancel); worker?.terminate();
-      if (buffer.byteLength) new Uint8Array(buffer).fill(0);
       if (error) reject(error); else resolve(value);
     };
     const cancel = () => done(aborted());
@@ -79,19 +76,25 @@ export async function inspectMediaTracks(blob, { signal } = {}) {
         catch (error) { wipeParsedResult(result); done(error); }
       };
       worker.onerror = () => done(unavailable());
-      worker.postMessage({ bytes: buffer }, [buffer]);
+      worker.postMessage({ blob, ...(subtitleId === undefined ? {} : { subtitleId }) });
     } catch { done(unavailable()); }
     if (signal?.aborted) cancel();
   });
-  let disposed = false;
+}
+
+export async function inspectMediaTracks(blob, { signal } = {}) {
+  let parsed = await readTrackWorker(blob, { signal });
+  let disposed = false, subtitleLoading = null;
+  const loadedSubtitles = new Set();
   const check = () => { if (disposed || signal?.aborted) throw aborted(); };
   const audio = parsed.audio.map(({ id, language, label, default: primary }) => ({ id, language, label, default: Boolean(primary) }));
   const subtitles = parsed.subtitles.map(({ id, language, label, format, supported }) => ({ id, language, label, format, supported: supported !== false }));
   function dispose() {
     if (disposed) return; disposed = true; signal?.removeEventListener("abort", dispose);
+    subtitleLoading?.controller.abort(); subtitleLoading = null;
     wipeParsedResult(parsed); parsed = null;
     for (const track of [...audio, ...subtitles]) { track.label = ""; track.language = ""; }
-    audio.length = 0; subtitles.length = 0;
+    audio.length = 0; subtitles.length = 0; loadedSubtitles.clear(); blob = null;
   }
   signal?.addEventListener("abort", dispose, { once: true });
   if (signal?.aborted) { dispose(); throw aborted(); }
@@ -108,8 +111,44 @@ export async function inspectMediaTracks(blob, { signal } = {}) {
       check(); return result;
     },
     async readSubtitles(id) {
-      check(); const track = parsed.subtitles.find(value => value.id === id);
+      check(); let track = parsed.subtitles.find(value => value.id === id);
       if (!track || track.supported === false) throw new Error(t("This subtitle format cannot be displayed as local text captions.", "Dieses Untertitelformat kann nicht als lokale Textuntertitel angezeigt werden."));
+      if (parsed.lazySubtitles && !loadedSubtitles.has(id)) {
+        if (subtitleLoading?.id !== id) {
+          subtitleLoading?.controller.abort();
+          const controller = new AbortController(), lifetime = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+          const promise = (async () => {
+            let result;
+            try {
+              result = await readTrackWorker(blob, { signal: lifetime, subtitleId: id }); lifetime.throwIfAborted(); check();
+              const selected = result.subtitles.find(value => value.id === id);
+              if (!selected || selected.supported === false) throw unavailable();
+              const bytes = cues => cues.reduce((total, cue) => total + new TextEncoder().encode(cue.text).byteLength, 0);
+              let totalCues = selected.cues.length, totalBytes = bytes(selected.cues);
+              for (const previous of parsed.subtitles) if (previous.id !== id) { totalCues += previous.cues.length; totalBytes += bytes(previous.cues); }
+              if (totalCues > VAULT_MEDIA_TRACK_LIMITS.cues || totalBytes > VAULT_MEDIA_TRACK_LIMITS.textBytes) {
+                for (const previous of parsed.subtitles) if (previous.id !== id) {
+                  for (const cue of previous.cues) cue.text = ""; previous.cues.length = 0; loadedSubtitles.delete(previous.id);
+                }
+              }
+              track = parsed.subtitles.find(value => value.id === id); track.cues = selected.cues; selected.cues = [];
+              loadedSubtitles.add(id);
+            } catch (error) {
+              if (!disposed && error?.name !== "AbortError") {
+                const current = parsed.subtitles.find(value => value.id === id), shown = subtitles.find(value => value.id === id);
+                if (current) current.supported = false; if (shown) shown.supported = false;
+              }
+              if (error?.name === "AbortError") throw error;
+              throw new Error(t("This subtitle track exceeds the local extraction limits or cannot be read on this device.",
+                "Diese Untertitelspur überschreitet die lokalen Lesegrenzen oder kann auf diesem Gerät nicht gelesen werden."));
+            } finally { wipeParsedResult(result); }
+          })();
+          subtitleLoading = { id, controller, promise };
+        }
+        const pending = subtitleLoading;
+        try { await pending.promise; } finally { if (subtitleLoading === pending) subtitleLoading = null; }
+        check(); track = parsed.subtitles.find(value => value.id === id);
+      }
       return track.cues.map(cue => ({ ...cue }));
     }, dispose };
 }
@@ -163,7 +202,10 @@ export async function attachMediaTracks(media, blob, { signal, onChange, onError
     }
     const entry = source.subtitles.find(track => track.id === id);
     if (!entry || entry.supported === false) throw unavailable();
-    const cues = await source.readSubtitles(id); check();
+    let cues;
+    try { cues = await source.readSubtitles(id); }
+    catch (error) { changed(); throw error; }
+    check();
     if (generation !== subtitleGeneration) return false;
     subtitleHandle = subtitleHandles.get(media);
     if (!subtitleHandle) {

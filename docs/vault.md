@@ -30,18 +30,24 @@ Select a file name, **Play** for audio/video, or **Open and edit** for an editab
 
 | File type | Available tools | Local limits |
 | --- | --- | --- |
-| Images, including PNG, JPEG, WebP, GIF, BMP, AVIF, and validated ICO icons | Crop edges, rotate, flip horizontally or vertically, and export as PNG, JPEG, or WebP | 128 MiB input and 33,554,432 decoded pixels |
-| Videos and audio, including supported MKV files | Local player with playback controls | 128 MiB input; available codecs depend on your browser and operating system |
+| Images, including PNG, JPEG, WebP, GIF, BMP, AVIF, and validated ICO icons | Crop edges, rotate, flip horizontally or vertically, and export as PNG, JPEG, or WebP | 10 GiB input and 33,554,432 decoded pixels |
+| Videos and audio, including supported MKV files | Local player with playback controls | 10 GiB input; available codecs depend on your browser and operating system |
 | PDF | Preview individual pages, reorder, rotate, delete pages, and position text notes | 64 MiB input, up to 500 pages; at least one page must remain |
 | Text, Markdown, JSON, CSV, configuration files, and common source-code formats | Edit UTF-8 or BOM-marked UTF-16 text, toggle line wrapping, and see line/character counts; JSON syntax is checked before saving | 2 MiB including encoding and BOM |
 | DOCX documents and XLSX spreadsheets | Edit paragraphs, tables, and spreadsheet cells; save a simplified DOCX or XLSX copy | 32 MiB input; 2 MiB of text, 20,000 cells, 2,000 rows, 64 columns per row, and 20 worksheets |
 | ZIP, TAR, TAR.GZ, and TGZ archives | Browse folders, open supported member files locally, download a member, or save it as a new encrypted Vault file | 64 MiB input, 128 MiB expanded content, 2,000 entries; up to 32 MiB per extracted file |
+
+Media input supports up to **10 GiB (10,737,418,240 bytes)** per file, subject to your Vault storage allowance. Files are authenticated and decrypted in chunks before opening; large files take time to prepare. The browser manages the resulting local data and may use temporary files on your device. Sufficient local storage and browser quota are required; availability also depends on your device and decoder. Closing the preview releases its references, but secure erasure of browser temporary storage is not guaranteed. The server receives neither plaintext nor decryption keys. Image dimensions are checked before decoding; the separate pixel limit remains in place.
+
+Image decoding reads at most **512 MiB of encoded data** to produce the first frame. An image whose first frame needs more data cannot be opened locally. If your browser cannot decode that image format from a stream, the fallback supports images up to **128 MiB** instead. Image size on disk and decoded pixel count are separate limits; the 10 GiB input allowance does not guarantee that every image can be decoded on every device.
 
 Image exports are static and remove the source image's metadata; animated images become a static image. Exported editing copies are limited to 128 MiB.
 
 Audio and video open in a local player and are not edited or exported in Vault. MKV playback supports combinations such as H.264/AAC and VP9/Opus when the browser and operating system provide the required codecs. An MKV filename alone does not guarantee playback. For unsupported codecs or files above the player limit, download the original and open it in a suitable local application.
 
 For supported MKV and MP4 files, **Audio** and **Subtitles** controls appear when multiple audio tracks or embedded subtitles are available. **Original audio (default)** restores the file's initial audio choice; **Off** disables subtitles. Embedded SRT and simple ASS text in MKV, and `mov_text` subtitles in MP4, can be displayed as passive text captions. ASS layout and styling are not preserved. Bitmap subtitle formats such as PGS are unavailable and shown as disabled choices; download the original for a suitable local player. Tracks come from the locally decrypted file, without contacting an external subtitle service. Your choices apply only on your device, including during Vault playback in a room: every viewer chooses independently, and the room's shared playback state and other viewers' language choices are unchanged.
+
+Track inspection has separate safety limits: **64 tracks**, **16 MiB of metadata**, and **32 MiB of local file reads per inspection**. Text subtitles are limited to **20,000 captions and 2 MiB of text**. MKV subtitle text is read when you select its track. Exceeding these limits can make a subtitle track or custom track selection unavailable even when normal playback still works. Use the original audio choice or download the file for a suitable local player.
 
 Text copies preserve the detected UTF-8 or UTF-16 LE/BE encoding, BOM, and line-ending style. UTF-16 input needs a BOM for automatic detection. Invalid Unicode and binary data are refused; other text encodings must be converted in a suitable local application first.
 
@@ -63,7 +69,7 @@ Downloads are decrypted on your device and saved as ordinary files. Browsers wit
 
 ## Play together in a room
 
-For an audio or video file in your own Vault, choose **Play in a room** in its file menu or player. Files up to **128 MiB** are supported. Choose a room you have joined and one of its live channels; your account must be allowed to start playback there.
+For an audio or video file in your own Vault, choose **Play in a room** in its file menu or player. Files up to **10 GiB** are supported. Choose a room you have joined and one of its live channels; your account must be allowed to start playback there.
 
 - If no watch party is active, choose **Play together here** to prepare a synchronized watch party.
 - If a watch party is already active, choose **Add to queue** to play your file after the current item.

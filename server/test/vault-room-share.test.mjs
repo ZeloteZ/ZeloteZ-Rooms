@@ -9,12 +9,12 @@ const { canShareVaultPlayback, loadVaultPlaybackRooms } = await import('../../we
 
 test('room playback entry points require own ready, unlocked media within the authenticated reader limit', () => {
   const user = { id: randomUUID() }
-  const entry = { kind: 'file', state: 'ready', ownerId: user.id, name: 'private-video.mp4', type: 'video/mp4', descriptor: { size: 128 * 1024 ** 2 } }
+  const entry = { kind: 'file', state: 'ready', ownerId: user.id, name: 'private-video.mp4', type: 'video/mp4', descriptor: { size: 10 * 1024 ** 3 } }
   assert.equal(canShareVaultPlayback(entry, user), true)
   assert.equal(canShareVaultPlayback({ ...entry, type: 'audio/mpeg', name: 'music.mp3' }, user), true)
   for (const changed of [
     { ownerId: randomUUID() }, { receivedShareId: randomUUID() }, { state: 'uploading' }, { locked: true }, { kind: 'folder' },
-    { descriptor: { size: 128 * 1024 ** 2 + 1 } }, { descriptor: { size: -1 } }, { descriptor: { size: NaN } },
+    { descriptor: { size: 10 * 1024 ** 3 + 1 } }, { descriptor: { size: -1 } }, { descriptor: { size: NaN } },
     { name: 'private.svg', type: 'image/svg+xml' }, { name: 'document.pdf', type: 'application/pdf' },
   ]) assert.equal(canShareVaultPlayback({ ...entry, ...changed }, user), false, JSON.stringify(changed))
   assert.equal(canShareVaultPlayback(entry, { id: randomUUID() }), false)

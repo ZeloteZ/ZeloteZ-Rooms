@@ -8,7 +8,7 @@ const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 export function canShareVaultPlayback(entry, user) {
   const size = entry?.descriptor?.size ?? entry?.plainBytes ?? entry?.size;
   return !!user?.id && entry?.ownerId === user.id && !entry.receivedShareId && !entry.locked && entry.kind === "file" && entry.state === "ready"
-    && Number.isSafeInteger(size) && size >= 0 && size <= VAULT_EDITOR_LIMITS.inputBytes && ["audio", "video"].includes(vaultFileKind(entry));
+    && Number.isSafeInteger(size) && size >= 0 && size <= VAULT_EDITOR_LIMITS.mediaBytes && ["audio", "video"].includes(vaultFileKind(entry));
 }
 
 export async function loadVaultPlaybackRooms({ signal, request = api } = {}) {
@@ -52,7 +52,7 @@ export async function openVaultRoomShare({ entry, client, user, signal, onShared
       el("p", { class: "muted" }, t(
         "This creates a revocable encrypted share for 24 hours. Current room members can decrypt and play the file. The original stays in your Vault.",
         "Dabei entsteht eine widerrufbare verschlüsselte Freigabe für 24 Stunden. Aktuelle Raummitglieder können die Datei entschlüsseln und abspielen. Das Original bleibt in deinem Vault.")),
-      el("p", { class: "subtle" }, t("Room playback supports Vault files up to 128 MiB.", "Die Raumwiedergabe unterstützt Vault-Dateien bis 128 MiB.")),
+      el("p", { class: "subtle" }, t("Room playback supports Vault files up to 10 GiB.", "Die Raumwiedergabe unterstützt Vault-Dateien bis 10 GiB.")),
       el("div", { class: "stack vault-room-share-fields" }, field(t("Room", "Raum"), roomChoice),
         field(t("Live channel", "Live-Kanal"), channelChoice), stateNote, action),
       feedback, result));

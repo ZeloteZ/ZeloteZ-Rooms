@@ -1,6 +1,7 @@
 import { t } from "./i18n.js";
 import { button, closeDialog, el, field, notify, select, showDialog, status, tell } from "./ui.js";
-import { VAULT_EDITOR_LIMITS, abortEditor, canvasBlob, editedFileName, editorEvent, createVaultPlayback, formatMediaTime, imageCrop, mediaDuration, rasterImageType, validateIconImage, vaultFileKind } from "./vault-media-edit.js";
+import { VAULT_EDITOR_LIMITS, abortEditor, canvasBlob, editedFileName, editorEvent, createVaultPlayback, formatMediaTime, imageCrop, mediaDuration, vaultFileKind } from "./vault-media-edit.js";
+import { decodeVaultImage } from "./vault-image-inspect.js";
 import { decodeVaultText, encodeVaultText } from "./vault-text-codec.js";
 import { officeEditor } from "./vault-office-editor.js";
 import { VAULT_OFFICE_LIMITS } from "./vault-office.js";
@@ -139,7 +140,9 @@ export async function openVaultEditor({ entry, client, signal, onSaved, onShare 
     }
     const maximum = kind === "text" ? VAULT_EDITOR_LIMITS.textBytes : kind === "pdf" ? VAULT_EDITOR_LIMITS.pdfBytes
       : kind === "office" ? VAULT_OFFICE_LIMITS.inputBytes : archiveOnly ? VAULT_ARCHIVE_LIMITS.inputBytes : VAULT_EDITOR_LIMITS.inputBytes;
-    const blob = await client.readBlob(entry, { signal: lifetime, maxBytes: maximum, onProgress: update });
+    const mediaInput = kind === "image" || playbackOnly;
+    const blob = await (mediaInput && client.readMediaBlob ? client.readMediaBlob : client.readBlob)(entry,
+      { signal: lifetime, maxBytes: mediaInput ? VAULT_EDITOR_LIMITS.mediaBytes : maximum, onProgress: update });
     abortEditor(lifetime);
     const environment = { signal: lifetime, stage, tools, filename, objectUrl, disposers, dirtyChanged, update, onShare: entry.receivedShareId ? undefined : onShare };
     if (kind === "image") builder = await imageEditor(blob, environment);
@@ -223,16 +226,12 @@ async function textEditor(blob, entry, { signal, stage, tools, dirtyChanged }) {
   };
 }
 
-async function imageEditor(blob, { signal, stage, tools, filename, objectUrl, disposers, dirtyChanged }) {
-  const type = rasterImageType(new Uint8Array(await blob.slice(0, 4096).arrayBuffer()));
+async function imageEditor(blob, { signal, stage, tools, filename, disposers, dirtyChanged }) {
+  const image = await decodeVaultImage(blob, { signal });
+  if (signal?.aborted) { image.close(); abortEditor(signal); }
+  disposers.push(() => image.close());
   abortEditor(signal);
-  if (!type) throw new Error(t("This file is not a supported raster image.", "Diese Datei ist kein unterstütztes Rasterbild."));
-  if (type === "image/x-icon") await validateIconImage(blob, { signal });
-  const image = el("img", { alt: "", decoding: "async" });
-  disposers.push(() => image.removeAttribute("src"));
-  const ready = editorEvent(image, "load", { signal }); image.src = objectUrl(new Blob([blob], { type })); await ready;
-  abortEditor(signal);
-  imageCrop(image.naturalWidth, image.naturalHeight);
+  imageCrop(image.width, image.height);
   const canvas = el("canvas", { class: "vault-image-canvas", "aria-label": t("Edited image preview", "Vorschau des bearbeiteten Bildes") });
   const rotation = select([["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], "0");
   const flipX = el("input", { type: "checkbox" }), flipY = el("input", { type: "checkbox" });
@@ -240,7 +239,7 @@ async function imageEditor(blob, { signal, stage, tools, filename, objectUrl, di
   const crops = Object.fromEntries(["left", "top", "right", "bottom"].map(key => [key, numberControl(0, 0, 95)]));
   const cropFeedback = status();
   function draw() {
-    const crop = imageCrop(image.naturalWidth, image.naturalHeight, Object.fromEntries(Object.entries(crops).map(([key, input]) => [key, checkedNumber(input)])));
+    const crop = imageCrop(image.width, image.height, Object.fromEntries(Object.entries(crops).map(([key, input]) => [key, checkedNumber(input)])));
     const turn = checkedNumber(rotation);
     canvas.width = turn % 180 ? crop.height : crop.width; canvas.height = turn % 180 ? crop.width : crop.height;
     const context = canvas.getContext("2d");
@@ -263,7 +262,7 @@ async function imageEditor(blob, { signal, stage, tools, filename, objectUrl, di
     cropFeedback, field(t("Output format", "Ausgabeformat"), format),
     el("p", { class: "subtle" }, t("Export creates a static image and removes the source file’s metadata.", "Der Export erstellt ein statisches Bild und entfernt die Metadaten der Quelldatei.")));
   stage.append(canvas); draw();
-  disposers.push(() => { image.removeAttribute("src"); canvas.width = 1; canvas.height = 1; });
+  disposers.push(() => { canvas.width = 1; canvas.height = 1; });
   return async () => {
     abortEditor(signal); draw();
     const output = await canvasBlob(canvas, format.value);

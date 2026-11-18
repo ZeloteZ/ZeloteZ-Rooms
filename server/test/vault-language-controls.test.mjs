@@ -79,6 +79,16 @@ test('active selection failures report once and preserve the controller selectio
   assert.equal(f.note.textContent, 'local track failed');
 });
 
+test('a subtitle exceeding lazy read limits becomes unavailable without blocking audio controls', async t => {
+  const f = fixture(t, { audio: [{ id: '1', language: 'deu', label: '' }, { id: '2', language: 'eng', label: '' }],
+    subtitles: [{ id: 's1', language: 'eng', label: 'Large captions', supported: true }] });
+  await f.mounted.ready;
+  f.controller.selectSubtitle = async () => { f.controller.subtitles[0].supported = false; f.callbacks().onChange(); throw new Error('caption limits'); };
+  f.subtitles.value = 's1'; f.subtitles.dispatchEvent(new Event('change')); await flush();
+  assert.equal(f.subtitles.children[1].disabled, true); assert.match(f.subtitles.children[1].textContent, /unavailable/u);
+  assert.equal(f.audio.disabled, false); assert.equal(f.subtitles.value, 'off'); assert.equal(f.mounted.switching, false);
+});
+
 test('abort disposes the track controller once and late selection events cannot act', async t => {
   const scope = new AbortController();
   const f = fixture(t, { options: { signal: scope.signal }, audio: [{ id: '1', language: 'deu', label: '' }, { id: '2', language: 'eng', label: '' }] });

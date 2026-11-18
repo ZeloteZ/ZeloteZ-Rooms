@@ -29,8 +29,8 @@ export async function startVaultWatch({ entry, client, user, channelId, signal, 
   if (!entry || entry.kind !== "file" || entry.state !== "ready" || entry.receivedShareId || entry.ownerId !== user.id || !media(entry)) throw new Error(t(
     "Choose one of your own audio or video files.", "Wähle eine eigene Audio- oder Videodatei."));
   const size = entry.descriptor?.size ?? entry.plainBytes ?? entry.size;
-  if (!Number.isSafeInteger(size) || size < 0 || size > VAULT_EDITOR_LIMITS.inputBytes) throw new Error(t(
-    "Room playback supports Vault files up to 128 MiB.", "Die Raumwiedergabe unterstützt Vault-Dateien bis 128 MiB."));
+  if (!Number.isSafeInteger(size) || size < 0 || size > VAULT_EDITOR_LIMITS.mediaBytes) throw new Error(t(
+    "Room playback supports Vault files up to 10 GiB.", "Die Raumwiedergabe unterstützt Vault-Dateien bis 10 GiB."));
   const endpoint = "channels/" + channelId;
   const members = await api(endpoint + "/messages?after=0", { signal });
   abortEditor(signal);
@@ -89,9 +89,9 @@ export async function openVaultWatch({ party, channelId, signal, onProgress } = 
     remote = await openPublicVault(link, { signal: lifetime });
     abortEditor(lifetime);
     if (remote.share?.id !== party.shareId || remote.share.ownerId !== identity.id || remote.opened.ownerId !== identity.id || !media(remote.opened)) throw invalid();
-    const blob = await remote.readBlob({ signal: lifetime, onProgress, maxBytes: VAULT_EDITOR_LIMITS.inputBytes });
+    const blob = await remote.readMediaBlob({ signal: lifetime, onProgress, maxBytes: VAULT_EDITOR_LIMITS.mediaBytes });
     abortEditor(lifetime);
-    if (!(blob instanceof Blob) || blob.size > VAULT_EDITOR_LIMITS.inputBytes) throw invalid();
+    if (!(blob instanceof Blob) || blob.size > VAULT_EDITOR_LIMITS.mediaBytes) throw invalid();
     result = { blob, name: remote.opened.name, type: remote.opened.type, kind: vaultFileKind(remote.opened), close };
     return result;
   } catch (error) { close(); throw error; }

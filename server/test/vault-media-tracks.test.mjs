@@ -79,3 +79,33 @@ test("a selected stream with no decodable audio restores the previous source and
   assert.equal(controller.audioId, "original"); assert.equal(controller.switching, false); assert.equal(media.captureStops, 1);
   controller.dispose(); assert.equal(media.src, "blob:parent-owned");
 });
+
+test("large Blob inspection never buffers the source and lazy captions share a bounded worker/cache", async t => {
+  fixture(t);
+  class LargeBlob extends Blob {
+    get size() { return 10 * 1024 ** 3; }
+    arrayBuffer() { throw new Error("Whole-media buffering is forbidden"); }
+  }
+  const blob = new LargeBlob([new Uint8Array([1])]), inspecting = inspectMediaTracks(blob);
+  const first = await pendingWorker(), metadata = result(); metadata.lazySubtitles = true; metadata.subtitles[0].cues = [];
+  assert.equal(first.input.blob, blob); assert.equal(first.input.bytes, undefined);
+  first.result(metadata); const source = await inspecting;
+  const a = source.readSubtitles("2"), second = WorkerFixture.instances.at(-1), b = source.readSubtitles("2");
+  assert.equal(WorkerFixture.instances.length, 2); assert.equal(second.input.subtitleId, "2");
+  const loaded = result(), cue = loaded.subtitles[0].cues[0]; second.result(loaded);
+  assert.deepEqual(await a, [{ start: 0, end: 1, text: "Private cue text" }]);
+  assert.deepEqual(await b, await source.readSubtitles("2")); assert.equal(WorkerFixture.instances.length, 2);
+  source.dispose(); assert.equal(cue.text, "");
+});
+
+test("a lazy subtitle failure disables only that track and retains usable audio metadata", async t => {
+  fixture(t);
+  const inspecting = inspectMediaTracks(new Blob([new Uint8Array([1])]));
+  const first = await pendingWorker(), metadata = result(); metadata.lazySubtitles = true; metadata.subtitles[0].cues = [];
+  first.result(metadata); const source = await inspecting;
+  const reading = source.readSubtitles("2"), second = WorkerFixture.instances.at(-1);
+  second.onmessage({ data: { error: true } });
+  await assert.rejects(reading, /subtitle track/u);
+  assert.equal(source.subtitles[0].supported, false); assert.equal(source.audio.length, 1);
+  source.dispose();
+});

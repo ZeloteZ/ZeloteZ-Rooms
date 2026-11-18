@@ -2,8 +2,10 @@ import { t } from "./i18n.js";
 import { accountHeaders, api, checkAccountResponse } from "./ui.js";
 import { CHUNK_SIZE, MAX_FILE_SIZE, validateName, createFile, createFolder, openEntry, renameEntry, encryptChunk, decryptChunk, destroySecret,
   sealMemberShare, openMemberShare, createShare, openShare, sealShareLink, openShareLink, validateDescriptor } from "./vault-crypto.js";
+import { vaultFileKind } from "./vault-media-edit.js";
 
 export const BLOB_DOWNLOAD_LIMIT = 128 * 1024 * 1024;
+export const MEDIA_BLOB_LIMIT = 10 * 1024 ** 3;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const downloads = new Set();
@@ -27,6 +29,81 @@ function id(value) {
 }
 function combined(first, second) {
   return first && second ? AbortSignal.any([first, second]) : first ?? second;
+}
+function localBlobFailure() {
+  return Object.assign(new Error(t("Your browser could not prepare this file. Free local temporary storage or download it instead.",
+    "Dein Browser konnte diese Datei nicht vorbereiten. Gib lokalen temporären Speicher frei oder lade die Datei stattdessen herunter.")), { code: "VAULT_LOCAL_STORAGE" });
+}
+function previewLimit(value, media) {
+  const maximum = media ? MEDIA_BLOB_LIMIT : BLOB_DOWNLOAD_LIMIT;
+  const limit = value ?? maximum;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > maximum) throw new Error(t(
+    "The local editor memory limit is invalid.", "Das Speicherlimit des lokalen Editors ist ungültig."));
+  return limit;
+}
+async function blobReady(blob, signal) {
+  cancelled(signal);
+  if (!blob.size) return;
+  let read;
+  try { read = blob.slice(blob.size - 1, blob.size).arrayBuffer(); }
+  catch { throw localBlobFailure(); }
+  // Reading a real byte waits for the browser's Blob construction and storage
+  // quota. Do not enqueue the next plaintext chunk while this one is pending.
+  await new Promise((resolve, reject) => {
+    let finished = false;
+    const done = error => {
+      if (finished) return;
+      finished = true; clearTimeout(timer); signal?.removeEventListener("abort", abort);
+      if (error) reject(error); else resolve();
+    };
+    const abort = () => { try { cancelled(signal); } catch (error) { done(error); } };
+    const timer = setTimeout(() => done(localBlobFailure()), 30000);
+    signal?.addEventListener("abort", abort, { once: true });
+    Promise.resolve(read).then(buffer => {
+      const size = buffer instanceof ArrayBuffer ? buffer.byteLength : -1;
+      if (size > 0) new Uint8Array(buffer).fill(0);
+      if (!finished) { if (signal?.aborted) abort(); else done(size === 1 ? undefined : localBlobFailure()); }
+    }, () => { if (!finished) { if (signal?.aborted) abort(); else done(localBlobFailure()); } });
+    if (signal?.aborted) abort();
+  });
+  cancelled(signal);
+}
+async function readAuthenticatedBlob(opened, readChunk, { signal, onProgress, limit, media } = {}) {
+  const descriptor = validateDescriptor(opened.descriptor);
+  if (descriptor.size > limit) throw new Error(t(
+    "This file is too large for the local preview. Download it to open it on your device.",
+    "Diese Datei ist zu groß für die lokale Vorschau. Lade sie herunter, um sie auf deinem Gerät zu öffnen."));
+  if (media && !["image", "video", "audio"].includes(vaultFileKind(opened))) throw new Error(t(
+    "Choose an image, video or audio file for the media player.", "Wähle eine Bild-, Video- oder Audiodatei für den Medienplayer."));
+  const parts = [];
+  let result;
+  try {
+    let done = 0;
+    for (let index = 0; index < descriptor.chunks; index += 1) {
+      cancelled(signal);
+      const length = Math.min(CHUNK_SIZE, descriptor.size - index * CHUNK_SIZE);
+      const encrypted = await readChunk(index, length + 28);
+      let plaintext, part;
+      try {
+        cancelled(signal);
+        plaintext = await decryptChunk(opened.secret, descriptor, index, encrypted);
+        cancelled(signal);
+        try { part = new Blob([plaintext]); } catch { throw localBlobFailure(); }
+      } finally { plaintext?.fill(0); encrypted.fill(0); }
+      await blobReady(part, signal);
+      parts.push(part); done += part.size;
+      onProgress?.({ done, total: Math.max(1, descriptor.size) });
+    }
+    cancelled(signal);
+    try { result = new Blob(parts, { type: opened.type || "application/octet-stream" }); }
+    catch { throw localBlobFailure(); }
+    if (result.size !== descriptor.size) throw new Error(t(
+      "The encrypted file is incomplete or damaged.", "Die verschlüsselte Datei ist unvollständig oder beschädigt."));
+    await blobReady(result, signal);
+    cancelled(signal); return result;
+  } finally {
+    parts.length = 0; result = null;
+  }
 }
 function safeDownloadName(value, maxBytes = 240) {
   let name = String(value ?? "").replace(/[\/\\:*?"<>|\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, "_");
@@ -425,48 +502,23 @@ export function createVaultClient({ user, signal: lifetime } = {}) {
     if (source.receivedShareId) id(source.receivedShareId);
     return source;
   }
-  async function readBlob(entry, options = {}) {
+  async function readPreview(entry, options = {}, media = false) {
     const request = operation(options);
     cancelled(request.signal);
     const source = editableSource(entry);
-    const limit = options.maxBytes ?? BLOB_DOWNLOAD_LIMIT;
-    if (!Number.isSafeInteger(limit) || limit < 0 || limit > BLOB_DOWNLOAD_LIMIT) {
-      throw new Error(t("The local editor memory limit is invalid.", "Das Speicherlimit des lokalen Editors ist ungültig."));
-    }
+    const limit = previewLimit(options.maxBytes, media);
     if (source.descriptor.size > limit) throw new Error(t(
       "This file is too large for the local editor. Download it to edit it on your device.",
       "Diese Datei ist zu groß für den lokalen Editor. Lade sie herunter, um sie auf deinem Gerät zu bearbeiten."));
     const details = await opened(source);
     cancelled(request.signal);
-    const descriptor = validateDescriptor(details.descriptor);
     const path = source.receivedShareId ? "vault/received/" + source.receivedShareId : "vault/entries/" + source.id;
-    const buffers = [];
     try {
-      let done = 0;
-      for (let index = 0; index < descriptor.chunks; index += 1) {
-        cancelled(request.signal);
-        const length = Math.min(CHUNK_SIZE, descriptor.size - index * CHUNK_SIZE);
-        const encrypted = await readVaultChunk(path + "/chunks/" + index, length + 28, request);
-        cancelled(request.signal);
-        const plaintext = await decryptChunk(details.secret, descriptor, index, encrypted);
-        buffers.push(plaintext);
-        cancelled(request.signal);
-        done += plaintext.byteLength;
-        options.onProgress?.({ done, total: Math.max(1, descriptor.size) });
-      }
-      cancelled(request.signal);
-      const result = new Blob(buffers, { type: details.type || "application/octet-stream" });
-      if (result.size !== descriptor.size) throw new Error(t(
-        "The encrypted file is incomplete or damaged.", "Die verschlüsselte Datei ist unvollständig oder beschädigt."));
-      cancelled(request.signal);
-      return result;
+      return await readAuthenticatedBlob(details, (index, size) => readVaultChunk(path + "/chunks/" + index, size, request),
+        { signal: request.signal, onProgress: options.onProgress, limit, media });
     } catch (error) {
       if ([401, 403, 404].includes(error.status)) clearCache();
       throw error;
-    } finally {
-      // Blob construction copies these bytes. Failed/aborted previews retain no
-      // plaintext chunk buffers or decrypted browser download objects.
-      for (const buffer of buffers) buffer.fill(0);
     }
   }
   async function saveEditedCopy(entry, blob, options = {}) {
@@ -489,7 +541,8 @@ export function createVaultClient({ user, signal: lifetime } = {}) {
     return result;
   }
   return {
-    list, upload, readBlob, saveEditedCopy,
+    list, upload, readBlob: (entry, options) => readPreview(entry, options),
+    readMediaBlob: (entry, options) => readPreview(entry, options, true), saveEditedCopy,
     async createFolder(parentId, name, options = {}) {
       const entryId = crypto.randomUUID(); const prepared = await createFolder(user, entryId, name);
       return api("vault/entries", { ...operation(options), method: "POST", body: { id: entryId, parentId, kind: "folder", descriptor: null, envelope: prepared.envelope } });
@@ -543,42 +596,16 @@ export async function openPublicVault(link, { signal } = {}) {
   const scope = new AbortController();
   const lifetime = combined(signal, scope.signal);
   lifetime.addEventListener("abort", () => destroySecret(opened.secret), { once: true });
+  async function readPreview(options = {}, media = false) {
+    const requestSignal = combined(lifetime, options.signal);
+    cancelled(requestSignal);
+    return readAuthenticatedBlob(opened, (index, size) => readVaultChunk("vault/public/" + id(link.id) + "/chunks/" + index, size,
+      { signal: requestSignal, token: link.token, publicAccess: true }),
+    { signal: requestSignal, onProgress: options.onProgress, limit: previewLimit(options.maxBytes, media), media });
+  }
   return {
     opened, share: result.share,
-    async readBlob(options = {}) {
-      const requestSignal = combined(lifetime, options.signal);
-      cancelled(requestSignal);
-      const descriptor = validateDescriptor(opened.descriptor);
-      const limit = options.maxBytes ?? BLOB_DOWNLOAD_LIMIT;
-      if (!Number.isSafeInteger(limit) || limit < 0 || limit > BLOB_DOWNLOAD_LIMIT) throw new Error(t(
-        "The local editor memory limit is invalid.", "Das Speicherlimit des lokalen Editors ist ungültig."));
-      if (descriptor.size > limit) throw new Error(t(
-        "This file is too large for the local player. Download it to play it on your device.",
-        "Diese Datei ist zu groß für den lokalen Player. Lade sie herunter, um sie auf deinem Gerät abzuspielen."));
-      const buffers = [];
-      try {
-        let done = 0;
-        for (let index = 0; index < descriptor.chunks; index += 1) {
-          cancelled(requestSignal);
-          const length = Math.min(CHUNK_SIZE, descriptor.size - index * CHUNK_SIZE);
-          const encrypted = await readVaultChunk("vault/public/" + id(link.id) + "/chunks/" + index, length + 28,
-            { signal: requestSignal, token: link.token, publicAccess: true });
-          cancelled(requestSignal);
-          const plaintext = await decryptChunk(opened.secret, descriptor, index, encrypted);
-          buffers.push(plaintext);
-          cancelled(requestSignal);
-          done += plaintext.byteLength;
-          options.onProgress?.({ done, total: Math.max(1, descriptor.size) });
-        }
-        cancelled(requestSignal);
-        const blob = new Blob(buffers, { type: opened.type || "application/octet-stream" });
-        if (blob.size !== descriptor.size) throw new Error(t(
-          "The encrypted file is incomplete or damaged.", "Die verschlüsselte Datei ist unvollständig oder beschädigt."));
-        return blob;
-      } finally {
-        for (const buffer of buffers) buffer.fill(0);
-      }
-    },
+    readBlob: options => readPreview(options), readMediaBlob: options => readPreview(options, true),
     prepareDownload: () => prepareVaultDownload(opened),
     download: options => saveVaultFile(opened, (index, size) => readVaultChunk("vault/public/" + id(link.id) + "/chunks/" + index,
       size, { signal: options?.signal ?? signal, token: link.token, publicAccess: true }), options),

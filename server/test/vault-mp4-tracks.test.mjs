@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MP4_TRACK_LIMITS, parseMp4MediaTracks } from '../../web/vault-mp4-tracks.js';
+import { MP4_TRACK_LIMITS, parseMp4MediaTracks, parseMp4BlobMediaTracks } from '../../web/vault-mp4-tracks.js';
 
 const text = value => new TextEncoder().encode(value);
 function join(...parts) {
@@ -133,4 +133,99 @@ test('bounded typed-array views use local offsets rather than accidentally inspe
   assert.equal(result.audio.length, 2);
   assert.deepEqual(parseMp4MediaTracks(patched(source, result.audioPatches['3'])).audio.map(item => item.id), ['3']);
   assert.equal(backing[0], 99); assert.equal(backing.at(-1), 99);
+});
+
+class SparseMediaBlob extends Blob {
+  constructor(size, segments) { super(); this.length = size; this.segments = segments; this.requests = []; this.buffers = []; }
+  get size() { return this.length; }
+  arrayBuffer() { throw new Error('The entire media Blob must never be read'); }
+  slice(start, end) {
+    assert.ok(end - start <= MP4_TRACK_LIMITS.readChunkBytes, 'every media read must be bounded');
+    assert.ok(start >= 0 && end <= this.size);
+    this.requests.push([start, end]);
+    const data = new Uint8Array(end - start);
+    for (const segment of this.segments) {
+      const first = Math.max(start, segment.position), last = Math.min(end, segment.position + segment.data.length);
+      if (last > first) data.set(segment.data.subarray(first - segment.position, last - segment.position), first - start);
+    }
+    const blob = new Blob([data]), owner = this;
+    return { async arrayBuffer() { const result = await blob.arrayBuffer(); owner.buffers.push(new Uint8Array(result)); return result; } };
+  }
+}
+function sparseFixture({ extraMetadataBytes = 0 } = {}) {
+  const ftyp = atom('ftyp', text('isom'), numbers(0), text('isomiso2'));
+  const mdatSize = 5 * 1024 ** 3 + 16, header = join(numbers(1), text('mdat'), new Uint8Array(8));
+  new DataView(header.buffer).setBigUint64(8, BigInt(mdatSize));
+  const first = sample('Deutsch beyond 4 GiB'), second = sample('English beyond 4 GiB');
+  const position = ftyp.length + 16 + 4 * 1024 ** 3 + 200, moviePosition = ftyp.length + mdatSize;
+  const movieHeader = new Uint8Array(100); new DataView(movieHeader.buffer).setUint32(12, 1000);
+  const movie = atom('moov', atom('mvhd', movieHeader), audio(2, 'deu', 'Deutsch', true), audio(3, 'eng', 'English', false),
+    subtitle(4, 'deu', position, first, { co64: true }), subtitle(5, 'eng', position + first.length, second, { co64: true }),
+    ...(extraMetadataBytes ? [atom('free', new Uint8Array(extraMetadataBytes))] : []));
+  const blob = new SparseMediaBlob(moviePosition + movie.length, [{ position: 0, data: ftyp }, { position: ftyp.length, data: header },
+    { position, data: first }, { position: position + first.length, data: second }, { position: moviePosition, data: movie }]);
+  return { blob, moviePosition, position, mdatPayload: ftyp.length + 16 };
+}
+
+test('Blob MP4 parsing matches the synchronous API and supports an explicit lazy subtitle filter', async () => {
+  const source = fixture(), blob = new SparseMediaBlob(source.length, [{ position: 0, data: source }]);
+  assert.deepEqual(await parseMp4BlobMediaTracks(blob), parseMp4MediaTracks(source));
+  assert.ok(blob.buffers.every(buffer => buffer.every(byte => byte === 0)), 'all temporary range reads are wiped');
+  const filtered = await parseMp4BlobMediaTracks(blob, { subtitleId: '5' });
+  assert.equal(filtered.lazySubtitles, true);
+  assert.deepEqual(filtered.subtitles.map(track => track.cues.length), [0, 1]);
+  await assert.rejects(parseMp4BlobMediaTracks(blob, { subtitleId: 'unknown' }), { code: 'VAULT_MEDIA_TRACK_INVALID' });
+});
+
+test('multi-GiB mdat is skipped and tail moov/co64 retain absolute 64-bit file offsets without a full-file allocation', async () => {
+  const { blob, moviePosition, position, mdatPayload } = sparseFixture();
+  assert.ok(blob.size > 5 * 1024 ** 3);
+  const result = await parseMp4BlobMediaTracks(blob);
+  assert.deepEqual(result.audio.map(track => [track.id, track.language]), [['2', 'deu'], ['3', 'eng']]);
+  assert.deepEqual(result.subtitles.map(track => track.cues[0].text), ['Deutsch beyond 4 GiB', 'English beyond 4 GiB']);
+  for (const patches of Object.values(result.audioPatches)) assert.ok(patches.every(patch => patch.offset > moviePosition));
+  assert.ok(blob.requests.some(([start]) => start === position));
+  assert.ok(!blob.requests.some(([start, end]) => start >= mdatPayload && end <= position && end - start > 8), 'large media payload is not scanned');
+  assert.ok(blob.requests.reduce((sum, [start, end]) => sum + end - start, 0) < 10000);
+  assert.ok(blob.buffers.every(buffer => buffer.every(byte => byte === 0)));
+});
+
+test('large moov metadata is read in bounded windows while preserving absolute audio patch positions', async () => {
+  const { blob, moviePosition } = sparseFixture({ extraMetadataBytes: 2 * 1024 ** 2 });
+  const result = await parseMp4BlobMediaTracks(blob);
+  assert.ok(blob.requests.filter(([start, end]) => start >= moviePosition && end - start > 8).length >= 3);
+  assert.ok(blob.requests.every(([start, end]) => end - start <= MP4_TRACK_LIMITS.readChunkBytes));
+  assert.ok(result.audioPatches['3'].every(patch => patch.offset > moviePosition));
+});
+
+test('Blob MP4 bounds metadata before allocation and rejects late/cancelled reads without retaining their plaintext', async () => {
+  const oversized = sparseFixture(), marker = oversized.blob.segments.at(-1).data;
+  new DataView(marker.buffer).setUint32(0, MP4_TRACK_LIMITS.metadataBytes + 1);
+  oversized.blob.length = oversized.moviePosition + MP4_TRACK_LIMITS.metadataBytes + 1;
+  await assert.rejects(parseMp4BlobMediaTracks(oversized.blob), { code: 'VAULT_MEDIA_TRACK_LIMIT' });
+  assert.ok(oversized.blob.requests.every(([start, end]) => end - start <= 8));
+  const overFile = new SparseMediaBlob(MP4_TRACK_LIMITS.blobBytes + 1, []);
+  await assert.rejects(parseMp4BlobMediaTracks(overFile), { code: 'VAULT_MEDIA_TRACK_LIMIT' });
+  assert.deepEqual(overFile.requests, []);
+  const controller = new AbortController(), cancelled = sparseFixture().blob;
+  const slice = cancelled.slice.bind(cancelled);
+  cancelled.slice = (start, end) => {
+    const range = slice(start, end);
+    return { async arrayBuffer() { const data = await range.arrayBuffer(); controller.abort(); return data; } };
+  };
+  await assert.rejects(parseMp4BlobMediaTracks(cancelled, { signal: controller.signal }), { name: 'AbortError' });
+  assert.ok(cancelled.buffers.every(buffer => buffer.every(byte => byte === 0)));
+  await assert.rejects(parseMp4BlobMediaTracks(sparseFixture().blob, { deadline: 0 }), { code: 'VAULT_MEDIA_TRACK_LIMIT' });
+});
+
+test('UTF-16 subtitle text also obeys the decoded UTF-8 text budget', async () => {
+  const data = sample('计'.repeat(20000), 'utf-16le'), count = 40;
+  const ftyp = atom('ftyp', text('isom'), numbers(0), text('isomiso2'));
+  const samples = Array.from({ length: count }, () => data), mdat = atom('mdat', ...samples);
+  const movieHeader = new Uint8Array(100); new DataView(movieHeader.buffer).setUint32(12, 1000);
+  const tracks = samples.map((bytes, index) => subtitle(index + 4, 'zho', ftyp.length + 8 + index * data.length, bytes));
+  const source = join(ftyp, mdat, atom('moov', atom('mvhd', movieHeader), ...tracks));
+  assert.ok(count * data.length < MP4_TRACK_LIMITS.textBytes);
+  assert.throws(() => parseMp4MediaTracks(source), { code: 'VAULT_MEDIA_TRACK_LIMIT' });
+  await assert.rejects(parseMp4BlobMediaTracks(new Blob([source])), { code: 'VAULT_MEDIA_TRACK_LIMIT' });
 });

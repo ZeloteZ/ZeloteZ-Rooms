@@ -1,6 +1,6 @@
 import { t } from "./i18n.js";
 
-export const VAULT_EDITOR_LIMITS = Object.freeze({ inputBytes: 128 * 1024 ** 2, textBytes: 2 * 1024 ** 2,
+export const VAULT_EDITOR_LIMITS = Object.freeze({ inputBytes: 128 * 1024 ** 2, mediaBytes: 10 * 1024 ** 3, textBytes: 2 * 1024 ** 2,
   pdfBytes: 64 * 1024 ** 2, imagePixels: 32 * 1024 ** 2, pdfPages: 500 });
 
 const textExtensions = new Set("txt md markdown csv tsv json jsonl yaml yml xml html htm css js mjs cjs jsx ts tsx py sh bash ini conf config toml sql srt vtt ics vcf svg tex rb go rs c cpp h hpp java php ps1 log env gitignore".split(" "));
@@ -84,7 +84,7 @@ export function rasterImageType(bytes) {
 export async function validateIconImage(blob, { signal } = {}) {
   const invalid = () => new Error(t("This icon is invalid or exceeds the local image limits.", "Dieses Icon ist ungültig oder überschreitet die lokalen Bildgrenzen."));
   abortEditor(signal);
-  if (!(blob instanceof Blob) || blob.size < 22 || blob.size > VAULT_EDITOR_LIMITS.inputBytes) throw invalid();
+  if (!(blob instanceof Blob) || blob.size < 22 || blob.size > VAULT_EDITOR_LIMITS.mediaBytes) throw invalid();
   const header = new Uint8Array(await blob.slice(0, 4102).arrayBuffer());
   abortEditor(signal);
   if (rasterImageType(header) !== "image/x-icon") throw invalid();

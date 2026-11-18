@@ -38,6 +38,10 @@ export function mountVaultMediaLanguages(media, blob, { signal, ownerDocument = 
     if (disposed) return;
     const busy = pending !== null || controller?.switching === true;
     audio.select.disabled = busy; subtitles.select.disabled = busy;
+    if (controller) controller.subtitles.forEach((track, index) => {
+      const option = Array.from(subtitles.select.options ?? subtitles.select.children).find(value => value.value === track.id);
+      if (option) { option.disabled = track.supported === false; option.textContent = vaultMediaLanguageLabel(track, index, true); }
+    });
     audio.select.value = controller?.audioId ?? "original"; subtitles.select.value = controller?.subtitleId ?? "off";
     try { onChange?.({ switching: switching(), audioId: audio.select.value, subtitleId: subtitles.select.value }); } catch {}
   }

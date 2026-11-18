@@ -72,6 +72,13 @@ test('Vault room start and queue transmit only an authenticated encrypted refere
   await createParty(f, { behind: randomUUID() });
 });
 
+test('a 10GiB room source passes admission without downloading or uploading its content', async t => {
+  const f = await fixture(t);
+  f.entry.descriptor = { ...f.entry.descriptor, size: 10 * 1024 ** 3, chunks: 2560 };
+  await createParty(f);
+  assert.equal(f.calls.length, 1);
+});
+
 test('Vault room media decrypts locally for another recipient and close releases the service Blob reference', async t => {
   const f = await fixture(t);
   const party = await createParty(f);
@@ -126,6 +133,6 @@ test('failed or cancelled room start revokes only its dedicated newly-created sh
 test('room source selection rejects received, foreign, unsupported and oversized files before creating a link', async t => {
   const f = await fixture(t); let network = 0; globalThis.fetch = async () => { network++; throw new Error('unexpected request'); };
   for (const entry of [{ ...f.entry, receivedShareId: randomUUID() }, { ...f.entry, ownerId: randomUUID() },
-    { ...f.entry, name: 'unsafe.svg', type: 'image/svg+xml' }, { ...f.entry, descriptor: { ...f.entry.descriptor, size: 128 * 1024 ** 2 + 1 } }]) await assert.rejects(watch.startVaultWatch({ entry, client: f.service, user: f.owner.user, channelId: f.channelId }));
+    { ...f.entry, name: 'unsafe.svg', type: 'image/svg+xml' }, { ...f.entry, descriptor: { ...f.entry.descriptor, size: 10 * 1024 ** 3 + 1 } }]) await assert.rejects(watch.startVaultWatch({ entry, client: f.service, user: f.owner.user, channelId: f.channelId }));
   assert.equal(network, 0); assert.equal(f.calls.length, 0);
 });

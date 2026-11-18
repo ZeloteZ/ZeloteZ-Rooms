@@ -1,18 +1,20 @@
 export const MP4_TRACK_LIMITS = Object.freeze({ inputBytes: 128 * 1024 ** 2, tracks: 64, boxes: 10000,
-  samples: 20000, cues: 20000, textBytes: 2 * 1024 ** 2, sampleBytes: 256 * 1024, milliseconds: 15000 });
+  samples: 20000, cues: 20000, textBytes: 2 * 1024 ** 2, sampleBytes: 256 * 1024, milliseconds: 15000,
+  blobBytes: 10 * 1024 ** 3, metadataBytes: 16 * 1024 ** 2, readBytes: 32 * 1024 ** 2, readChunkBytes: 1024 ** 2 });
 const now = () => globalThis.performance?.now() ?? Date.now();
 const error = (code, message) => Object.assign(new Error(message), { code });
 const invalid = () => error("VAULT_MEDIA_TRACK_INVALID", "This media contains invalid track information.");
 const unsupported = () => error("VAULT_MEDIA_TRACK_UNSUPPORTED", "This media track format is not supported.");
 const exceeded = () => error("VAULT_MEDIA_TRACK_LIMIT", "This media exceeds the local track safety limits.");
 const free = new Uint8Array([102, 114, 101, 101]);
+const encoder = new TextEncoder();
 
-export function parseMp4MediaTracks(input, { deadline, signal } = {}) {
+function parseMp4TrackIndex(input, { deadline, signal, metadataOffset = 0, mediaRanges: externalMediaRanges } = {}) {
   const bytes = input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input) : null;
   if (!bytes || bytes.byteLength > MP4_TRACK_LIMITS.inputBytes) throw exceeded();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const until = Number.isFinite(deadline) ? Math.min(deadline, now() + MP4_TRACK_LIMITS.milliseconds) : now() + MP4_TRACK_LIMITS.milliseconds;
-  let boxCount = 0, sampleCount = 0, cueCount = 0, textBytes = 0;
+  let boxCount = 0, sampleCount = 0;
   const cache = new Map();
   function check() {
     if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
@@ -190,19 +192,6 @@ export function parseMp4MediaTracks(input, { deadline, signal } = {}) {
     for (let index = 1; index < ordered.length; index++) if (ordered[index].position < ordered[index - 1].end) throw invalid();
     return positions;
   }
-  function subtitleText(position, size) {
-    if (size < 2) throw invalid();
-    const length = view.getUint16(position);
-    if (length + 2 > size) throw invalid();
-    textBytes += length;
-    if (textBytes > MP4_TRACK_LIMITS.textBytes) throw exceeded();
-    const data = bytes.subarray(position + 2, position + 2 + length);
-    const encoding = data[0] === 0xff && data[1] === 0xfe ? "utf-16le" : data[0] === 0xfe && data[1] === 0xff ? "utf-16be" : "utf-8";
-    let text;
-    try { text = new TextDecoder(encoding, { fatal: true }).decode(data); } catch { throw invalid(); }
-    return text.replace(/\r\n?/gu, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, "");
-  }
-
   check();
   const top = boxes(0, bytes.length, true), moov = one(top, "moov"), movie = children(moov);
   if (top.some(box => box.type === "moof") || movie.some(box => box.type === "mvex" || box.type === "cmov")) throw unsupported();
@@ -210,10 +199,10 @@ export function parseMp4MediaTracks(input, { deadline, signal } = {}) {
   if (mvhd.end - movieStart < (movieVersion ? 32 : 20)) throw invalid();
   const movieTimescale = view.getUint32(movieStart + (movieVersion ? 20 : 12));
   if (!movieTimescale || movieTimescale > 1000000000) throw invalid();
-  const tracks = movie.filter(box => box.type === "trak"), mediaRanges = top.filter(box => box.type === "mdat");
+  const tracks = movie.filter(box => box.type === "trak"), mediaRanges = externalMediaRanges ?? top.filter(box => box.type === "mdat");
   if (tracks.length > MP4_TRACK_LIMITS.tracks) throw exceeded();
   if (!tracks.length || !mediaRanges.length) throw invalid();
-  const audio = [], subtitles = [], trackData = new Map(), ids = new Set();
+  const audio = [], subtitles = [], subtitlePlans = [], trackData = new Map(), ids = new Set();
   for (const track of tracks) {
     check();
     const metadata = header(track);
@@ -229,29 +218,128 @@ export function parseMp4MediaTracks(input, { deadline, signal } = {}) {
     let edit;
     try { edit = presentation(track, movieTimescale, media.timescale); }
     catch (error) { if (error.code === "VAULT_MEDIA_TRACK_UNSUPPORTED") continue; throw error; }
-    const sizes = sampleSizes(stbl), times = sampleTimes(stbl, sizes), positions = samplePositions(stbl, sizes, entries, mediaRanges), cues = [];
+    const sizes = sampleSizes(stbl), times = sampleTimes(stbl, sizes), positions = samplePositions(stbl, sizes, entries, mediaRanges), samples = [];
     for (const [index, sample] of times.entries()) {
       check();
-      const text = subtitleText(positions[index], sizes[index]);
-      if (!text.trim()) continue;
+      if (sizes[index] < 2) throw invalid();
       const start = Math.max(0, edit.start, (sample.timestamp + sample.composition) / media.timescale + edit.offset);
       const end = Math.min(edit.end, (sample.timestamp + sample.composition + sample.duration) / media.timescale + edit.offset);
       if (!Number.isFinite(start) || !Number.isFinite(end) || Math.max(start, end) > 8 * 86400) throw exceeded();
       if (end <= start) continue;
-      if (++cueCount > MP4_TRACK_LIMITS.cues) throw exceeded();
-      cues.push({ start, end, text });
+      samples.push({ position: positions[index], size: sizes[index], start, end });
     }
-    subtitles.push({ ...info, format: "mov_text", cues });
+    const record = { ...info, format: "mov_text", cues: [] };
+    subtitles.push(record); subtitlePlans.push({ record, samples });
   }
   const audioPatches = {};
   for (const item of audio) {
     const selected = trackData.get(item.id), patches = [];
-    for (const other of audio) if (other.id !== item.id) patches.push({ offset: trackData.get(other.id).track.start + 4, bytes: Uint8Array.from(free) });
+    for (const other of audio) if (other.id !== item.id) patches.push({ offset: metadataOffset + trackData.get(other.id).track.start + 4, bytes: Uint8Array.from(free) });
     // A nondefault track can be disabled in tkhd; enable the selected track in
     // addition to masking others. No atom sizes or media offsets change.
     const flags = selected.flags | 3;
-    patches.push({ offset: selected.tkhd.payload + 1, bytes: new Uint8Array([flags >>> 16 & 255, flags >>> 8 & 255, flags & 255]) });
+    patches.push({ offset: metadataOffset + selected.tkhd.payload + 1, bytes: new Uint8Array([flags >>> 16 & 255, flags >>> 8 & 255, flags & 255]) });
     audioPatches[item.id] = patches.sort((a, b) => a.offset - b.offset);
   }
-  check(); return { container: "mp4", audio, audioPatches, subtitles };
+  check(); return { result: { container: "mp4", audio, audioPatches, subtitles }, subtitlePlans, check };
+}
+
+function appendSubtitle(record, sample, data, budget) {
+  budget.textBytes += data.byteLength;
+  if (budget.textBytes > MP4_TRACK_LIMITS.textBytes) throw exceeded();
+  const encoding = data[0] === 0xff && data[1] === 0xfe ? "utf-16le" : data[0] === 0xfe && data[1] === 0xff ? "utf-16be" : "utf-8";
+  let text;
+  try { text = new TextDecoder(encoding, { fatal: true }).decode(data); } catch { throw invalid(); }
+  text = text.replace(/\r\n?/gu, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, "");
+  budget.decodedBytes = (budget.decodedBytes ?? 0) + encoder.encode(text).byteLength;
+  if (budget.decodedBytes > MP4_TRACK_LIMITS.textBytes) throw exceeded();
+  if (!text.trim()) return;
+  if (++budget.cues > MP4_TRACK_LIMITS.cues) throw exceeded();
+  record.cues.push({ start: sample.start, end: sample.end, text });
+}
+
+export function parseMp4MediaTracks(input, { deadline, signal } = {}) {
+  const bytes = input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input) : null;
+  const { result, subtitlePlans, check } = parseMp4TrackIndex(input, { deadline, signal });
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), budget = { cues: 0, textBytes: 0 };
+  for (const { record, samples } of subtitlePlans) for (const sample of samples) {
+    check();
+    const length = view.getUint16(sample.position);
+    if (length + 2 > sample.size) throw invalid();
+    appendSubtitle(record, sample, bytes.subarray(sample.position + 2, sample.position + 2 + length), budget);
+  }
+  check(); return result;
+}
+
+export async function parseMp4BlobMediaTracks(blob, { deadline, signal, subtitleId } = {}) {
+  if (!(blob instanceof Blob) || !Number.isSafeInteger(blob.size) || blob.size < 8 || blob.size > MP4_TRACK_LIMITS.blobBytes) throw exceeded();
+  if (subtitleId !== undefined && (typeof subtitleId !== "string" || !/^[1-9][0-9]{0,9}$/u.test(subtitleId))) throw invalid();
+  const until = Number.isFinite(deadline) ? Math.min(deadline, now() + MP4_TRACK_LIMITS.milliseconds) : now() + MP4_TRACK_LIMITS.milliseconds;
+  let readBytes = 0, boxCount = 0;
+  function check() {
+    if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+    if (now() > until) throw exceeded();
+  }
+  async function read(position, length) {
+    check();
+    if (!Number.isSafeInteger(position) || !Number.isSafeInteger(length) || position < 0 || length < 0 || position + length > blob.size) throw invalid();
+    readBytes += length;
+    if (length > MP4_TRACK_LIMITS.readChunkBytes || readBytes > MP4_TRACK_LIMITS.readBytes) throw exceeded();
+    const bytes = new Uint8Array(await blob.slice(position, position + length).arrayBuffer());
+    try { check(); if (bytes.byteLength !== length) throw invalid(); return bytes; }
+    catch (error) { bytes.fill(0); throw error; }
+  }
+  const mediaRanges = [];
+  let moov;
+  for (let position = 0; position < blob.size;) {
+    check();
+    if (++boxCount > MP4_TRACK_LIMITS.boxes || position + 8 > blob.size) throw exceeded();
+    const bytes = await read(position, 8);
+    let size, type, header = 8;
+    try { size = new DataView(bytes.buffer).getUint32(0); type = String.fromCharCode(...bytes.subarray(4)); }
+    finally { bytes.fill(0); }
+    if (size === 1) {
+      const extended = await read(position + 8, 8);
+      try {
+        const large = new DataView(extended.buffer).getBigUint64(0);
+        if (large > BigInt(Number.MAX_SAFE_INTEGER)) throw exceeded();
+        size = Number(large); header = 16;
+      } finally { extended.fill(0); }
+    }
+    if (size === 0) { if (!["mdat", "free", "skip"].includes(type)) throw unsupported(); size = blob.size - position; }
+    if (size < header || !Number.isSafeInteger(position + size) || position + size > blob.size) throw invalid();
+    if (type === "moof") throw unsupported();
+    if (type === "moov") {
+      if (moov) throw invalid();
+      if (size > MP4_TRACK_LIMITS.metadataBytes) throw exceeded();
+      moov = { position, size };
+    } else if (type === "mdat") mediaRanges.push({ payload: position + header, end: position + size });
+    position += size;
+  }
+  if (!moov || !mediaRanges.length) throw invalid();
+  const metadata = new Uint8Array(moov.size);
+  try {
+    for (let offset = 0; offset < metadata.byteLength; offset += MP4_TRACK_LIMITS.readChunkBytes) {
+      const bytes = await read(moov.position + offset, Math.min(MP4_TRACK_LIMITS.readChunkBytes, metadata.byteLength - offset));
+      try { metadata.set(bytes, offset); } finally { bytes.fill(0); }
+    }
+    const { result, subtitlePlans } = parseMp4TrackIndex(metadata, { deadline: until, signal, metadataOffset: moov.position, mediaRanges });
+    if (subtitleId !== undefined && !result.subtitles.some(track => track.id === subtitleId)) throw invalid();
+    const budget = { cues: 0, textBytes: 0 };
+    for (const { record, samples } of subtitlePlans) {
+      if (subtitleId !== undefined && record.id !== subtitleId) continue;
+      for (const sample of samples) {
+        check();
+        const prefix = await read(sample.position, 2);
+        let length;
+        try { length = new DataView(prefix.buffer).getUint16(0); } finally { prefix.fill(0); }
+        if (length + 2 > sample.size) throw invalid();
+        if (budget.textBytes + length > MP4_TRACK_LIMITS.textBytes) throw exceeded();
+        const data = await read(sample.position + 2, length);
+        try { appendSubtitle(record, sample, data, budget); } finally { data.fill(0); }
+      }
+    }
+    check();
+    return subtitleId === undefined ? result : { ...result, lazySubtitles: true };
+  } finally { metadata.fill(0); }
 }
