@@ -50,6 +50,7 @@ class PublisherStats:
     frames: int = 0
     bytes_sent: int = 0
     dropped: int = 0
+    codec: str | None = None
 
 
 class CaptureWorker:
@@ -298,13 +299,18 @@ class CapturePipeline:
     def publisher_stats(self):
         if self.sender is None:
             return PublisherStats()
+        codec = None
+        if self.frame_counter is not None:
+            caps = self.frame_counter.get_static_pad("src").get_current_caps()
+            if caps is not None and not caps.is_empty() and caps.get_structure(0).get_name() == "video/x-h264":
+                codec = "H264"
         transport = self.sender.get_property("stats")
         bytes_sent = transport.get_value("out-bytes-total") if transport else 0
         if not bytes_sent:
-            return PublisherStats()
+            return PublisherStats(codec=codec)
         frames = self.frame_counter.get_property("stats").get_value("num-buffers")
         dropped = GstBase.BaseSink.get_stats(self.sender).get_value("dropped")
-        return PublisherStats(frames or 0, bytes_sent, dropped or 0)
+        return PublisherStats(frames or 0, bytes_sent, dropped or 0, codec)
 
     def frames_sent(self):
         return self.publisher_stats().frames

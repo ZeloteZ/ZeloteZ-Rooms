@@ -1,5 +1,6 @@
-import { language, t } from "./i18n.js";
+import { t } from "./i18n.js";
 import { button, el, notify, topicHref } from "./ui.js";
+import { mountSendingStats } from "./video-stats.js";
 
 const streamId = /^[a-f0-9]{32}$/u;
 
@@ -87,11 +88,11 @@ export function createNativeBroadcast(signal, dock) {
     const stage = el("div", { class: "stage native-broadcast-stage" }, canvas);
     const waiting = el("p", { class: "muted native-broadcast-waiting" }, t("Loading preview …", "Vorschau wird geladen …"));
     stage.append(waiting);
-    const stats = el("div", { class: "inline native-broadcast-metrics", hidden: true });
+    const stats = !previewOnly && mountSendingStats(null, { active: () => active }, channel, viewSignal);
     const node = el("section", { class: "native-broadcast stack", hidden: true, "aria-label": heading },
       !previewOnly && el("header", { class: "section-heading" },
         el("div", { class: "inline" }, el("span", { class: "tag live" }, t("Live", "Live")), el("h3", {}, heading)), end()),
-      stage, !previewOnly && stats);
+      stage, stats && stats.element);
     let decoding = false;
     let pendingFrame;
     let decodedFrame;
@@ -99,8 +100,6 @@ export function createNativeBroadcast(signal, dock) {
     let generation = 0;
     let disposed = false;
     let mountedId;
-    let caption;
-    const number = new Intl.NumberFormat(language(), { maximumFractionDigits: 1 });
 
     function visible() {
       return !disposed && !viewSignal.aborted && !signal.aborted && !document.hidden && !node.hidden && node.isConnected;
@@ -166,25 +165,13 @@ export function createNativeBroadcast(signal, dock) {
         mountedId = id;
         canvas.hidden = true;
         waiting.hidden = false;
-        stats.hidden = true;
-        caption = undefined;
+        stats && stats.reset();
       }
       if (!shown) return;
       if (!location || location.id !== channel.id) {
         location = { roomId: room.id, id: channel.id, title: channel.title };
         placeDock();
       }
-      if (previewOnly || !Number.isFinite(active.elapsed)) return;
-      const seconds = Math.floor(active.elapsed);
-      const duration = [Math.floor(seconds / 60), seconds % 60].map(value => String(value).padStart(2, "0")).join(":");
-      const values = [
-        duration, `${active.width} × ${active.height}`, `${number.format(active.fps)} FPS`, `${number.format(active.mbps)} Mbit/s`,
-      ];
-      if (caption !== values.join(" ")) {
-        caption = values.join(" ");
-        stats.replaceChildren(...values.map(text => el("span", { class: "tag" }, text)));
-      }
-      stats.hidden = false;
     }
 
     events.addEventListener("status", refresh, { signal: viewSignal });

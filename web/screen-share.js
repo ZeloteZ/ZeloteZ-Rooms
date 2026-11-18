@@ -2,6 +2,7 @@ import { accountHeaders, api, button, checkAccountResponse, el, identifier, noti
 import { language, t } from "./i18n.js";
 import { cropDesktopShare, desktopSharePreview, desktopShareSettings } from "./desktop-share.js";
 import { prepareDesktopAudio } from "./desktop-audio.js";
+import { createSendingStats } from "./sending-stats.js";
 
 const streamId = /^[a-f0-9]{32}$/u;
 
@@ -127,6 +128,7 @@ export function createScreenShareController({ signal }, dock) {
     entry.controller.abort();
     clearTimeout(entry.heartbeat);
     clearTimeout(entry.disconnectTimer);
+    entry.stats?.destroy();
     entry.peer?.close();
     const tracks = new Set([...(entry.source?.getTracks() ?? []), ...(entry.media?.getTracks() ?? [])]);
     for (const track of tracks) track.stop();
@@ -329,6 +331,7 @@ export function createScreenShareController({ signal }, dock) {
       await peerState(peer, "connectionstatechange", () => peer.connectionState === "connected",
         controller.signal, 16000, t("Connecting to the streaming server timed out.", "Die Verbindung zum Streamingserver hat zu lange gedauert."));
       controller.signal.throwIfAborted();
+      entry.stats = createSendingStats(peer);
       entry.phase = "live";
       update();
       maintain(entry);

@@ -10,6 +10,7 @@
   line-height: 1.45;
 }
 .video-reception-stats > span { white-space: nowrap; }
-.live-channel-player > .live-player:has(> .video-reception-stats:not([hidden])) {
+.live-channel-player > .live-player:has(> .video-reception-stats:not([hidden])),
+.live-channel-watch > .screen-preview:has(> .video-reception-stats:not([hidden])) {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }

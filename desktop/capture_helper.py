@@ -170,9 +170,12 @@ class CaptureSession:
             if self.on_live is not None:
                 self.on_live()
 
-    def send_metrics(self, stream_id, quality, fps, mbps, elapsed):
+    def send_metrics(self, stream_id, quality, fps, mbps, elapsed, *, codec=None):
+        # RTMP over TCP supplies no RTP loss/jitter reports. BaseSink.dropped counts
+        # muxed output buffers, so it cannot describe dropped video frames either.
         self.send("stats", streamId=stream_id, width=quality.width, height=quality.height,
-                  fps=round(fps, 1), mbps=round(mbps, 2), elapsed=max(0, elapsed))
+                  fps=round(fps, 1), mbps=round(mbps, 2), elapsed=max(0, elapsed),
+                  packetLoss=None, jitterMs=None, framesDropped=None, codec=codec)
 
     def close(self):
         self.ready = False

@@ -7,6 +7,7 @@ import { renderLive } from "./live.js";
 import { createQuickScreen } from "./quick-screen.js";
 import { openStreamNow, quickRoomActions } from "./quick-start.js";
 import { createWatchParty } from "./watch-party.js";
+import { mountSendingStats } from "./video-stats.js";
 import { api, button, closeDialog, el, field, form, identifier, notify, personRow, sameId, select, showDialog, status, tell, topicHref } from "./ui.js";
 
 const visibilityOptions = [["public", t("Everyone in the group", "Für alle im Freundeskreis")], ["private", t("Private · invite only", "Privat · nur auf Einladung")]];
@@ -667,6 +668,7 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
       shareActions, actions: quickRoomActions(context, topic, stopCapture),
       channelId: channel.id, href: topicHref(topic.id, channel.id), queue: setup?.queue,
       createPreview: screenRoom ? signal => renderQuickPreview(context, topic, channel, signal) : undefined,
+      metrics: screenRoom ? mountSendingStats(context.screenShare, context.nativeBroadcast, channel, context.signal).element : undefined,
       onUnavailable() {
         context.quickRoomHeader.ended(topic.id);
         location.hash = "#/rooms";

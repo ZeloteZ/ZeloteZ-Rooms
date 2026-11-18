@@ -12,6 +12,10 @@ const previewFrameLimit = 128 * 1024;
 const sessions = new Map();
 const childEnv = { ...process.env, PYTHONDONTWRITEBYTECODE: "1" };
 
+function optionalMetric(value, maximum = Number.MAX_SAFE_INTEGER, integer = false) {
+  return Number.isFinite(value) && value >= 0 && value <= maximum && (!integer || Number.isSafeInteger(value)) ? value : null;
+}
+
 async function nativeHelper() {
   if (process.platform !== "linux") return null;
   const script = app.isPackaged ? path.join(process.resourcesPath, "native-capture", "capture_helper.py")
@@ -182,7 +186,12 @@ function startCapture(state, channel, language, embedded) {
       } else if (task.embedded && task.live && message.action === "stats" && message.streamId === task.id) {
         const { width, height, fps, mbps, elapsed } = message;
         if ([width, height, fps, mbps, elapsed].every(value => Number.isFinite(value) && value >= 0)) {
-          task.stats = { width, height, fps, mbps, elapsed };
+          task.stats = { width, height, fps, mbps, elapsed,
+            packetLoss: optionalMetric(message.packetLoss, 100),
+            jitterMs: optionalMetric(message.jitterMs),
+            framesDropped: optionalMetric(message.framesDropped, Number.MAX_SAFE_INTEGER, true),
+            codec: typeof message.codec === "string" && /^[A-Za-z0-9][A-Za-z0-9._+/-]{0,63}$/u.test(message.codec) ? message.codec : null,
+          };
           notifyStatus(state);
         }
       } else if (message.action === "finish" && typeof task.id === "string" && message.streamId === task.id) {

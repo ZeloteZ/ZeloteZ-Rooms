@@ -432,7 +432,9 @@ class CaptureWindow(Adw.ApplicationWindow):
         )
         self.metrics = {}
         for metric, caption in (("time", t("Time live")), ("resolution", t("Resolution")),
-                                ("fps", t("Frame rate")), ("upload", t("Upload"))):
+                                ("fps", t("Frame rate")), ("upload", t("Upload")),
+                                ("packetLoss", t("Packet loss")), ("jitter", t("Jitter")),
+                                ("framesDropped", t("Frames dropped")), ("codec", t("Codec"))):
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             card.add_css_class("metric")
             value = label("–", "metric-value")
@@ -522,6 +524,8 @@ class CaptureWindow(Adw.ApplicationWindow):
             self.metrics["resolution"].set_label(f"{quality.width} × {quality.height}" if quality else "–")
             self.metrics["fps"].set_label("–")
             self.metrics["upload"].set_label("–")
+            for metric in ("packetLoss", "jitter", "framesDropped", "codec"):
+                self.metrics[metric].set_label("–")
             self.hide_preview.set_active(False)
             self.hide_preview.set_label(t("Hide preview"))
             if self.region is not None:
@@ -881,8 +885,9 @@ class CaptureWindow(Adw.ApplicationWindow):
         mbps = max(0, stats.bytes_sent - previous_stats.bytes_sent) * 8 / seconds / 1_000_000
         self.metrics["fps"].set_label(t("{rate} FPS", rate=decimal(fps, 0)))
         self.metrics["upload"].set_label(t("{speed} Mbps", speed=decimal(mbps, 2)))
+        self.metrics["codec"].set_label(stats.codec or "–")
         if self.on_metrics is not None and self.stream_id:
-            self.on_metrics(self.stream_id, self.output_quality, fps, mbps, int(now - self.since))
+            self.on_metrics(self.stream_id, self.output_quality, fps, mbps, int(now - self.since), codec=stats.codec)
 
     def finish_room_stream(self):
         self.reservation = None

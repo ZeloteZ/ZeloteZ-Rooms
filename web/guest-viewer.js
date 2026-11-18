@@ -153,6 +153,7 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
   function mountHost() {
     shareActions.prepend(...(host?.shareActions ?? []));
     if (host?.actions) supportToolbar.prepend(host.actions);
+    if (host?.metrics) find(".watch-party-footer").append(host.metrics);
     // The shared snapshot is ready before the host's controls may have finished loading.
     queueSlot.replaceChildren(...[host?.queue, viewerQueue.node].filter(Boolean));
   }
@@ -160,6 +161,7 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
   function removeHostActions() {
     for (const action of host?.shareActions ?? []) action.remove();
     host?.actions?.remove();
+    host?.metrics?.remove();
   }
 
   function showPane(pane) {

@@ -36,6 +36,7 @@ function fixture() {
     EventTarget, Event, CustomEvent, ArrayBuffer, Blob, Intl, document,
     language: () => 'en', t: en => en, button: () => element('button'),
     el: element, notify() {}, topicHref: () => '#/rooms/room/channel',
+    mountSendingStats: () => ({ element: element('div'), reset() {} }),
     window: { roomsNativeCapture: {
       observe(status, frame) { observeStatus = status; observeFrame = frame; return () => {} },
       status: () => new Promise(() => {}),

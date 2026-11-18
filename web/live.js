@@ -8,7 +8,7 @@ import { createWatchParty } from "./watch-party.js";
 import { canPlayDirectly, startWhep } from "./whep.js";
 import { mountViewSidebar } from "./view-sidebar.js";
 import { createPlaybackStats } from "./playback-stats.js";
-import { mountVideoStats } from "./video-stats.js";
+import { mountSendingStats, mountVideoStats } from "./video-stats.js";
 
 const viewerHeartbeat = 8000;
 const startupTimeout = 24000;
@@ -477,7 +477,7 @@ export function renderLive(context, channel, player, voiceMount, playerMount = e
   previewVideo.muted = true;
   const previewStage = el("div", { class: "stage" });
   const preview = el("section", { class: "stack screen-preview", hidden: true, "aria-label": previewTitle },
-    el("h3", {}, previewTitle), previewStage);
+    el("h3", {}, previewTitle), previewStage, mountSendingStats(screenShare, null, channel, signal).element);
   const nativePreview = nativeBroadcast?.mount(room, channel, signal);
   const reconnectNote = t("Reconnecting the stream list.", "Die Stream-Liste wird neu verbunden.");
   const unavailableNote = t("The mentioned stream is unavailable.", "Der erwähnte Stream ist nicht verfügbar.");
