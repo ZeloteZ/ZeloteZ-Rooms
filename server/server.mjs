@@ -23,8 +23,10 @@ import { configuredSetupKey, createSetup } from './setup.mjs'
 
 const origin = new URL(process.env.PUBLIC_ORIGIN ?? 'http://127.0.0.1:8080')
 const localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
-const trustProxyIp = process.env.TRUST_PROXY_IP === '1'
-if ((origin.protocol !== 'https:' && (!localHttp || trustProxyIp)) || origin.href !== `${origin.origin}/`) {
+const host = process.env.HOST ?? '0.0.0.0'
+const trustExternalProxy = process.env.TRUST_PROXY_IP === '1'
+const trustProxyIp = trustExternalProxy || (process.env.TRUST_GATEWAY_IP === '1' && host === '127.0.0.1')
+if ((origin.protocol !== 'https:' && (!localHttp || trustExternalProxy)) || origin.href !== `${origin.origin}/`) {
   throw new Error('PUBLIC_ORIGIN must be an HTTPS address or a local test address.')
 }
 
@@ -161,7 +163,6 @@ const privateApi = service(async (request, response) => {
   if (!await streams.handleMedia(request, response, request.url, auth)) response.writeHead(404).end()
 })
 
-const host = process.env.HOST ?? '0.0.0.0'
 const apiPort = Number(process.env.PORT ?? 8080)
 const mediaPort = Number(process.env.AUTH_PORT ?? 8081)
 publicApi.listen(apiPort, host)

@@ -226,8 +226,12 @@ export function createScreenShareController({ signal }, dock) {
         else if (!desktopAudio) {
           throw new Error(t("The selected audio output is unavailable.", "Die ausgewählte Tonquelle ist offline."));
         }
-        // The native picker sets quality after capture has begun; cap the source as well as the encoder.
-        await input.applyConstraints({ frameRate: { ideal: desktopOptions.fps, max: desktopOptions.fps } }).catch(() => {});
+        // Protected output is already cropped locally. Tab capture otherwise
+        // defaults to the monitor's resolution, even for a larger output canvas.
+        const outputSize = setup.protectedCapture === true ? {
+          width: { ideal: Math.round(desktopOptions.height * 16 / 9) }, height: { ideal: desktopOptions.height }, resizeMode: "none",
+        } : {};
+        await input.applyConstraints({ ...outputSize, frameRate: { ideal: desktopOptions.fps, max: desktopOptions.fps } }).catch(() => {});
         controller.signal.throwIfAborted();
       }
       const audioMode = desktopOptions?.audio;

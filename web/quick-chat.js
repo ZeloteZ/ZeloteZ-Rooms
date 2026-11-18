@@ -10,7 +10,10 @@ const messages = {
   sendLimited: ["Wait a moment before sending another message.", "Warte kurz, bevor du eine weitere Nachricht sendest."],
 };
 
-export function renderQuickChat({ publicId, signal, member = false }) {
+export function renderQuickChat({ publicId, signal, member = false, accountId, onAccountChanged }) {
+  if (member && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(accountId ?? "")) {
+    throw new Error(t("Your session has changed. Please sign in again.", "Deine Sitzung hat sich geändert. Melde dich erneut an."));
+  }
   const pane = document.createElement("section");
   pane.className = "panel quick-chat";
   pane.innerHTML = `
@@ -123,7 +126,7 @@ export function renderQuickChat({ publicId, signal, member = false }) {
     if (stopped) return;
     stopped = true;
     clearTimeout(timer);
-    if (invalidate) void forgetQuickChatDevice(publicId, member, device?.deviceId);
+    if (invalidate) void forgetQuickChatDevice(publicId, member, device?.deviceId, accountId);
     else if (device) void request("/leave", { deviceId: device.deviceId }, true).catch(() => {});
     peers = [];
     participants = [];
@@ -136,7 +139,7 @@ export function renderQuickChat({ publicId, signal, member = false }) {
   }
 
   async function request(path, body, keepalive = false) {
-    const headers = { "Accept-Language": language() };
+    const headers = { "Accept-Language": language(), ...(member && { "X-Rooms-Account": accountId }) };
     if (body) headers["Content-Type"] = "application/json";
     const deadline = AbortSignal.timeout(8000);
     const response = await fetch(endpoint + path, {
@@ -150,6 +153,11 @@ export function renderQuickChat({ publicId, signal, member = false }) {
       keepalive,
       signal: keepalive ? deadline : AbortSignal.any([signal, deadline]),
     });
+    if (member && response.headers.get("X-Rooms-Error") === "account-changed") {
+      stop(true);
+      onAccountChanged?.();
+      throw Object.assign(new Error("Account changed"), { status: 409 });
+    }
     if (!response.ok) throw Object.assign(new Error("Live chat request failed"), { status: response.status });
     return response.status === 204 ? undefined : response.json();
   }
@@ -198,7 +206,20 @@ export function renderQuickChat({ publicId, signal, member = false }) {
   async function poll() {
     try {
       if (!device) {
-        const session = await createQuickChatCrypto(publicId, { member });
+        const session = await createQuickChatCrypto(publicId, { member, accountId, signal, async proveLegacy(candidate) {
+          const query = new URLSearchParams({ deviceId: candidate.deviceId, after: "0" });
+          let batch;
+          try { batch = await request("?" + query); } catch (error) {
+            if (stopped || signal.aborted) throw error;
+            if ([401, 403, 404, 409, 410].includes(error.status)) return false;
+            throw error;
+          }
+          signal.throwIfAborted();
+          if (stopped) throw new DOMException("Chat closed", "AbortError");
+          const own = batch?.peers?.find(peer => peer.id === candidate.deviceId);
+          return batch?.deviceId === candidate.deviceId && own?.publicKey?.x === candidate.publicKey.x &&
+            own.publicKey.y === candidate.publicKey.y;
+        } });
         if (stopped) return;
         device = session;
       }
@@ -218,8 +239,8 @@ export function renderQuickChat({ publicId, signal, member = false }) {
           batch = await register();
         } catch (error) {
           if (error.status !== 409 || stopped) throw error;
-          await forgetQuickChatDevice(publicId, member, device.deviceId);
-          const replacement = await createQuickChatCrypto(publicId, { member });
+          await forgetQuickChatDevice(publicId, member, device.deviceId, accountId);
+          const replacement = await createQuickChatCrypto(publicId, { member, accountId, signal });
           if (stopped) return;
           device = replacement;
           batch = await register();

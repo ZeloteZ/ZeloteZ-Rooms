@@ -202,6 +202,7 @@ function installAudio(web, allowed, choose) {
       return true;
     },
     clear,
+    revoke,
   };
 }
 

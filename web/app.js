@@ -197,7 +197,16 @@ profileEditor.addEventListener("click", () => {
 
 function passwordInput(newPassword = false) {
   return el("input", { type: "password", required: true,
-    autocomplete: newPassword ? "new-password" : "current-password", minlength: newPassword ? "12" : undefined });
+    autocomplete: newPassword ? "new-password" : "current-password", minlength: newPassword ? "15" : undefined });
+}
+
+let passwordHintId = 0;
+function newPasswordField(label, input) {
+  const id = "password-guidance-" + ++passwordHintId;
+  input.setAttribute("aria-describedby", id);
+  return el("div", { class: "field" }, field(label, input), el("p", { id, class: "subtle" }, t(
+    "Use at least 15 characters. Choose an uncommon password or passphrase.",
+    "Verwende mindestens 15 Zeichen. Wähle ein ungewöhnliches Passwort oder eine Passphrase.")));
 }
 
 function authenticatorInput() {
@@ -281,7 +290,7 @@ async function changePassword() {
   const body = form([
     field(t("Current password", "Aktuelles Passwort"), current),
     previous && field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
-    field(t("New password", "Neues Passwort"), next),
+    newPasswordField(t("New password", "Neues Passwort"), next),
     account.admin ? codeField : memberFactor.node,
   ], title, async () => {
     if (user !== account) return;
@@ -377,7 +386,7 @@ async function showWorkspace(nextUser, unlocked = true) {
 
 function enterAuth() {
   clearQuickLinks();
-  if (user) void forgetMemberQuickChatDevices();
+  if (user) void forgetMemberQuickChatDevices(user.id);
   if (user) window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
   if (user) window.roomsNativeCapture?.close().catch(() => {});
   if (view) view.abort();
@@ -447,7 +456,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
   const name = el("input", { type: "text", name: "displayName", autocomplete: "nickname", maxlength: "48", required: true });
   const password = el("input", {
     type: "password", name: "password", autocomplete: startRegister ? "new-password" : "current-password",
-    required: true, minlength: startRegister ? "12" : undefined,
+    required: true, minlength: startRegister ? "15" : undefined,
   });
   const factor = signInFactor();
   username.addEventListener("input", factor.clear);
@@ -459,7 +468,7 @@ function showAuth(note = "", preset = "", showInvite = false) {
       "Erstelle das Betreiberkonto. Anschließend sicherst du es mit einem Authenticator ab.")),
     startRegister && field(t("Display name", "Anzeigename"), name),
     field(t("Username", "Benutzername"), username),
-    field(t("Password", "Passwort"), password),
+    startRegister ? newPasswordField(t("Password", "Passwort"), password) : field(t("Password", "Passwort"), password),
     factor.node,
     remember && el("label", { class: "inline" }, remember,
       t("Keep me signed in on this device", "Auf diesem Gerät angemeldet bleiben")),
@@ -571,8 +580,9 @@ async function showRecovery(token) {
       field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
       el("label", { class: "inline" }, keepLocked, t("I lost the chat password. Keep the chats locked.",
         "Ich habe das Chatpasswort verloren. Die Chats sollen gesperrt bleiben.")),
-      field(t("New password", "Neues Passwort"), password),
+      newPasswordField(t("New password", "Neues Passwort"), password),
     ], title, async () => {
+      ClubCrypto.assertNewPassword(password.value);
       const prepared = keepLocked.checked
         ? { password: await ClubCrypto.credential(account.username, password.value), keepLocked: true }
         : await ClubCrypto.rewrapIdentity(account, previous.value, password.value);
@@ -636,7 +646,8 @@ async function render(force = false) {
   const current = () => !signal.aborted && location.hash === requestedHash;
   workspace.replaceChildren(el("p", { class: "panel status", role: "status" }, t("Loading …", "Wird geladen …")));
   workspace.scrollTop = 0;
-  const context = { user, signal, player, videoDock, voice, screenShare, nativeBroadcast, quickRoomHeader, profileUpdates, refresh: () => render(true) };
+  const context = { user, signal, player, videoDock, voice, screenShare, nativeBroadcast, quickRoomHeader, profileUpdates,
+    onAccountChanged: lockOnAccountChange, refresh: () => render(true) };
   try {
     if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       const { room } = await api("quick-rooms", { signal });
@@ -658,7 +669,8 @@ async function render(force = false) {
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       const quick = quickViewerHeading();
       banner = quick.header;
-      page = renderGuestViewer({ publicId: route.topicId, signal, member: true, videoDock, onRoom: quick.update });
+      page = renderGuestViewer({ publicId: route.topicId, signal, member: true, accountId: user.id,
+        onAccountChanged: lockOnAccountChange, videoDock, onRoom: quick.update });
     }
     else if (route.page === "rooms" && route.topicId) {
       const topic = await renderTopic(context, route.topicId, route.channelId, route.target);

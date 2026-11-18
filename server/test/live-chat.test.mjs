@@ -19,7 +19,7 @@ const keyBox = () => ({ nonce: encoded(12), blob: encoded(48) })
 const envelopeFor = (...users) => ({ v: 1, ephemeral: point(), nonce: encoded(12), body: encoded(80),
   keys: Object.fromEntries(users.map(user => [user.id, keyBox()])) })
 
-function fixture(t) {
+function fixture(t, reactionOptions) {
   const db = new DatabaseSync(':memory:')
   db.exec('PRAGMA foreign_keys = ON')
   const { requireSession } = createAuth(db, { publicOrigin: origin })
@@ -34,7 +34,7 @@ function fixture(t) {
   } }
   const history = createHistory(db, { requireSession })
   const streamChat = createStreamChat(db, { requireSession, community, streams, profileFor: appearance.profile })
-  const reactions = createReactions(db, { requireSession, streams })
+  const reactions = createReactions(db, { requireSession, streams }, reactionOptions)
   const notifications = createNotifications(db, { requireSession, streams })
   const channels = createChannelManagement(db, { requireSession })
   const handlers = [notifications, reactions, streamChat, history, channels, community]
@@ -65,8 +65,9 @@ function fixture(t) {
       if (writeChunk) writeChunk(done, this)
       else done()
     } })
-    let headers
-    response.writeHead = (status, values = {}) => { response.status = status; headers = values; return response }
+    const headers = {}
+    response.setHeader = (name, value) => { headers[name] = value }
+    response.writeHead = (status, values = {}) => { response.status = status; Object.assign(headers, values); return response }
     const url = new URL(path, origin)
     for (const handler of handlers) {
       if (await handler.handle(incoming, response, url)) {
@@ -77,7 +78,7 @@ function fixture(t) {
     }
     throw new Error('Unhandled test route ' + path)
   }
-  return { db, user, request }
+  return { db, user, request, resetReactions: () => { handlers[1] = createReactions(db, { requireSession, streams }, reactionOptions) } }
 }
 
 async function attachmentFixture(t) {
@@ -97,6 +98,113 @@ async function attachmentFixture(t) {
     { id: message, envelope: envelopeFor(owner, viewer), attachmentIds })
   return { db, user, request, owner, viewer, room, channelId, channel, id, file, message, post }
 }
+
+async function reactionFixture(t, options) {
+  const f = fixture(t, options)
+  const owner = f.user('Reaction Owner'), viewer = f.user('Reaction Viewer')
+  const { body: { topic } } = await f.request('POST', '/api/topics', owner, { title: 'Reactions', visibility: 'public' })
+  const room = '/api/topics/' + topic.id
+  await f.request('POST', room + '/join', viewer, {})
+  const { body: { channels } } = await f.request('GET', room, owner)
+  const channel = channels.find(channel => channel.type === 'chat').id
+  const live = channels.find(channel => channel.type === 'live').id
+  const persistent = randomUUID(), transient = randomUUID(), broadcast = randomBytes(16).toString('hex')
+  const envelope = envelopeFor(owner, viewer)
+  await f.request('POST', '/api/channels/' + channel + '/messages', owner, { id: persistent, envelope, attachmentIds: [] })
+  f.db.prepare('INSERT INTO broadcasts VALUES (?,?,?,?,NULL)').run(broadcast, live, owner.id, 'publisher')
+  await f.request('POST', '/api/streams/' + broadcast + '/chat', owner, { id: transient, envelope })
+  const paths = {
+    text: '/api/channels/' + channel + '/messages/reactions',
+    stream: '/api/streams/' + broadcast + '/chat/reactions',
+  }
+  const messages = { text: persistent, stream: transient }
+  const payload = () => ({ nonce: encoded(12), body: encoded(48) })
+  const put = (kind, actor, id = encoded(32)) => f.request('PUT', paths[kind] + '/' + messages[kind] + '/' + id, actor, payload())
+  const remove = (kind, actor, id) => f.request('DELETE', paths[kind] + '/' + messages[kind] + '/' + id, actor)
+  const read = (kind, actor = owner) => f.request('GET', paths[kind] + '?ids=' + messages[kind], actor)
+  const usage = scope => f.db.prepare('SELECT reactions FROM reaction_storage WHERE scope = ?').get(scope)?.reactions ?? 0
+  return { ...f, owner, viewer, room, channel, persistent, transient, broadcast, payload, put, remove, read, usage }
+}
+
+test('reaction storage budgets are shared across chat types and cleanup releases accounted rows', async t => {
+  const { db, owner, viewer, channel, persistent, broadcast, put, remove, read, usage } = await reactionFixture(t,
+    { maxTotal: 3, maxPerUser: 2, maxMutations: 100 })
+  const first = encoded(32), second = encoded(32), third = encoded(32), fourth = encoded(32)
+  await put('text', owner, first)
+  await put('stream', owner, second)
+  await assert.rejects(put('text', owner), { status: 413 })
+  await put('text', viewer, third)
+  await assert.rejects(put('stream', viewer, fourth), { status: 413 })
+  assert.equal(usage(''), 3)
+  assert.equal(usage(owner.id), 2)
+  await put('text', owner, first) // Fixed-width replacement does not grow an already full collection.
+  assert.equal(usage(''), 3)
+  assert.equal((await read('text')).body.reactions.length, 2)
+  await remove('text', owner, first)
+  await put('stream', viewer, fourth)
+  assert.equal(usage(''), 3)
+  assert.equal(usage(viewer.id), 2)
+  // A rolled-back maintenance transaction must also roll back every storage counter.
+  db.exec('BEGIN IMMEDIATE')
+  db.prepare('DELETE FROM message_reactions WHERE message_id = ?').run(persistent)
+  assert.equal(usage(''), 2)
+  db.exec('ROLLBACK')
+  assert.equal(usage(''), 3)
+  db.prepare('DELETE FROM messages WHERE id = ?').run(persistent)
+  assert.equal(usage(''), 2)
+  assert.equal(db.prepare('SELECT 1 FROM message_reactions WHERE message_id = ?').get(persistent), undefined)
+  db.prepare('UPDATE broadcasts SET ended_at = ? WHERE id = ?').run(Date.now(), broadcast)
+  assert.equal(usage(''), 0)
+  assert.equal(db.prepare("SELECT count(*) AS n FROM reaction_storage WHERE scope <> ''").get().n, 0)
+  assert.equal(db.prepare('SELECT 1 FROM channels WHERE id = ?').get(channel) !== undefined, true)
+})
+
+test('existing reactions are counted on upgrade and remain readable and removable over budget', async t => {
+  const { db, owner, viewer, persistent, transient, payload, put, remove, read, usage, resetReactions } = await reactionFixture(t,
+    { maxTotal: 2, maxPerUser: 1, maxMutations: 100 })
+  for (const table of ['message_reactions', 'stream_message_reactions']) {
+    db.exec(`DROP TRIGGER count_${table}_insert; DROP TRIGGER count_${table}_delete`)
+  }
+  db.exec('DROP TABLE reaction_storage')
+  const first = encoded(32), second = encoded(32), third = encoded(32), fourth = encoded(32)
+  for (const [table, message, actor, id] of [
+    ['message_reactions', persistent, owner, first], ['message_reactions', persistent, owner, second],
+    ['message_reactions', persistent, viewer, third], ['stream_message_reactions', transient, owner, fourth],
+  ]) {
+    const value = payload()
+    db.prepare(`INSERT INTO ${table} VALUES (?,?,?,?,?)`).run(message, actor.id, id, value.nonce, value.body)
+  }
+  resetReactions()
+  assert.equal(usage(''), 4)
+  assert.equal(usage(owner.id), 3)
+  assert.equal((await read('text')).body.reactions.length, 3)
+  await assert.rejects(put('text', owner), { status: 413 })
+  await put('text', owner, first)
+  await remove('text', owner, first)
+  await remove('text', owner, second)
+  await remove('stream', owner, fourth)
+  assert.equal(usage(''), 1)
+  assert.equal(usage(owner.id), 0)
+  await put('text', owner)
+  assert.equal(usage(''), 2)
+  assert.equal(usage(owner.id), 1)
+})
+
+test('reaction mutation limits follow the actor across chat types and leave reads available', async t => {
+  let at = 0
+  const { owner, viewer, put, remove, read, usage } = await reactionFixture(t,
+    { maxTotal: 20, maxPerUser: 10, maxMutations: 2, windowMs: 10_000, now: () => at })
+  const first = encoded(32), second = encoded(32)
+  await put('text', owner, first)
+  await put('stream', owner, second)
+  await assert.rejects(remove('text', owner, first), { status: 429 })
+  assert.equal(usage(''), 2)
+  assert.equal((await read('text')).body.reactions.length, 1)
+  await put('text', viewer)
+  at = 10_000
+  await remove('text', owner, first)
+  assert.equal(usage(''), 2)
+})
 
 test('regular live chat persists independently of broadcasts and is limited to current members of the channel', async t => {
   const { db, user, request } = fixture(t)

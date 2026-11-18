@@ -47,6 +47,7 @@ window.roomsShare = function roomsShare(state) {
     if (option.value !== "none" && !state.audioModes?.includes(option.value)) option.remove();
   });
   get("share-source-kinds").hidden = Boolean(state.portal);
+  if (state.legacyAudio) get("share-audio-label").closest("label").hidden = true;
 
   function showError(message = "") { error.textContent = message; error.hidden = !message; }
   function resetRegion() { region = { x: .1, y: .1, width: .8, height: .8 }; }
@@ -80,6 +81,8 @@ window.roomsShare = function roomsShare(state) {
     get("share-height").disabled = submitting;
     get("share-fps").disabled = submitting;
     get("share-audio-controls").hidden = modeSelect.value === "none";
+    if (state.legacyAudio) get("share-audio-status").textContent = t("Your server selects audio separately after video sharing starts.",
+      "Deine Serverversion wählt den Ton nach dem Start der Bildfreigabe separat aus.", "此服务器版本将在开始画面共享后单独选择音频。");
     audioSelect.disabled = audioLoading || submitting || audioSources.length === 0;
     get("share-audio-refresh").disabled = audioLoading || submitting;
     start.disabled = sourceMissing || loading || audioLoading || submitting || previewWaiting || (modeSelect.value !== "none" && audioSelect.value === "");

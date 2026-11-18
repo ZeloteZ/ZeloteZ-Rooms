@@ -65,3 +65,24 @@ test('changing the password rewraps an existing chat identity without losing its
   assert.equal(await after.unlock(changedUser, newPassword), true)
   assert.equal((await after.openMessage(channel, message, envelope)).content.text, content)
 })
+
+test('new passwords require fifteen Unicode characters and reject common local variants', async () => {
+  const encryption = browserCrypto()
+  for (const password of ['Maple!River8Qs', '🔒'.repeat(14)]) {
+    assert.throws(() => encryption.assertNewPassword(password), /at least 15/)
+    await assert.rejects(encryption.prepareRegistration('new-member', password), /at least 15/)
+    await assert.rejects(encryption.rewrapIdentity(user, previousPassword, password), /at least 15/)
+  }
+  for (const password of ['Password123456789!', 'correct horse battery staple', 'PasswortPasswort',
+    'pAsSwOrDpassword', '111111111111111', ' '.repeat(15)]) {
+    assert.throws(() => encryption.assertNewPassword(password), /too common/)
+    await assert.rejects(encryption.prepareRegistration('new-member', password), /too common/)
+    await assert.rejects(encryption.rewrapIdentity(user, previousPassword, password), /too common/)
+  }
+  const exact = 'Maple!River8Qs+'
+  assert.equal([...exact].length, 15)
+  assert.doesNotThrow(() => encryption.assertNewPassword(exact))
+  assert.doesNotThrow(() => encryption.assertNewPassword('🦉🌿🔐🪷🧭🎨🍃🚲🦋🍂🌙🪁🪺🫖🎻'))
+  // Login credentials keep their existing format and accept pre-policy passwords.
+  assert.match(await encryption.credential('legacy-member', 'old-password'), /^[A-Za-z0-9_-]{43}$/)
+})

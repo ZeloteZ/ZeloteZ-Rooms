@@ -1,11 +1,12 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Notification, Tray, WebContentsView, desktopCapturer, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, WebContentsView, dialog, ipcMain, nativeImage, nativeTheme, safeStorage, session, shell } = require("electron");
 const { mkdir, readFile, rename, rm, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { installAudio, audioArguments } = require("./audio.cjs");
 const { installShareSetup } = require("./share-setup.cjs");
+const { createCaptureOwner } = require("./capture-owner.cjs");
 const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { detachedVideo } = require("./detached-video.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
@@ -442,15 +443,6 @@ function showUpdateIntro(parent) {
   local.window.once("closed", () => { if (updateIntro === local) updateIntro = null; });
 }
 
-function chooseSource(parent, sources) {
-  if (!sources.length || parent.isDestroyed()) return Promise.resolve(null);
-  return choose(parent, "picker", sources, { sources: sources.map(source => ({
-    name: source.name,
-    kind: source.id.startsWith("screen:") ? "screen" : "window",
-    thumbnail: source.thumbnail.isEmpty() ? null : source.thumbnail.toDataURL(),
-  })) }).result;
-}
-
 function choose(parent, mode, entries, state) {
   const local = localWindow(mode, state, parent);
   const result = new Promise(resolve => {
@@ -647,7 +639,7 @@ function installPermissions(window, web, origin, media, isActive) {
   const audio = installAudio(web, canShare,
     (mode, sources) => choose(window, "audio", sources, { audioMode: mode, sources: sources.map(source => ({ name: source.title })) }));
   const configureShare = installShareSetup(web, {
-    allowed: canShare, audio, portal: wayland,
+    allowed: canShare, audio, portal: wayland, createOwner: createCaptureOwner, defaultLanguage: () => language,
     showDialog: state => localWindow("share", state, window),
   });
   const allowed = (contents, target, main) => isActive()
@@ -682,35 +674,15 @@ function installPermissions(window, web, origin, media, isActive) {
       && request.frame === web.mainFrame && webUrl(request.securityOrigin)?.origin === origin && isRoomsPage(request.frame.url, origin);
     if (picking || !request.videoRequested || !request.userGesture || !valid()) return callback(null);
     picking = true;
-    let capture = null;
     try {
       const unified = configureShare(request.frame, callback);
       if (unified) return await unified;
-      const sources = await desktopCapturer.getSources({
-        types: ["screen", "window"],
-        // PipeWire's chooser already shows previews. Some Wayland backends only
-        // start delivering frames once the approved source is actually opened.
-        thumbnailSize: wayland ? { width: 0, height: 0 } : { width: 288, height: 162 },
-      });
-      if (valid()) {
-        const [source] = sources;
-        // Chromium marks sources approved in a native picker with ":s".
-        const portalSource = wayland && sources.length === 1 && /^(?:window|screen):\d+:\d+:s$/u.test(source?.id);
-        capture = portalSource ? source : await chooseSource(window, sources);
-      }
+      callback(null);
     } catch {
       // A canceled or unavailable system picker ends this capture request.
+      try { callback(null); } catch { /* The requesting frame can already have closed. */ }
     } finally {
       picking = false;
-    }
-    try {
-      if (!capture || !valid()) callback(null);
-      else {
-        audio.approve();
-        callback({ video: capture });
-      }
-    } catch {
-      // Chromium discards the pending request when its frame closes.
     }
   });
 }

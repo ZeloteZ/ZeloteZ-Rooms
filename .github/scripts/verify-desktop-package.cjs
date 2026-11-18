@@ -70,7 +70,8 @@ async function verify() {
     assert.deepEqual(binary.subarray(0, 5), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2]));
     assert.equal(binary.readUInt16LE(18), 62, "The application must be Linux x64");
   }
-  console.log(`Verified ${platform} x64 version ${packaged.version}, packaged sources, Electron fuses and ASAR integrity`);
+  console.log(`Verified ${platform} x64 version ${packaged.version}, packaged sources and Electron fuses` +
+    (platform === "win32" ? "; verified embedded ASAR header integrity" : "; Linux runtime ASAR authenticity is not asserted"));
 }
 
 verify().catch(error => {

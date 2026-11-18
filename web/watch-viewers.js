@@ -3,13 +3,14 @@ const requestTimeout = 5000;
 const confirmationAge = 8000;
 const transferGrace = 4500;
 
-export async function reportWatchViewer(path, { method, body, keepalive, signal }, { accountId, partyId } = {}) {
+export async function reportWatchViewer(path, { method, body, keepalive, signal }, { accountId, partyId, onAccountChanged } = {}) {
   const response = await fetch(path, {
     method, keepalive, signal,
     credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "same-origin",
     headers: { "Content-Type": "application/json", ...(accountId && { "X-Rooms-Account": accountId }) },
     body: JSON.stringify(partyId ? { ...body, partyId } : body),
   });
+  if (accountId && response.headers.get("X-Rooms-Error") === "account-changed") onAccountChanged?.();
   if (response.status !== 204) throw new Error("Watch party viewing access is unavailable.");
 }
 

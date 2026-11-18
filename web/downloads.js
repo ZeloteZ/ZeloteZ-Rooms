@@ -26,19 +26,22 @@ export async function suggestedDownloadPlatform(browserNavigator = navigator) {
   return /x86_64|amd64|Win64|WOW64|\bx64\b/iu.test(details) ? platform : null;
 }
 
+function releaseFilePath(url, path) {
+  if (typeof url !== "string") return false;
+  try {
+    const resolved = new URL(url, location.origin);
+    return resolved.origin === location.origin && resolved.pathname === path && !resolved.search && !resolved.hash &&
+      !resolved.username && !resolved.password;
+  } catch {
+    return false;
+  }
+}
+
 function downloadEntry(release, platform) {
   const suffix = platform === "linux" ? "x86_64.AppImage" : "x64.exe";
   const path = "/downloads/desktop/" + release.version + "/ZeloteZ-Rooms-" + release.version + "-" + suffix;
-  return release.downloads.find(entry => {
-    if (entry?.platform !== platform || entry.arch !== "x64" || typeof entry.url !== "string" ||
-        !Number.isSafeInteger(entry.size) || entry.size <= 0) return false;
-    try {
-      const url = new URL(entry.url, location.origin);
-      return url.origin === location.origin && url.pathname === path && !url.search && !url.hash && !url.username && !url.password;
-    } catch {
-      return false;
-    }
-  });
+  return release.downloads.find(entry => entry?.platform === platform && entry.arch === "x64" &&
+    Number.isSafeInteger(entry.size) && entry.size > 0 && releaseFilePath(entry.url, path));
 }
 
 function downloadCard(platform, entry, suggested) {
@@ -68,6 +71,7 @@ function downloadCard(platform, entry, suggested) {
 export function renderDownloads({ signal }) {
   const version = el("p", { class: "subtle", hidden: true });
   const cards = el("div", { class: "download-cards" });
+  const verification = el("p", { class: "subtle", hidden: true });
   const feedback = status();
   const retry = button(t("Try again", "Erneut laden"), () => void load(), { hidden: true });
   const intro = el("div", { class: "download-intro" },
@@ -83,7 +87,7 @@ export function renderDownloads({ signal }) {
     el("header", { class: "page-heading" }, el("div", { class: "stack download-heading" },
       el("h1", { id: "downloads-heading", tabindex: -1 }, t("Downloads", "Downloads")),
       version)),
-    el("div", { class: "download-content" }, intro, feedback, retry, cards));
+    el("div", { class: "download-content" }, intro, feedback, retry, cards, verification));
   let loading = false;
 
   async function load() {
@@ -103,6 +107,15 @@ export function renderDownloads({ signal }) {
         const entry = downloadEntry(release, platform);
         return downloadCard(platform, entry, Boolean(entry && suggested === platform));
       }));
+      const { manifestUrl, signatureUrl } = release;
+      const proofBase = `/downloads/desktop/${release.version}/desktop-release-manifest.`;
+      verification.hidden = !releaseFilePath(manifestUrl, proofBase + "json") ||
+        !releaseFilePath(signatureUrl, proofBase + "sig");
+      if (!verification.hidden) {
+        verification.replaceChildren(
+          el("a", { href: manifestUrl, download: "" }, t("Release manifest", "Release-Manifest")),
+          " · ", el("a", { href: signatureUrl, download: "" }, t("Release signature", "Release-Signatur")));
+      }
       tell(feedback, "");
     } catch (error) {
       if (signal.aborted) return;

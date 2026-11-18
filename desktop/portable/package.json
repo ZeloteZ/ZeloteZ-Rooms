@@ -1,6 +1,6 @@
 {
   "name": "zelotez-rooms-desktop",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "description": "ZeloteZ Rooms desktop client",
   "author": "ZeloteZ",
   "desktopName": "de.zelotez.rooms.desktop",
@@ -30,6 +30,7 @@
       "ui/**"
     ],
     "asarUnpack": ["ui/icon.png"],
+    "afterAllArtifactBuild": "build/appimage.cjs",
     "protocols": [{
       "name": "ZeloteZ Rooms share links",
       "schemes": ["zelotez-rooms"]

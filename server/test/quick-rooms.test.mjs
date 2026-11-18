@@ -50,14 +50,15 @@ function fixture(t) {
       revoke: () => db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(token) }
   }
 
-  async function request(method, path, { user: actor, cookie = actor?.cookie, body, beforeBody, address = '127.0.0.1' } = {}) {
+  async function request(method, path, { user: actor, cookie = actor?.cookie, expectedAccount, body, beforeBody, address = '127.0.0.1' } = {}) {
     const stream = Readable.from((async function* () {
       await beforeBody?.()
       if (body !== undefined) yield Buffer.from(JSON.stringify(body))
     })())
     stream.method = method
     stream.url = path
-    stream.headers = { ...(cookie && { cookie }), ...(body !== undefined && { 'content-type': 'application/json' }) }
+    stream.headers = { ...(cookie && { cookie }), ...(body !== undefined && { 'content-type': 'application/json' }),
+      ...(expectedAccount !== undefined && { 'x-rooms-account': expectedAccount }) }
     stream.socket = { remoteAddress: address }
     const chunks = []
     const response = new Writable({ write(data, _encoding, done) { chunks.push(data); done() } })
@@ -86,6 +87,48 @@ function fixture(t) {
   return { db, user, request, quick, start, guestPath, ownerPath, viewerReports,
     stop: room => current.delete(room.channelId), tick: milliseconds => { time += milliseconds } }
 }
+
+test('temporary member requests reject switched accounts before guest-cookie fallback', async t => {
+  const { user, request, start, guestPath, ownerPath, viewerReports } = fixture(t)
+  const host = user('bound-host')
+  const member = user('bound-member')
+  const room = (await request('POST', '/api/quick-rooms', { user: host,
+    body: { source: 'youtube', guestAccess: true, memberVisibility: true } })).body
+  start(room, host)
+  const guest = await request('POST', guestPath(room, 'session'), { body: { password: room.secret } })
+  const ticket = guest.headers['Set-Cookie'].split(';', 1)[0]
+  const cookie = member.cookie + '; ' + ticket
+  const initial = (await request('GET', guestPath(room, 'state'), { user: member, expectedAccount: member.id, cookie })).body
+  const deviceId = randomUUID()
+  const publicKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' })
+  const joined = (await request('POST', guestPath(room, 'chat/join'), {
+    cookie, expectedAccount: member.id, body: { deviceId, publicKey },
+  })).body
+  assert.equal(joined.peers.find(peer => peer.id === deviceId).guest, false)
+  assert.equal(joined.peers.find(peer => peer.id === deviceId).name, 'bound-member')
+  await request('POST', guestPath(room, 'viewers'), { cookie, expectedAccount: member.id,
+    body: { partyId: initial.party.id, playerId: randomUUID() } })
+  assert.equal(viewerReports.at(-1).guest, false)
+
+  for (const [method, action, body] of [
+    ['GET', 'state'],
+    ['PATCH', 'playback', { partyId: initial.party.id, revision: 1, action: 'play', position: 17 }],
+    ['POST', 'viewers', { partyId: initial.party.id, playerId: randomUUID() }],
+    ['GET', 'chat?deviceId=' + deviceId + '&after=0'],
+    ['POST', 'chat/join', { deviceId: randomUUID(), publicKey }],
+    ['POST', 'chat/leave', { deviceId }],
+    ['POST', 'chat', {}],
+    ['GET', 'media/' + initial.party.id],
+  ]) {
+    await assert.rejects(request(method, guestPath(room, action), { cookie, expectedAccount: host.id, body }),
+      { status: 409, code: 'ROOMS_ACCOUNT_CHANGED' })
+  }
+  assert.equal((await request('GET', guestPath(room, 'state'), { cookie: ticket })).body.party.position, 0)
+  await assert.rejects(request('GET', guestPath(room, 'state'), { cookie: ticket, expectedAccount: member.id }), { status: 401 })
+  await request('PATCH', ownerPath(room), { user: host, body: { memberVisibility: false } })
+  await assert.rejects(request('GET', guestPath(room, 'state'), { cookie, expectedAccount: member.id }), { status: 401 })
+  assert.equal((await request('GET', guestPath(room, 'state'), { cookie: ticket })).status, 200)
+})
 
 test('temporary rooms are hidden, use the selected source once, and opt in to signed-in viewer access independently', async t => {
   const { db, user, request, quick, start, stop, tick, guestPath, ownerPath } = fixture(t)

@@ -30,15 +30,22 @@ function decrypt(key, envelope, additionalData) {
   return crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData }, key, decode(envelope.blob));
 }
 
-function storageKey(roomId, member) {
-  return (member ? "member:" : "guest:") + roomId;
+function storageKey(roomId, member, accountId) {
+  if (!member) return "guest:" + roomId;
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(accountId ?? "")) {
+    throw new Error("Member chat requires an account");
+  }
+  return "member:" + accountId + ":" + roomId;
 }
+
+const usableDevice = value => value?.expiresAt > Date.now() && value.pair?.privateKey && value.pair.publicKey;
 
 async function newDevice() {
   return { deviceId: crypto.randomUUID(), pair: await crypto.subtle.generateKey(curve, false, ["deriveBits"]), expiresAt: Date.now() + keyLifetime };
 }
 
-async function changeDeviceStore(operation) {
+async function changeDeviceStore(operation, signal) {
+  signal?.throwIfAborted();
   if (!globalThis.indexedDB) throw new Error("Local chat key storage is unavailable");
   const db = await new Promise((resolve, reject) => {
     const request = indexedDB.open("zelotez-rooms-quick-chat", 1);
@@ -51,8 +58,12 @@ async function changeDeviceStore(operation) {
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction(keyStore, "readwrite");
       let result;
-      transaction.oncomplete = () => resolve(result);
-      transaction.onabort = () => reject(transaction.error);
+      const abort = () => transaction.abort();
+      const cleanup = () => signal?.removeEventListener("abort", abort);
+      transaction.oncomplete = () => { cleanup(); resolve(result); };
+      transaction.onabort = () => { cleanup(); reject(signal?.aborted ? signal.reason : transaction.error); };
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) return abort();
       operation(transaction.objectStore(keyStore), value => { result = value; });
     });
   } finally {
@@ -60,9 +71,51 @@ async function changeDeviceStore(operation) {
   }
 }
 
-async function roomDevice(key) {
-  if (resident.get(key)?.expiresAt > Date.now()) return resident.get(key);
-  const candidate = await newDevice();
+async function roomDevice(key, { legacyKey, accountId, proveLegacy, signal } = {}) {
+  signal?.throwIfAborted();
+  if (usableDevice(resident.get(key))) return resident.get(key);
+  const saved = await changeDeviceStore((store, finish) => {
+    const request = store.get(key);
+    request.onsuccess = () => {
+      if (usableDevice(request.result) || !legacyKey) finish({ scoped: request.result });
+      else {
+        const previous = store.get(legacyKey);
+        previous.onsuccess = () => finish({ legacy: previous.result });
+      }
+    };
+  }, signal).catch(() => { signal?.throwIfAborted(); return {}; });
+  if (usableDevice(saved.scoped)) {
+    resident.set(key, saved.scoped);
+    return saved.scoped;
+  }
+  const legacy = saved.legacy ?? resident.get(legacyKey);
+  if (usableDevice(legacy) && typeof proveLegacy === "function") {
+    const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", legacy.pair.publicKey);
+    // An old room-only key has no account label. Claim it only after the server confirms
+    // the current account/session owns that exact device and public key.
+    if (await proveLegacy({ deviceId: legacy.deviceId, publicKey: { kty, crv, x, y } })) {
+      signal?.throwIfAborted();
+      const promoted = { ...legacy, accountId };
+      const record = await changeDeviceStore((store, finish) => {
+        const current = store.get(key);
+        current.onsuccess = () => {
+          if (usableDevice(current.result)) return finish(current.result);
+          const previous = store.get(legacyKey);
+          previous.onsuccess = () => {
+            if (previous.result?.deviceId === legacy.deviceId) store.delete(legacyKey);
+            store.put(promoted, key);
+            finish(promoted);
+          };
+        };
+      }, signal).catch(() => { signal?.throwIfAborted(); return promoted; });
+      signal?.throwIfAborted();
+      resident.delete(legacyKey);
+      resident.set(key, record);
+      return record;
+    }
+  }
+  // Unclaimed legacy keys stay quarantined until their owner can prove access or they expire.
+  const candidate = { ...await newDevice(), ...(accountId && { accountId }) };
   const record = await changeDeviceStore((store, finish) => {
     const request = store.get(key);
     request.onsuccess = () => {
@@ -80,13 +133,14 @@ async function roomDevice(key) {
       if (entry.value.expiresAt <= Date.now()) entry.delete();
       entry.continue();
     };
-  }).catch(() => resident.get(key)?.expiresAt > Date.now() ? resident.get(key) : candidate);
+  }, signal).catch(() => { signal?.throwIfAborted(); return usableDevice(resident.get(key)) ? resident.get(key) : candidate; });
+  signal?.throwIfAborted();
   resident.set(key, record);
   return record;
 }
 
-export async function forgetQuickChatDevice(roomId, member, deviceId) {
-  const key = storageKey(roomId, member);
+export async function forgetQuickChatDevice(roomId, member, deviceId, accountId) {
+  const key = storageKey(roomId, member, accountId);
   if (deviceId === undefined || resident.get(key)?.deviceId === deviceId) resident.delete(key);
   await changeDeviceStore(store => {
     const request = store.get(key);
@@ -96,10 +150,11 @@ export async function forgetQuickChatDevice(roomId, member, deviceId) {
   }).catch(() => {});
 }
 
-export async function forgetMemberQuickChatDevices() {
-  for (const key of resident.keys()) if (key.startsWith("member:")) resident.delete(key);
+export async function forgetMemberQuickChatDevices(accountId) {
+  const prefix = accountId ? "member:" + accountId + ":" : "member:";
+  for (const key of resident.keys()) if (key.startsWith(prefix)) resident.delete(key);
   await changeDeviceStore(store => {
-    const request = store.openKeyCursor(IDBKeyRange.bound("member:", "member:\uffff"));
+    const request = store.openKeyCursor(IDBKeyRange.bound(prefix, prefix + "\uffff"));
     request.onsuccess = () => {
       const current = request.result;
       if (!current) return;
@@ -110,7 +165,10 @@ export async function forgetMemberQuickChatDevices() {
 }
 
 export async function createQuickChatCrypto(roomId, options) {
-  const { deviceId, pair } = options ? await roomDevice(storageKey(roomId, options.member)) : await newDevice();
+  const { deviceId, pair } = options ? await roomDevice(storageKey(roomId, options.member, options.accountId), {
+    signal: options.signal,
+    ...(options.member && { legacyKey: "member:" + roomId, accountId: options.accountId, proveLegacy: options.proveLegacy }),
+  }) : await newDevice();
   const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", pair.publicKey);
   const salt = context("room", roomId);
 

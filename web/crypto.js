@@ -16,6 +16,35 @@ window.ClubCrypto = (() => {
   const reactionKeys = new WeakMap();
   const failedHistoryKeys = new EventTarget();
   let active = null;
+  const commonPasswords = new Set([
+    "password", "password1", "password123", "password1234", "password12345", "password123456", "password12345678",
+    "password123456789", "password1234567890", "passwordpassword123", "passw0rd", "passwort", "passwort123",
+    "passwort12345678", "meinpasswort12345", "diesistmeinpasswort", "sicherespasswort", "geheimespasswort",
+    "qwerty", "qwerty123", "qwertyuiop", "qwertyuiopasdfgh", "qwertyuiopasdfghjkl", "qwertyuiop123456",
+    "123456", "123456789", "123456789012345", "1234567890123456", "12345678901234567890", "0123456789012345",
+    "123451234512345", "123456789123456789", "abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz1234567890",
+    "letmein", "welcome", "welcome123", "welcometotheclub", "admin", "administrator", "administrator123",
+    "changeme", "changeme123456789", "iloveyou", "iloveyou123456789", "thisismypassword", "thisisasecretpassword",
+    "mysecurepassword", "supersecretpassword", "securepassword123", "verysecurepassword", "verystrongpassword",
+    "correcthorsebatterystaple", "zelotezrooms12345", "zelotezroomspassword", "woaini", "woaini1314520",
+  ]);
+  const repeatedPasswords = ["password", "passwort", "qwerty", "12345", "123456", "1234567890", "letmein", "iloveyou", "welcome", "admin", "woaini"];
+
+  function assertNewPassword(passphrase) {
+    if (typeof passphrase !== "string" || [...passphrase].length < 15) {
+      throw new Error(errorText("Use at least 15 characters for your new password.",
+        "Verwende mindestens 15 Zeichen für dein neues Passwort.", "新密码至少需要 15 个字符。"));
+    }
+    // Normalize only for the local denylist, never for encryption or existing sign-in.
+    const comparison = passphrase.normalize("NFKC").toLowerCase().replace(/\s/gu, "");
+    const base = comparison.replace(/[.!?_-]+$/u, "");
+    if (!comparison || /^(.)\1{14,}$/u.test(comparison) || commonPasswords.has(base) ||
+        repeatedPasswords.some(word => base.length >= word.length * 2 && base === word.repeat(base.length / word.length))) {
+      throw new Error(errorText("This password is too common. Choose a different password or passphrase.",
+        "Dieses Passwort ist zu häufig. Wähle ein anderes Passwort oder eine andere Passphrase.",
+        "此密码过于常见。请选择其他密码或密码短语。"));
+    }
+  }
 
   function base64(bytes) {
     const source = new Uint8Array(bytes);
@@ -77,6 +106,7 @@ window.ClubCrypto = (() => {
   }
 
   async function prepareRegistration(username, passphrase) {
+    assertNewPassword(passphrase);
     const { material, salt } = await accountMaterial(username, passphrase);
     const [login, vault, pair] = await Promise.all([
       expand(material, salt, "login"), expand(material, salt, "identity"),
@@ -108,6 +138,7 @@ window.ClubCrypto = (() => {
   }
 
   async function rewrapIdentity(user, previousChatPassword, newPassword) {
+    assertNewPassword(newPassword);
     const pub = publicPoint(user.publicKey);
     const previous = await accountMaterial(user.username, previousChatPassword);
     let secret;
@@ -307,6 +338,6 @@ window.ClubCrypto = (() => {
     return id + "/deletion";
   }
 
-  return { prepareRegistration, rewrapIdentity, credential, unlock, lock, deviceUnlockKey, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
+  return { assertNewPassword, prepareRegistration, rewrapIdentity, credential, unlock, lock, deviceUnlockKey, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
     sealReaction, openReaction, deletionScope, onHistoryKeyFailure };
 })();

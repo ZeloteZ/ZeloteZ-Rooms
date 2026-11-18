@@ -3,55 +3,38 @@
 
 import argparse
 import fcntl
-import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import tempfile
+from desktop_release_manifest import (MANIFEST_NAME, SIGNATURE_NAME, check_installer, load_signed_release,
+                                      read_small, version_number)
 
 
-VERSION = re.compile(r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}")
-MAX_INSTALLER = 256 * 1024**2
-
-
-def version_number(version):
-    if not isinstance(version, str) or not VERSION.fullmatch(version):
-        raise ValueError("Expected a stable desktop version, such as 0.1.29")
-    return tuple(map(int, version.split(".")))
-
-
-def stage_installer(source, destination, name, magic):
-    checksum = (source / (name + ".sha256")).read_text(encoding="ascii").strip()
+def stage_installer(source, destination, artifact):
+    name = artifact["filename"]
+    checksum = read_small(source / (name + ".sha256"), 256).decode("ascii").strip()
     match = re.fullmatch(r"([0-9a-f]{64}) [ *]" + re.escape(name), checksum)
-    if not match:
+    if not match or match[1] != artifact["sha256"]:
         raise ValueError(f"Invalid SHA-256 file for {name}")
-    digest = hashlib.sha256()
-    size = 0
-    with (source / name).open("rb") as installer, destination.open("xb") as output:
-        if installer.read(len(magic)) != magic:
-            raise ValueError(f"Invalid installer format for {name}")
-        installer.seek(0)
-        while chunk := installer.read(1024**2):
-            size += len(chunk)
-            if size > MAX_INSTALLER:
-                raise ValueError(f"Installer too large: {name}")
-            digest.update(chunk)
-            output.write(chunk)
-    if digest.hexdigest() != match[1]:
-        raise ValueError(f"SHA-256 mismatch for {name}")
+    with destination.open("xb") as output:
+        check_installer(source, artifact, output)
     destination.chmod(0o644)
-    return size, match[1]
 
 
-def publish(version, source, directory):
+def publish(version, source, directory, trusted_key):
     target_version = version_number(version)
+    if Path(trusted_key).resolve(strict=True).is_relative_to(directory.resolve()):
+        raise ValueError("The trusted operator key must be outside the public download directory")
+    manifest, manifest_bytes, signature = load_signed_release(version, source, trusted_key)
     directory.mkdir(parents=True, exist_ok=True)
     current = directory / "current.json"
     target = directory / version
     with (directory / ".publish.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if current.exists():
-            active = json.loads(current.read_text(encoding="utf-8"))
+            active = json.loads(read_small(current, 16384).decode("utf-8"))
             if target_version < version_number(active["version"]):
                 raise ValueError("Refusing to replace the current release with an older version")
 
@@ -61,23 +44,30 @@ def publish(version, source, directory):
             assets.mkdir(mode=0o755)
             assets.chmod(0o755)
             downloads = []
-            for platform, suffix, magic in [("linux", "x86_64.AppImage", b"\x7fELF"), ("windows", "x64.exe", b"MZ")]:
-                name = f"ZeloteZ-Rooms-{version}-{suffix}"
-                size, checksum = stage_installer(source, assets / name, name, magic)
-                downloads.append({"platform": platform, "arch": "x64", "url": f"/downloads/desktop/{version}/{name}",
-                                  "size": size, "sha256": checksum})
+            for artifact in manifest["artifacts"]:
+                name = artifact["filename"]
+                stage_installer(source, assets / name, artifact)
+                downloads.append({"platform": artifact["platform"], "arch": artifact["arch"],
+                                  "url": f"/downloads/desktop/{version}/{name}",
+                                  "size": artifact["size"], "sha256": artifact["sha256"]})
+            for name, content in [(MANIFEST_NAME, manifest_bytes), (SIGNATURE_NAME, signature)]:
+                (assets / name).write_bytes(content)
+                (assets / name).chmod(0o644)
 
             if target.exists():
-                for item in downloads:
-                    name = item["url"].rsplit("/", 1)[1]
-                    with (target / name).open("rb") as existing:
-                        if hashlib.file_digest(existing, "sha256").hexdigest() != item["sha256"]:
-                            raise ValueError(f"Version {version} already contains a different {name}")
+                if target.is_symlink() or {path.name for path in target.iterdir()} != {path.name for path in assets.iterdir()}:
+                    raise ValueError(f"Version {version} already exists without the same signed release files")
+                for artifact in manifest["artifacts"]:
+                    check_installer(target, artifact)
+                if read_small(target / MANIFEST_NAME, 8192) != manifest_bytes or read_small(target / SIGNATURE_NAME, 64) != signature:
+                    raise ValueError(f"Version {version} already contains a different release signature")
             else:
                 assets.rename(target)
 
             metadata = {
-                "current.json": {"version": version, "downloads": downloads},
+                "current.json": {"version": version, "downloads": downloads,
+                                 "manifestUrl": f"/downloads/desktop/{version}/{MANIFEST_NAME}",
+                                 "signatureUrl": f"/downloads/desktop/{version}/{SIGNATURE_NAME}"},
                 "release.json": {"product": "zelotez-rooms", "protocol": 1, "version": version,
                                  "artifacts": [f"{item['platform']}-{item['arch']}" for item in downloads]},
             }
@@ -93,10 +83,11 @@ def main():
     parser.add_argument("version")
     parser.add_argument("--source", type=Path, required=True, help="directory containing both installers and their .sha256 files")
     parser.add_argument("--directory", type=Path, default=Path("desktop-downloads"), help="download directory mounted by the gateway")
+    parser.add_argument("--trusted-key", type=Path, required=True, help="operator-controlled Ed25519 public key outside the incoming release directory")
     args = parser.parse_args()
     try:
-        publish(args.version, args.source, args.directory)
-    except (OSError, ValueError, KeyError) as error:
+        publish(args.version, args.source, args.directory, args.trusted_key)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Desktop release was not published: {error}\n")
     print(f"Published Rooms {args.version} for Linux and Windows in {args.directory}")
 

@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktop", true);
 if (process.isMainFrame && ["win32", "linux"].includes(process.platform)) contextBridge.exposeInMainWorld("roomsDesktopShare", {
+  protectedCapture: true,
   arm: (id, language) => navigator.userActivation.isActive
     ? ipcRenderer.invoke("rooms:share-arm", id, language) : Promise.resolve(false),
   take: id => ipcRenderer.invoke("rooms:share-take", id),

@@ -1,10 +1,10 @@
 "use strict";
 
 const { ipcMain, desktopCapturer } = require("electron");
+const { randomUUID } = require("node:crypto");
 
 const sessions = new Map();
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
-const jpeg = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/u;
 const resolutions = [720, 1080, 1440];
 const frameRates = [30, 60];
 
@@ -18,13 +18,16 @@ function current(event, id) {
 
 function clear(state) {
   const setup = state.setup;
+  const owner = state.owner;
+  state.owner = null;
   state.setup = null;
   state.issued = null;
-  state.audio.clear();
+  owner?.close();
+  if (owner) state.audio.revoke();
+  else state.audio.clear();
   if (!setup) return;
   clearTimeout(setup.timer);
   try { setup.grant?.(null); } catch { /* Chromium can discard the request when a frame closes. */ }
-  setup.previewResult?.(null);
   if (setup.local && !setup.local.window.isDestroyed()) setup.local.window.close();
 }
 
@@ -60,32 +63,12 @@ ipcMain.handle("rooms:share-take", (event, id) => {
   const request = current(event, id);
   if (!request) return null;
   const { state, setup } = request;
-  if (setup.phase === "looking-for-preview") {
-    setup.phase = "awaiting-preview";
-    return { preview: true };
-  }
   return consume(state, setup);
 });
 
-ipcMain.handle("rooms:share-preview", (event, id, thumbnail, aspect, sourceWidth, sourceHeight) => {
-  const request = current(event, id);
-  if (!request) return null;
-  const { state, setup } = request;
-  if (setup.phase !== "awaiting-preview" || typeof thumbnail !== "string" || thumbnail.length > 250_000
-      || !jpeg.test(thumbnail) || ![sourceWidth, sourceHeight].every(size => Number.isSafeInteger(size) && size > 0 && size <= 32768)
-      || !Number.isFinite(aspect) || aspect < .05 || aspect > 20 || aspect !== sourceWidth / sourceHeight) return null;
-  setup.dimensions = { aspect, sourceWidth, sourceHeight };
-  setup.phase = "cropping";
-  timeout(state, setup, 180_000);
-  return new Promise(resolve => {
-    setup.previewResult = resolve;
-    try {
-      setup.local.contents.send("rooms:local-share-preview", { thumbnail });
-    } catch {
-      clear(state);
-    }
-  });
-});
+// Old desktop versions used a snapshot supplied by the remote page. The new
+// capture owner is authoritative; a remote renderer can no longer supply it.
+ipcMain.handle("rooms:share-preview", () => null);
 
 ipcMain.handle("rooms:share-cancel", (event, id) => {
   const request = current(event, id);
@@ -164,7 +147,17 @@ function setVideo(state, setup, selected) {
   }
 }
 
-function submit(state, setup, input) {
+function captureOwner(state, setup, video) {
+  if (!state.owner) {
+    const owner = state.createOwner({ source: video,
+      valid: () => (state.setup === setup || state.issued?.id === setup.id) && state.valid(setup.frame),
+      onEnded: () => { if (state.owner === owner) clear(state); } });
+    state.owner = owner;
+  }
+  return state.owner;
+}
+
+async function submit(state, setup, input) {
   if (!state.open(setup) || !input || typeof input !== "object" || !Number.isInteger(input.source)) return false;
   const video = setup.video?.[input.source];
   if (!video || (setup.selectedVideo && setup.selectedVideo !== video)
@@ -173,34 +166,56 @@ function submit(state, setup, input) {
 
   if (input.region === true && setup.phase === "configuring") {
     setup.selectedVideo = video;
-    setup.phase = "looking-for-preview";
+    setup.phase = "preparing-preview";
     timeout(state, setup, 12_000);
-    return setVideo(state, setup, video) ? "preview" : false;
+    try {
+      const preview = await captureOwner(state, setup, video).snapshot();
+      if (!state.open(setup)) return false;
+      setup.dimensions = { aspect: preview.aspect, sourceWidth: preview.width, sourceHeight: preview.height };
+      setup.phase = "cropping";
+      timeout(state, setup, 180_000);
+      setup.local.contents.send("rooms:local-share-preview", { thumbnail: preview.thumbnail });
+      return "preview";
+    } catch { clear(state); return false; }
   }
 
   const region = regionOptions(input.region, setup.dimensions);
   if (input.region !== null && !region) return false;
   const { audioMode, audioSource } = input;
+  if (setup.legacy && audioMode !== "none") return false;
   const selectedAudio = audioMode !== "none" && setup.audio?.mode === audioMode && Number.isInteger(audioSource)
     ? setup.audio.sources?.[audioSource] : undefined;
   if (audioMode === "none" ? audioSource !== null : !state.audio.modes.includes(audioMode) || !selectedAudio) return false;
   setup.result = {
-    options: { height: input.height, fps: input.fps, region, audio: audioMode },
+    // The remote page receives only already-transformed output, never the raw
+    // source or a crop that it is responsible for enforcing.
+    options: { height: input.height, fps: input.fps, region: null, audio: audioMode },
     audioSource: selectedAudio,
   };
-  setup.phase = "ready";
-  timeout(state, setup, 30_000);
-  if (!setVideo(state, setup, video)) return false;
-  const respondToPreview = setup.previewResult;
-  setup.previewResult = null;
-  setup.local.window.close();
-  if (respondToPreview) respondToPreview(consume(state, setup));
-  return true;
+  setup.phase = "preparing-output";
+  timeout(state, setup, 12_000);
+  try {
+    const owner = captureOwner(state, setup, video);
+    const frame = await owner.configure({ height: input.height, fps: input.fps, region });
+    if (!state.open(setup)) return false;
+    setup.phase = "ready";
+    timeout(state, setup, 30_000);
+    if (!setVideo(state, setup, frame)) return false;
+    owner.delivered();
+    if (setup.legacy) {
+      clearTimeout(setup.timer);
+      state.setup = null;
+      state.issued = { id: setup.id, frame: setup.frame };
+      state.audio.approve();
+    }
+    setup.local.window.close();
+    return true;
+  } catch { clear(state); return false; }
 }
 
-function installShareSetup(web, { allowed, audio, portal, showDialog }) {
+function installShareSetup(web, { allowed, audio, portal, showDialog, createOwner, defaultLanguage = () => "en" }) {
   const state = {
-    setup: null, issued: null, audio, portal,
+    setup: null, issued: null, owner: null, audio, portal, createOwner,
     valid: frame => Boolean(frame && !frame.detached && frame === web.mainFrame && allowed(frame.url)),
     open: setup => state.setup === setup && setup.local && !setup.local.window.isDestroyed() && state.valid(setup.frame),
   };
@@ -211,13 +226,19 @@ function installShareSetup(web, { allowed, audio, portal, showDialog }) {
   web.once("destroyed", () => { revoke(); sessions.delete(web.id); });
 
   return (frame, callback) => {
-    const setup = state.setup;
-    if (setup?.phase !== "armed" || setup.frame !== frame || !state.valid(frame)) return null;
+    if (!state.valid(frame)) return null;
+    let setup = state.setup;
+    if (!setup) {
+      clear(state);
+      setup = state.setup = { id: randomUUID(), frame, language: defaultLanguage(), phase: "armed", legacy: true };
+    }
+    if (setup.phase !== "armed" || setup.frame !== frame) return null;
     setup.phase = "configuring";
     setup.grant = callback;
     timeout(state, setup, 300_000);
     return new Promise(resolve => {
-      const local = setup.local = showDialog({ language: setup.language, portal, audioModes: audio.modes });
+      const local = setup.local = showDialog({ language: setup.language, portal,
+        audioModes: setup.legacy ? [] : audio.modes, ...(setup.legacy ? { legacyAudio: true } : {}) });
       local.share = {
         sources: () => videoSources(state, setup),
         audio: mode => audioSources(state, setup, mode),

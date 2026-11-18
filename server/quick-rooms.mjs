@@ -212,6 +212,13 @@ export function createQuickRooms(db, { publicOrigin, trustProxyIp, auth, communi
 
   function guestAccess(request, id) {
     const room = activeRoom(id)
+    // Member views pin their account even when this browser also holds a guest ticket.
+    if (request.headers['x-rooms-account'] !== undefined) {
+      const user = auth.requireSession(request)
+      const session = auth.sessionKey(request)
+      if (!accountAccess(room, user.id, session)) throw unauthorized()
+      return { ...scope(room, { userId: user.id, session }), displayName: user.displayName }
+    }
     const ticket = cookieValue(request, cookieName)
     if (ticketValid(room, ticket)) return { ...scope(room, { token: ticket }), quotaSource: quotaSource(request) }
     const user = auth.session(request)

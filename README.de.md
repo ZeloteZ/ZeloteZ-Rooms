@@ -48,6 +48,8 @@ docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms 
 
 Scanne den QR-Code aus dem Terminal mit deiner Authenticator-App. Bei Bedarf kannst du den Schlüssel manuell als zeitbasierten Code mit sechs Stellen und 30 Sekunden Intervall hinzufügen. Der Befehl beendet bestehende Betreibersitzungen und ersetzt den bisherigen Authenticator. Melde dich erneut an und erstelle im Profil neue Wiederherstellungscodes.
 
+Für neue Passwörter prüft Rooms mindestens 15 Zeichen und eine lokale Sperrliste häufiger Passwörter. Bestehende Passwörter funktionieren weiter. Der Server erhält einen abgeleiteten Anmeldewert und prüft dessen Format. Die Prüfung von Länge und Sperrliste erfolgt in der offiziellen Web- und Desktop-App.
+
 Im Profil kannst du unter **Passwort ändern** dein Passwort wechseln. Rooms erhält deinen Chatschlüssel und beendet die anderen Sitzungen. Um das Betreiberkonto über die Konsole wiederherzustellen, verwende:
 
 ```sh

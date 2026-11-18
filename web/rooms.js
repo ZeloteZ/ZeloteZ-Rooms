@@ -660,7 +660,8 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   if (child.shareSource === "screen") screen?.prepare();
   else if (child.shareSource) setup?.prepareSource(child.shareSource);
   const shareActions = el("div", { class: "quick-view-actions" }, screen?.actions, setup?.share);
-  const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true, videoDock: context.videoDock,
+  const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true, accountId: context.user.id,
+    onAccountChanged: context.onAccountChanged, videoDock: context.videoDock,
     host: {
       shareActions, actions: quickRoomActions(context, topic, stopCapture),
       channelId: channel.id, href: topicHref(topic.id, channel.id), queue: setup?.queue,

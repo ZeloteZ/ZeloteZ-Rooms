@@ -10,6 +10,7 @@
 !deploy/mediamtx.LICENSE
 !deploy/node.LICENSE
 !deploy/rooms-entrypoint.mjs
+!deploy/rooms-role.c
 !server/
 server/**
 !server/qrcode-generator-license.json

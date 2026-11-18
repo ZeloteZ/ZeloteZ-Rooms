@@ -27,9 +27,16 @@ RUN set -eu; \
       -e "s#src=\"/vendor/hls\.min\.js\"#src=\"/assets/$version/hls.min.js\"#g" index.html guest.html
 
 FROM bluenviron/mediamtx:1.21.4-ffmpeg@sha256:1fa0abbefb6f181bf0da075c65a75505ee43bb9996e4a4b5fd30a4ab7dea01e6 AS media
+
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS permissions
+RUN apk add --no-cache build-base linux-headers
+COPY deploy/rooms-role.c /build/rooms-role.c
+RUN cc -std=c11 -static -O2 -Wall -Wextra -Werror -o /build/rooms-role /build/rooms-role.c
+
 FROM nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
 
-RUN apk add --no-cache ffmpeg libstdc++ tini \
+RUN apk del nginx-module-xslt \
+    && apk add --no-cache 'zlib>=1.4-r0' ffmpeg libstdc++ tini \
     && addgroup -g 1000 rooms \
     && adduser -S -D -H -u 1000 -G rooms rooms \
     && install -d -m 0700 -o rooms -g rooms /data /watch-data \
@@ -38,13 +45,15 @@ COPY --from=build /usr/local/bin/node /usr/local/bin/node
 COPY --from=build /backend/ /app/
 COPY --from=build /srv/www/ /srv/www/
 COPY --from=media /mediamtx /usr/local/bin/mediamtx
+COPY --from=permissions /build/rooms-role /usr/local/bin/rooms-role
 # Node 24.22.3 and MediaMTX 1.21.4 notices from the pinned base releases.
 COPY deploy/node.LICENSE deploy/mediamtx.LICENSE /usr/share/licenses/rooms/
 COPY deploy/mediamtx.yml /etc/rooms/mediamtx.yml
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/rooms-entrypoint.mjs /app/rooms-entrypoint.mjs
 # The internal endpoints share a network namespace in the single container.
-RUN sed -i \
+RUN ln -s rooms-role /usr/local/bin/ffmpeg \
+    && sed -i \
       -e '/^    resolver /d' \
       -e 's/server server:8080 resolve;/server 127.0.0.1:8082;/' \
       -e 's/server mediamtx:8888 resolve;/server 127.0.0.1:8888;/' /etc/nginx/nginx.conf

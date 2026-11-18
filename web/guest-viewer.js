@@ -38,15 +38,18 @@ function setText(node, text) {
 let supportId = 0;
 
 export function renderGuestViewer(options) {
-  const { publicId, videoDock, signal, member, host, onRoom } = options;
+  const { publicId, videoDock, signal, member, accountId, host, onRoom } = options;
   if (!member || !videoDock) return createGuestViewer(options).viewer;
-  const entry = videoDock.get("temporary:" + publicId, entry => createGuestViewer({ ...options, signal: entry.signal }, entry));
+  const entry = videoDock.get("temporary:" + accountId + ":" + publicId, entry => createGuestViewer({ ...options, signal: entry.signal }, entry));
   entry.instance.connectView(host, onRoom);
   entry.mount(entry.instance.slot, signal, entry.instance.disconnectView);
   return entry.instance.viewer;
 }
 
-function createGuestViewer({ publicId, signal, member = false, password, host, onRoom }, dockEntry) {
+function createGuestViewer({ publicId, signal, member = false, accountId, onAccountChanged, password, host, onRoom }, dockEntry) {
+  if (member && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(accountId ?? "")) {
+    throw new Error(t("Your session has changed. Please sign in again.", "Deine Sitzung hat sich geändert. Melde dich erneut an."));
+  }
   const viewer = document.createElement("div");
   viewer.className = "guest-viewer";
   viewer.innerHTML = `
@@ -215,6 +218,7 @@ function createGuestViewer({ publicId, signal, member = false, password, host, o
   let generation = 0;
   let mounted = !dockEntry;
   let dismissedSource;
+  let accountChanged = false;
   const base = "/api/guest/" + publicId;
 
   function updateLabels() {
@@ -356,7 +360,9 @@ function createGuestViewer({ publicId, signal, member = false, password, host, o
     const current = { id: source.id, kind: source.kind, ready: false, started: false };
     if (source.kind === "youtube") {
       current.audience = audience ?? createWatchViewerLease({ signal, ownerDocument,
-        report: options => reportWatchViewer(base + "/viewers", options, { partyId: source.id }),
+        report: options => reportWatchViewer(base + "/viewers", options, {
+          partyId: source.id, accountId: member ? accountId : undefined, onAccountChanged: changedAccount,
+        }),
       });
       audience?.moveTo(ownerDocument);
     }
@@ -446,7 +452,8 @@ function createGuestViewer({ publicId, signal, member = false, password, host, o
   function openChat() {
     if (chat || !mounted || !authorized) return;
     chatScope = new AbortController();
-    chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]), member });
+    chat = renderQuickChat({ publicId, signal: AbortSignal.any([chatScope.signal, signal]), member,
+      accountId, onAccountChanged: changedAccount });
     chatSlot.append(chat);
   }
 
@@ -486,17 +493,33 @@ function createGuestViewer({ publicId, signal, member = false, password, host, o
     dockEntry?.activate(source.title || roomTitle || title.textContent, host?.href ?? dockEntry.href ?? "#/watch/" + publicId);
   }
 
-  function request(path, method = "GET", body, absolute = false) {
-    return fetch(absolute ? path : base + path, {
+  function changedAccount() {
+    if (!member || accountChanged) return;
+    accountChanged = true;
+    clearTimeout(timer);
+    revoke(true);
+    showGate("unavailable");
+    onAccountChanged?.();
+  }
+
+  async function request(path, method = "GET", body, absolute = false) {
+    if (accountChanged) throw new Error("Account changed");
+    const response = await fetch(absolute ? path : base + path, {
       method,
       credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
       referrerPolicy: "no-referrer",
       signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
-      headers: { "Accept-Language": language(), ...(body ? { "Content-Type": "application/json" } : {}) },
+      headers: { "Accept-Language": language(), ...(member && { "X-Rooms-Account": accountId }),
+        ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (member && response.headers.get("X-Rooms-Error") === "account-changed") {
+      changedAccount();
+      throw new Error("Account changed");
+    }
+    return response;
   }
 
   function accessLost(response) {
@@ -509,11 +532,11 @@ function createGuestViewer({ publicId, signal, member = false, password, host, o
 
   function schedule(delay = watch?.source.kind === "local" || watch?.source.kind === "youtube" ? 1200 : 2600) {
     clearTimeout(timer);
-    if (!signal.aborted) timer = setTimeout(refresh, delay);
+    if (!signal.aborted && !accountChanged) timer = setTimeout(refresh, delay);
   }
 
   async function refresh() {
-    if (signal.aborted) return;
+    if (signal.aborted || accountChanged) return;
     if (pulling || writing) return schedule();
     pulling = true;
     const version = generation;

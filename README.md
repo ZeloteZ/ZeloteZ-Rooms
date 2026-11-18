@@ -35,6 +35,8 @@ Scan the terminal QR code with your authenticator app. You can also enter the pr
 
 The site owner manages invitations and can suspend accounts or end their sessions under **Invites → Accounts**. Each account can broadcast one stream at a time, with up to eight simultaneous broadcasts per instance.
 
+Rooms checks new passwords in the browser. Use at least 15 characters and choose a password that is uncommon. Existing passwords still work. The server receives a derived credential and can enforce its format. The password length and blocklist checks run in the official web and desktop apps.
+
 To change your password, open your profile and choose **Change password**. Rooms keeps your chat key and ends your other sessions. To recover the owner account from the server console, use:
 
 ```sh
