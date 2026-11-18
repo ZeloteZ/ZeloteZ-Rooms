@@ -24,7 +24,7 @@ AAC_ENCODERS = ("fdkaacenc", "avenc_aac", "voaacenc", "faac")
 PREVIEW_MAX_BYTES = 128 * 1024
 JPEG_PREVIEW_PIPELINE = (
     "published_video. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 max-size-time=0 ! "
-    "videorate drop-only=true ! video/x-raw,framerate=12/1 ! videoconvertscale ! "
+    "videoconvertscale add-borders=true ! "
     "video/x-raw,format=I420,width=640,height=360,pixel-aspect-ratio=1/1 ! jpegenc quality=70 ! "
     "appsink name=local_preview sync=false async=false emit-signals=true max-buffers=1 drop=true wait-on-eos=false"
 )

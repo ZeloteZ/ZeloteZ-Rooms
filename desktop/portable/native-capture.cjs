@@ -68,6 +68,7 @@ function readPreview(state, task) {
   pipe.on("data", chunk => {
     if (task.ended) return;
     buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
+    let latest;
     while (buffer.length >= 4) {
       const length = buffer.readUInt32BE(0);
       if (length < 4 || length > previewFrameLimit) {
@@ -78,9 +79,10 @@ function readPreview(state, task) {
       const frame = buffer.subarray(4, length + 4);
       buffer = buffer.subarray(length + 4);
       if (task.live && task.id && frame[0] === 0xff && frame[1] === 0xd8) {
-        toPage(state, "rooms:native-capture-preview", task.id, Uint8Array.from(frame));
+        latest = frame;
       }
     }
+    if (latest) toPage(state, "rooms:native-capture-preview", task.id, Uint8Array.from(latest));
   });
 }
 

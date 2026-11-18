@@ -3,6 +3,7 @@ import os
 import socket
 import stat
 import sys
+from threading import Lock
 from urllib.parse import urlsplit
 
 import i18n
@@ -10,6 +11,7 @@ from i18n import t
 from model import STREAM_ID, capture_reservation, reservation_id, server_origin
 
 try:
+    from media import PREVIEW_MAX_BYTES
     from streamer import Adw, CaptureWindow, Gio, GLib, Gtk, initialize_media
 except (ImportError, ValueError) as error:
     sys.exit(f"ZeloteZ Rooms native capture needs GTK, Libadwaita, libportal and GStreamer. ({error})")
@@ -29,25 +31,80 @@ class PreviewPipe:
             raise RuntimeError("The preview requires a local pipe.")
         os.set_blocking(fd, False)
         self.fd = fd
-        self.enabled = False
+        self.lock = Lock()
+        self._enabled = False
+        self.watch = 0
         self.pending = None
+        self.started = False
+        self.latest = None
+
+    @property
+    def enabled(self):
+        with self.lock:
+            return self._enabled
+
+    @enabled.setter
+    def enabled(self, value):
+        with self.lock:
+            self._enabled = bool(value)
+            if not self._enabled:
+                self.latest = None
+                # The receiver may already hold the packet's header. Finish
+                # that packet even when no more preview frames are requested.
+                if not self.started:
+                    self.pending = None
+                if self.pending is None and self.watch:
+                    GLib.source_remove(self.watch)
+                    self.watch = 0
 
     def send_frame(self, jpeg):
-        if not self.enabled:
+        if not 0 < len(jpeg) <= PREVIEW_MAX_BYTES:
             return
-        # Complete a partially written frame before sending any newer one.
-        packet = self.pending
-        if packet is None:
-            packet = memoryview(len(jpeg).to_bytes(4, "big") + jpeg)
-        try:
-            written = os.write(self.fd, packet)
-        except BlockingIOError:
-            written = 0
-        except OSError:
-            self.enabled = False
-            self.pending = None
-            return
-        self.pending = packet[written:] or None
+        packet = memoryview(len(jpeg).to_bytes(4, "big") + jpeg)
+        with self.lock:
+            if not self._enabled:
+                return
+            # Finish a started packet to preserve framing, then use the newest
+            # frame. An unsent packet can be replaced without adding latency.
+            if self.pending is not None and self.started:
+                self.latest = packet
+            else:
+                self.pending = packet
+            self._flush_locked()
+            if self.pending is not None and not self.watch:
+                self.watch = GLib.io_add_watch(self.fd, GLib.PRIORITY_DEFAULT,
+                    GLib.IOCondition.OUT | GLib.IOCondition.HUP | GLib.IOCondition.ERR, self._writable)
+
+    def _flush_locked(self):
+        while self.pending is not None:
+            try:
+                written = os.write(self.fd, self.pending)
+            except BlockingIOError:
+                return
+            except OSError:
+                self._enabled = False
+                self.pending = self.latest = None
+                self.started = False
+                return
+            if written == 0:
+                return
+            self.pending = self.pending[written:] or None
+            self.started = self.pending is not None
+            if self.pending is None:
+                self.pending, self.latest = self.latest, None
+
+    def _writable(self, _source, condition):
+        with self.lock:
+            if condition & (GLib.IOCondition.HUP | GLib.IOCondition.ERR):
+                self._enabled = False
+                self.pending = self.latest = None
+                self.started = False
+            else:
+                self._flush_locked()
+            if self.pending is None:
+                self.watch = 0
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
 
 
 class CaptureSession:

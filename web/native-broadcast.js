@@ -92,16 +92,77 @@ export function createNativeBroadcast(signal, dock) {
       !previewOnly && el("header", { class: "section-heading" },
         el("div", { class: "inline" }, el("span", { class: "tag live" }, t("Live", "Live")), el("h3", {}, heading)), end()),
       stage, !previewOnly && stats);
-    let drawing = false;
+    let decoding = false;
+    let pendingFrame;
+    let decodedFrame;
+    let repaint;
+    let generation = 0;
+    let disposed = false;
     let mountedId;
     let caption;
     const number = new Intl.NumberFormat(language(), { maximumFractionDigits: 1 });
+
+    function visible() {
+      return !disposed && !viewSignal.aborted && !signal.aborted && !document.hidden && !node.hidden && node.isConnected;
+    }
+
+    function clearPreview() {
+      generation++;
+      pendingFrame = undefined;
+      decodedFrame?.close();
+      decodedFrame = undefined;
+      if (repaint !== undefined) cancelAnimationFrame(repaint);
+      repaint = undefined;
+    }
+
+    function paint() {
+      repaint = undefined;
+      const image = decodedFrame;
+      decodedFrame = undefined;
+      if (!image) return;
+      try {
+        if (!visible()) return;
+        if (canvas.width !== image.width || canvas.height !== image.height) {
+          canvas.width = image.width;
+          canvas.height = image.height;
+        }
+        canvasContext.drawImage(image, 0, 0);
+        waiting.hidden = true;
+        canvas.hidden = false;
+      } finally {
+        image.close();
+      }
+    }
+
+    async function decode() {
+      if (decoding || !pendingFrame || !visible()) return;
+      const bytes = pendingFrame;
+      pendingFrame = undefined;
+      const currentGeneration = generation;
+      decoding = true;
+      let image;
+      try {
+        image = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
+        if (currentGeneration !== generation || !visible()) return;
+        decodedFrame?.close();
+        decodedFrame = image;
+        image = undefined;
+        if (repaint === undefined) repaint = requestAnimationFrame(paint);
+      } catch {
+        // Keep the last complete image if a preview frame cannot be decoded.
+      } finally {
+        image?.close();
+        decoding = false;
+        if (pendingFrame && visible()) void decode();
+      }
+    }
 
     function refresh() {
       const shown = active?.channelId === channel.id;
       node.hidden = !shown;
       const id = shown ? active.streamId : null;
       if (id !== mountedId) {
+        clearPreview();
         mountedId = id;
         canvas.hidden = true;
         waiting.hidden = false;
@@ -127,28 +188,20 @@ export function createNativeBroadcast(signal, dock) {
     }
 
     events.addEventListener("status", refresh, { signal: viewSignal });
-    events.addEventListener("frame", async ({ detail }) => {
-      if (node.hidden || !node.isConnected || drawing || !canvasContext) return;
-      const id = mountedId;
-      drawing = true;
-      let image;
-      try {
-        image = await createImageBitmap(new Blob([detail], { type: "image/jpeg" }));
-        if (viewSignal.aborted || id !== mountedId || node.hidden) return;
-        if (canvas.width !== image.width || canvas.height !== image.height) {
-          canvas.width = image.width;
-          canvas.height = image.height;
-        }
-        canvasContext.drawImage(image, 0, 0);
-        waiting.hidden = true;
-        canvas.hidden = false;
-      } catch {
-        // Keep the last complete image if a preview frame cannot be decoded.
-      } finally {
-        image?.close();
-        drawing = false;
-      }
+    events.addEventListener("frame", ({ detail }) => {
+      if (!canvasContext || !visible()) return;
+      pendingFrame = detail;
+      void decode();
     }, { signal: viewSignal });
+    const visibilityChanged = () => { if (document.hidden) clearPreview(); };
+    document.addEventListener("visibilitychange", visibilityChanged, { signal: viewSignal });
+    const dispose = () => {
+      disposed = true;
+      clearPreview();
+      document.removeEventListener("visibilitychange", visibilityChanged);
+    };
+    viewSignal.addEventListener("abort", dispose, { once: true });
+    signal.addEventListener("abort", dispose, { once: true, signal: viewSignal });
     refresh();
     return node;
   }
