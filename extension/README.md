@@ -4,7 +4,7 @@ The optional extension adds **Create ZeloteZ Room** beside **Share** on YouTube 
 
 ## Install locally
 
-Sign in to GitHub with access to this repository and download [ZeloteZ-Rooms-YouTube.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip) from Releases.
+Download [ZeloteZ-Rooms-YouTube.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip) from Releases.
 
 - **Firefox 140 or later.** Open `about:debugging`, select **This Firefox**, choose **Load Temporary Add-on**, and select the ZIP. If you extracted it, select `manifest.json`. Reload the add-on after each Firefox restart. A permanent Firefox installation requires a Mozilla-signed add-on. [Firefox’s loading instructions](https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/)
 
@@ -25,3 +25,7 @@ Rooms Web 0.1.22 or later applies these choices when the handoff opens a confirm
 The YouTube handoff tab closes after Rooms Desktop confirms the handoff. This needs Desktop and the Rooms instance on release 0.1.25 or later. If your system still opens an older Desktop version, use **Open an older desktop app** when it appears. The receipt uses a short-lived random ID and omits cookies, account information, and the video ID.
 
 The extension saves your address, target, and default access options locally. It passes the selected video ID and access choices to Rooms when you open the video. The extension checks the server’s Rooms protocol and page marker, and the normal Rooms site handles sign-in. It uses the browser’s existing session for same-origin requests when you are already signed in. It reads no cookies or credentials and stores no viewing history. Choose an instance run by someone you trust.
+
+## License
+
+The extension is source available under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Include `LICENSE` and `NOTICE` when distributing the ZIP or an extracted copy. Commercial use outside the license's permissions requires separate authorization from ZeloteZ. Third-party components retain their own licenses. The extension's `LICENSE` is an unchanged copy of the repository's root license.

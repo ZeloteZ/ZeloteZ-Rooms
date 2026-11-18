@@ -5,6 +5,9 @@ COPY deploy/player.package-lock.json package-lock.json
 RUN npm ci --ignore-scripts --no-audit --no-fund
 
 FROM nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
+LABEL org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+COPY LICENSE LICENSING.md /usr/share/licenses/zelotez-rooms/
+COPY LICENSE LICENSING.md /srv/www/
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY web/ /srv/www/
 COPY --from=player /build/node_modules/hls.js/dist/hls.min.js /srv/www/vendor/hls.min.js

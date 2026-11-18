@@ -58,7 +58,7 @@ docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms 
 
 ## 桌面应用
 
-在浏览器中登录 Rooms，点击头像旁的“客户端”。页面会根据你的系统推荐 x64 版 Linux AppImage 或 Windows 安装包，并链接到 GitHub 上的官方发布。如果仓库是私有的，请使用有权访问该仓库的 GitHub 账户登录。[最新版本](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
+在浏览器中登录 Rooms，点击头像旁的“客户端”。页面会根据你的系统推荐 x64 版 Linux AppImage 或 Windows 安装包，并链接到 GitHub 上的官方发布。[最新版本](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
 
 桌面更新通知可以自行开启。在桌面设置中启用通知并选择检查间隔。应用会检查已验证的 Rooms 实例提供的版本，并在浏览器中打开该实例的下载页面。
 
@@ -81,3 +81,9 @@ docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms 
 临时房间的访客链接允许访客观看视频、使用直播聊天，以及在观影派对中播放、暂停和跳转进度。链接 URL 片段中的密码会换取一个仅限该房间的会话。房间主持人可以在“直播访问设置”中撤销或更换此链接。
 
 临时直播聊天为每个参与的浏览器使用独立密钥，包括受邀访客。浏览器在本地保留私钥。在房间访问权限仍然有效时，同一浏览器可以重新读取之前收到的近期聊天，也包括离开期间发送的消息。新的浏览器从加入后的消息开始接收。服务器在房间关闭前，仅在内存中保留最近 64 条加密消息，并可以看到发送者和时间戳。
+
+## 许可证
+
+ZeloteZ Rooms 的源码采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，属于源码可用软件（source available）。你可以在该许可证允许的范围内使用、修改和再分发代码，包括非商业用途。超出这些许可范围的商业使用，需要获得权利人 ZeloteZ 的单独授权。第三方组件仍遵循各自的许可证。
+
+请参阅[许可说明](LICENSING.md)和[贡献要求](CONTRIBUTING.md)。

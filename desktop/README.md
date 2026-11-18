@@ -4,7 +4,7 @@ The desktop app opens the same Rooms interface as the website. Enter your server
 
 Open **Desktop settings** from the app menu or with Ctrl+, to change local preferences while staying signed in. Friend requests, direct messages, mentions, and opted-in live alerts can also appear as system notifications. By default, the close button asks whether to keep Rooms running in the background or quit. Select **Don’t show this again** to minimize automatically on future clicks. Restore Rooms from the tray or taskbar, depending on your desktop. Change what X does in Desktop settings.
 
-Under **Desktop settings → Desktop updates**, turn on update notifications and choose the check frequency. Update checks start off. The app checks the official GitHub release. You can open the release in your browser from the alert or from desktop settings. For a private repository, use the GitHub link in settings and sign in with an account that has access.
+Under **Desktop settings → Desktop updates**, turn on update notifications and choose the check frequency. Update checks start off. The app checks the official GitHub release. You can open the release in your browser from the alert or from desktop settings.
 
 Upgrade the self-hosted gateway and server together before connecting a current desktop app. The app checks `/api/desktop/instance` and the `X-ZeloteZ-Rooms-Client` header on the main page. Any HTTPS reverse proxy in front of the gateway must pass through that response header.
 

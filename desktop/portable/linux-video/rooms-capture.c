@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright (c) 2026 ZeloteZ. See the repository LICENSE for the terms.
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -449,5 +451,7 @@ static gboolean plugin_init(GstPlugin *plugin)
 }
 
 #define PACKAGE "zelotez-rooms"
+// GStreamer only accepts a fixed set of license categories. "Proprietary"
+// represents the PolyForm Noncommercial license identified above.
 GST_PLUGIN_DEFINE(1, 20, roomscapture, "Rooms native Linux capture",
     plugin_init, "1.0", "Proprietary", "ZeloteZ Rooms", "https://github.com/ZeloteZ/ZeloteZ-Rooms")

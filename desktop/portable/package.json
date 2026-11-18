@@ -5,6 +5,7 @@
   "author": "ZeloteZ",
   "desktopName": "de.zelotez.rooms.desktop",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "main": "main.cjs",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
@@ -38,6 +39,14 @@
       "name": "ZeloteZ Rooms share links",
       "schemes": ["zelotez-rooms"]
     }],
+    "extraResources": [{
+      "from": "../..",
+      "to": "licenses/zelotez-rooms",
+      "filter": ["LICENSE", "LICENSING.md"]
+    }],
+    "nsis": {
+      "license": "../../LICENSE"
+    },
     "win": {
       "target": "nsis",
       "icon": "ui/icon.png",

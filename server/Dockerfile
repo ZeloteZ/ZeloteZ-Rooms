@@ -1,11 +1,13 @@
 FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5
 
 WORKDIR /app
+LABEL org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+COPY LICENSE LICENSING.md /usr/share/licenses/zelotez-rooms/
 ENV NODE_ENV=production APP_DATA_DIR=/data
 RUN install -d -m 0700 -o node -g node /data /watch-data
-COPY package.json package-lock.json ./
+COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-COPY qrcode-generator-license.json ./node_modules/qrcode-generator/LICENSE.json
-COPY server.mjs account-mfa.mjs appearance.mjs auth.mjs auth-work.mjs bootstrap.mjs channel-management.mjs community.mjs desktop-handoff.mjs direct.mjs history.mjs http.mjs locale.mjs notifications.mjs owner-access.mjs presence.mjs quick-chat.mjs quick-rooms.mjs reactions.mjs setup.mjs stream-chat.mjs streams.mjs tutorials.mjs voice.mjs watch-parties.mjs ./
+COPY server/qrcode-generator-license.json ./node_modules/qrcode-generator/LICENSE.json
+COPY server/*.mjs ./
 USER node
 CMD ["node", "server.mjs"]

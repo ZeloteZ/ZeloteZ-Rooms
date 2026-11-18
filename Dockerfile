@@ -11,6 +11,7 @@ COPY deploy/player.package.json package.json
 COPY deploy/player.package-lock.json package-lock.json
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY web/ /srv/www/
+COPY LICENSE LICENSING.md /srv/www/
 COPY server/qrcode-generator-license.json /srv/www/vendor/qrcode-generator-license.json
 # Version the whole module graph together, just as in the standalone gateway.
 RUN set -eu; \
@@ -41,6 +42,8 @@ RUN apk del nginx-module-xslt \
     && adduser -S -D -H -u 1000 -G rooms rooms \
     && install -d -m 0700 -o rooms -g rooms /data /watch-data \
     && install -d -m 0755 /tls
+LABEL org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+COPY LICENSE LICENSING.md /usr/share/licenses/zelotez-rooms/
 COPY --from=build /usr/local/bin/node /usr/local/bin/node
 COPY --from=build /backend/ /app/
 COPY --from=build /srv/www/ /srv/www/

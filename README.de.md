@@ -69,7 +69,7 @@ Wenn dein Reverse-Proxy Anfragen nach Größe begrenzt, erlaube 4 MiB je Teilst�
 
 Beim ersten Start prüfst du die HTTPS-Adresse deiner Instanz und bestätigst die Verbindung. Die Desktop-App kann Systembenachrichtigungen anzeigen und beim Schließen des Fensters im Hintergrund weiterlaufen. Im Browser wählst du beim Teilen einen Bildschirm, ein Fenster oder einen Tab. Die Desktop-App bietet zusätzlich die Auswahl eines Bildausschnitts. Audiooptionen hängen vom Betriebssystem und der Aufnahmeart ab. Die [Desktop-Anleitung](desktop/README.md) beschreibt Windows-Installer und Linux-AppImage.
 
-Melde dich im Browser bei Rooms an und wähle **Client** neben deinem Profilbild. Die Seite schlägt für dein x64-System ein Linux-AppImage oder einen Windows-Installer vor und verlinkt die offiziellen Downloads auf GitHub. Wenn das Repository privat ist, melde dich bei GitHub mit einem Konto an, das Zugriff darauf hat. [Neueste Version](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
+Melde dich im Browser bei Rooms an und wähle **Client** neben deinem Profilbild. Die Seite schlägt für dein x64-System ein Linux-AppImage oder einen Windows-Installer vor und verlinkt die offiziellen Downloads auf GitHub. [Neueste Version](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
 
 Updatehinweise sind optional. In den Desktop-Einstellungen kannst du sie einschalten und das Prüfintervall festlegen. Die App fragt deine geprüfte Rooms-Instanz nach der bereitgestellten Version und öffnet deren Downloadseite im Browser.
 
@@ -80,3 +80,9 @@ Wenn du **Auf diesem Gerät angemeldet bleiben** auswählst, schützt der sicher
 Klicke auf YouTube neben **Teilen** auf **ZeloteZ-Raum erstellen** und prüfe den Raumzugriff. Der Gastlink und die Anzeige unter **Gerade live** für Mitglieder sind standardmäßig aktiviert. Du kannst deine Vorgaben in den Erweiterungseinstellungen speichern oder sie für ein einzelnes Video ändern. Mit **Im Browser öffnen** kann die Erweiterung die Watchparty in einem offenen Rooms-Tab desselben Kontos im selben Browserfenster starten. Öffnet Rooms einen neuen Tab, melde dich an oder gib unter **Chats entsperren** dein Passwort ein. Bestätige anschließend das Video in Rooms.
 
 Für **ZeloteZ Rooms Desktop** öffnest du die installierte App einmal und verbindest sie mit derselben Rooms-Adresse wie in der Erweiterung. Mache das AppImage unter Linux ausführbar und starte es an dem Ort, an dem es liegen bleiben soll. So kann die App den Linkhandler registrieren. Wenn sich die Desktop-App nicht öffnen lässt, wähle **Im Browser fortfahren**. [Desktop-Installationsanleitung](desktop/README.md)
+
+## Lizenz
+
+Der Quellcode von ZeloteZ Rooms steht unter der [PolyForm Noncommercial License 1.0.0](LICENSE) zur Verfügung (source available). Du darfst ihn für die von dieser Lizenz erlaubten Zwecke nutzen, verändern und weitergeben, insbesondere für nichtkommerzielle Zwecke. Kommerzielle Nutzungen außerhalb dieser Erlaubnisse benötigen eine gesonderte Genehmigung von ZeloteZ als Rechteinhaber. Für Drittanbieter-Komponenten gelten weiterhin deren eigene Lizenzen.
+
+Weitere Informationen findest du in den [Lizenzhinweisen](LICENSING.md) und den [Anforderungen für Beiträge](CONTRIBUTING.md).

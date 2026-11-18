@@ -2,5 +2,6 @@
   "name": "zelotez-live-player",
   "version": "1.0.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {"hls.js": "1.7.4", "qrcode-generator": "2.0.4"}
 }

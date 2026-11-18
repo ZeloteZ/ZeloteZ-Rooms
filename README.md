@@ -52,7 +52,7 @@ If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the w
 
 ## Desktop app
 
-In your browser, sign in to Rooms and select **Client** next to your profile picture. The page suggests a Linux AppImage or Windows installer for your x64 system and links to the official GitHub downloads. If the repository is private, sign in to GitHub with an account that has access. [Latest release](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
+In your browser, sign in to Rooms and select **Client** next to your profile picture. The page suggests a Linux AppImage or Windows installer for your x64 system and links to the official GitHub downloads. [Latest release](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
 
 Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. The app checks which version your verified Rooms instance has published and opens its download page in your browser.
 
@@ -75,3 +75,9 @@ For watch parties, YouTube serves its own embedded player and video directly to 
 A temporary room’s guest link lets visitors watch, use the live chat, and play, pause, or seek in a watch party. The password in the link’s URL fragment is exchanged for a session limited to that room. The host can revoke or replace it from **Stream access**.
 
 Temporary live chat uses separate keys for each participating browser, including invited guests. The browser keeps its private key locally. While its room access is valid, the same browser can reopen the recent chat it received, including messages sent during its absence. A new browser starts with messages sent after it joins. The server holds the latest 64 encrypted messages in memory until the room closes and can see senders and timestamps.
+
+## License
+
+ZeloteZ Rooms is source available under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may use, modify, and redistribute it for purposes permitted by that license, including noncommercial use. Commercial use outside those permissions requires separate authorization from ZeloteZ as the rights holder. Third-party components retain their own licenses.
+
+See [licensing details](LICENSING.md) and the [contribution requirements](CONTRIBUTING.md).
