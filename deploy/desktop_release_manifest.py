@@ -172,35 +172,20 @@ def load_signed_release(version, source, trusted_key):
     return parse_manifest(data, version), data, signature
 
 
-def build_manifest(version, source):
+def sign_release(version, source, private_key):
+    source = Path(source)
     document = {"product": "zelotez-rooms", "schema": 1, "version": version,
                 "artifacts": [check_installer(source, item) for item in artifacts_for(version)]}
     data = canonical(document)
     parse_manifest(data, version)
-    return data
-
-
-def sign_release(version, source, private_key):
-    source = Path(source)
-    data = build_manifest(version, source)
-    with tempfile.TemporaryDirectory(prefix=".signed-release-", dir=source) as temporary:
-        manifest = Path(temporary) / MANIFEST_NAME
-        manifest.write_bytes(data)
-        sign_manifest(version, manifest, private_key, source).replace(source / SIGNATURE_NAME)
-        manifest.replace(source / MANIFEST_NAME)
-    return parse_manifest(data, version)
-
-
-def sign_manifest(version, manifest, private_key, source):
-    data = read_small(manifest, MAX_MANIFEST)
-    parse_manifest(data, version)
     signature = signature_for(data, source, private_key)
-    target = manifest.with_name(SIGNATURE_NAME)
-    with tempfile.TemporaryDirectory(prefix=".rooms-signature-", dir=target.parent) as temporary:
-        staged = Path(temporary) / SIGNATURE_NAME
-        staged.write_bytes(signature)
-        staged.replace(target)
-    return target
+    with tempfile.TemporaryDirectory(prefix=".signed-release-", dir=source) as temporary:
+        for name, content in [(MANIFEST_NAME, data), (SIGNATURE_NAME, signature)]:
+            staged = Path(temporary) / name
+            staged.write_bytes(content)
+            staged.chmod(0o644)
+            staged.replace(source / name)
+    return document
 
 
 def main():
@@ -214,22 +199,10 @@ def main():
         if name == "verify":
             command.add_argument("--platform", choices=["linux", "windows"],
                                  help="verify only this downloaded installer; the complete manifest is still authenticated")
-    manifest = commands.add_parser("manifest", help="print a canonical manifest for two built installers")
-    manifest.add_argument("version")
-    manifest.add_argument("--source", type=Path, required=True)
-    detached = commands.add_parser("sign-manifest", help="sign a manifest obtained from a trusted build")
-    detached.add_argument("version")
-    detached.add_argument("--manifest", type=Path, required=True)
-    detached.add_argument("--private-key", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "sign":
             sign_release(args.version, args.source, args.private_key)
-        elif args.command == "manifest":
-            print(build_manifest(args.version, args.source).decode("ascii"), end="")
-            return
-        elif args.command == "sign-manifest":
-            sign_manifest(args.version, args.manifest, args.private_key, args.manifest.parent)
         else:
             manifest, _, _ = load_signed_release(args.version, args.source, args.trusted_key)
             for artifact in manifest["artifacts"]:
