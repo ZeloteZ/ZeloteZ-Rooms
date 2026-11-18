@@ -10,6 +10,7 @@ Follow the guide for Chrome, Brave, Edge, and temporary Firefox installation, in
 
 [Download the extension ZIP](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip) · [Desktop installation](../docs/desktop.md)
 
+
 ## License
 
 Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). The extension's [LICENSE](LICENSE) is an unchanged copy of the root license. Preserve [NOTICE](NOTICE) and third-party terms. Commercial use outside the license's permissions requires separate authorization.
