@@ -53,7 +53,7 @@ editor_style=$(sed -nE 's/.*href="([^"]+\/vault-editor\.css)".*/\1/p' "$fixtures
 editor_type=$(curl --fail --silent --show-error --output "$fixtures/editor.css" \
   --write-out '%{content_type}' "http://$port$editor_style")
 [[ -s "$fixtures/editor.css" && "$editor_type" =~ ^text/css(\;.*)?$ ]]
-for module in vault-editor.js vault-media-edit.js vault-pdf-tools.js vault-pdf-worker.js \
+for module in vault-editor.js vault-explorer-model.js vault-media-edit.js vault-pdf-tools.js vault-pdf-worker.js \
   vault-office.js vault-office-editor.js vault-archive.js vault-archive-worker.js vault-archive-viewer.js \
   vault-text-codec.js vault-image-inspect.js vault-language-controls.js vault-media-tracks.js vault-media-tracks-worker.js vault-media-ranges.js vault-mkv-tracks.js vault-mp4-tracks.js; do
   editor_type=$(curl --fail --silent --show-error --output "$fixtures/editor-module.js" \

@@ -879,6 +879,71 @@ test('media limits are separate from generic previews and cannot trust a spoofed
   assert.equal(requests, 0)
 })
 
+test('media refreshes preserve folder moves while still enforcing authentication, removal and account cancellation', async t => {
+  for (const change of ['move', 'move-and-tamper', 'remove', 'abort-account']) await t.test(change, async t => {
+    const f = await fixture(t, new Uint8Array(vault.CHUNK_SIZE + 29).fill(61), { name: 'Moving-video.mp4', type: 'video/mp4' })
+    const encrypted = [
+      await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data.subarray(0, vault.CHUNK_SIZE)),
+      await vault.encryptChunk(f.created.secret, f.created.descriptor, 1, f.data.subarray(vault.CHUNK_SIZE)),
+    ]
+    const account = new AbortController(), service = client.createVaultClient({ user: f.user, signal: account.signal })
+    t.after(() => service.close())
+    let entries = [f.entry], releaseSecond, markSecondRequested
+    const secondRequested = new Promise(resolve => { markSecondRequested = resolve })
+    const secondResponse = new Promise(resolve => { releaseSecond = resolve })
+    const paths = [], progress = []
+    globalThis.fetch = async (path, options) => {
+      if (path === '/api/vault/config') return json({ enabled: true })
+      if (path === '/api/vault') return json({ entries, receivedShares: [] })
+      paths.push(path)
+      assert.equal(options.credentials, 'same-origin')
+      assert.equal(path, `/api/vault/entries/${f.entry.id}/chunks/${paths.length - 1}`)
+      if (paths.length === 1) return new Response(encrypted[0])
+      assert.equal(paths.length, 2)
+      markSecondRequested()
+      return new Response(await secondResponse)
+    }
+    const initial = (await service.list()).entries[0]
+    const outcome = service.readMediaBlob(initial, { onProgress: value => progress.push(value.done) })
+      .then(blob => ({ blob }), error => ({ error }))
+    try {
+      await secondRequested
+      assert.deepEqual(progress, [vault.CHUNK_SIZE], 'the first authenticated chunk is complete before the refresh')
+      if (change.startsWith('move')) {
+        const parentId = randomUUID()
+        entries = [{ ...f.entry, parentId }]
+        const refreshed = (await service.list()).entries[0]
+        assert.equal(refreshed.parentId, parentId)
+        assert.equal(refreshed.name, f.file.name)
+        assert.notEqual(initial.parentId, refreshed.parentId)
+      } else if (change === 'remove') {
+        entries = []
+        assert.deepEqual((await service.list()).entries, [])
+      } else account.abort()
+      const second = new Uint8Array(encrypted[1])
+      if (change === 'move-and-tamper') second[second.length - 1] ^= 1
+      releaseSecond(second)
+      const result = await outcome
+      assert.equal(paths.length, 2)
+      if (change === 'move') {
+        assert.ifError(result.error)
+        assert.equal(result.blob.type, 'video/mp4')
+        assert.deepEqual(new Uint8Array(await result.blob.arrayBuffer()), f.data)
+        assert.deepEqual(progress, [vault.CHUNK_SIZE, f.data.length])
+      } else {
+        assert.equal(result.blob, undefined, 'partial authenticated data must never escape as a completed preview')
+        if (change === 'move-and-tamper') assert.match(result.error?.message, /authenticated/u)
+        else assert.equal(result.error?.name, 'AbortError')
+        assert.deepEqual(progress, [vault.CHUNK_SIZE])
+      }
+    } finally {
+      service.close()
+      releaseSecond(encrypted[1])
+      await outcome
+    }
+  })
+})
+
 test('the 10 GiB media boundary accepts authenticated chunks and aborts before fetching the next one', async t => {
   const f = await fixture(t), service = client.createVaultClient({ user: f.user }); t.after(() => service.close())
   const created = await vault.createFile(f.user, randomUUID(), { name: 'large.mkv', type: 'video/x-matroska', size: client.MEDIA_BLOB_LIMIT, lastModified: 0 })

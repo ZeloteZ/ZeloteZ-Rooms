@@ -389,7 +389,9 @@ export function createVaultClient({ user, signal: lifetime } = {}) {
       throw new Error(t("This vault item is unavailable.", "Dieses Vault-Element ist nicht verfügbar."));
     }
     const key = entry.receivedShareId ? "share:" + entry.receivedShareId : "entry:" + entry.id;
-    const fingerprint = JSON.stringify({ id: entry.id, ownerId: entry.ownerId, kind: entry.kind, parentId: entry.parentId,
+    // Folder placement does not change the authenticated file descriptor or key.
+    // Moving a file must not destroy a secret used by its active preview.
+    const fingerprint = JSON.stringify({ id: entry.id, ownerId: entry.ownerId, kind: entry.kind,
       receivedShareId: entry.receivedShareId, envelope: entry.envelope, descriptor: entry.descriptor,
       share: entry.share && { id: entry.share.id, entryId: entry.share.entryId, ownerId: entry.share.ownerId,
         recipientId: entry.share.recipientId, owner: entry.share.owner && { id: entry.share.owner.id, publicKey: entry.share.owner.publicKey } } });

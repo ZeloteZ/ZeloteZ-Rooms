@@ -158,3 +158,39 @@
 .vault-player-dialog .vault-editor-feedback .status:not([hidden]) { padding: 8px 12px; }
 .vault-player-dialog .vault-editor-feedback:has(.status[hidden]):has(progress[hidden]) { display: none; }
 @media (prefers-reduced-motion: reduce) { .vault-player-dialog #dialog-close { transition: none; } }
+
+/* Embedded previews own their height; only the editing surfaces scroll. */
+.vault-editor-inline { container-type: inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr); inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; overflow: hidden; background: var(--surface, #10131d); }
+.vault-editor-inline > .vault-editor-inline { grid-row: 1 / -1; }
+.vault-editor-heading { display: flex; align-items: center; min-inline-size: 0; gap: 10px; padding: 10px 12px; border-block-end: 1px solid var(--line); }
+.vault-editor-heading strong { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .83rem; font-weight: 600; }
+.vault-editor-heading .vault-editor-dismiss { flex: none; min-block-size: 30px; min-inline-size: 30px; padding: 4px 8px; font-size: .8rem; }
+.vault-editor-inline > .vault-editor { grid-row: 2; padding: 10px; box-sizing: border-box; min-inline-size: 0; overflow: hidden; gap: 9px; }
+.vault-editor-inline .vault-editor-intro { gap: 7px; align-items: start; }
+.vault-editor-inline .vault-editor-intro p { font-size: .7rem; }
+.vault-editor-inline .vault-editor-kind { font-size: .67rem; padding: 3px 6px; }
+.vault-editor-inline .vault-editor-footer { gap: 7px; }
+.vault-editor-inline .vault-editor-footer input { padding: 7px; font-size: .75rem; }
+.vault-editor-inline .vault-editor-footer > .button { max-inline-size: 45%; font-size: .71rem; padding: 7px 9px; }
+.vault-editor-inline .vault-editor-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 155px); gap: 9px; }
+.vault-editor-inline .vault-editor-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 7px 10px; }
+.vault-editor-inline .vault-editor-tools > :is(h3, h4, p, .status) { grid-column: 1 / -1; }
+.vault-editor-inline .vault-editor-tools .vault-editor-pair { display: contents; }
+.vault-editor-inline .vault-editor-workspace:has(.vault-editor-tools[hidden]) { grid-template-rows: minmax(0, 1fr); }
+.vault-editor-inline .vault-editor-player { grid-template-rows: minmax(0, 1fr) auto; gap: 0; padding: 0; }
+.vault-editor-inline .vault-editor-player .vault-editor-stage { border: 0; border-radius: 0; }
+.vault-editor-inline .vault-editor-player .vault-editor-feedback { padding-inline: 10px; }
+.vault-editor-inline .vault-editor-feedback:has(.status[hidden]):has(progress[hidden]) { display: none; }
+.vault-editor-inline .vault-player-controls { padding: 8px; gap: 4px; }
+.vault-editor-inline .vault-player-actions { flex-wrap: wrap; gap: 4px; }
+.vault-editor-inline .vault-player-actions > .button { min-inline-size: 29px; min-block-size: 32px; padding: 5px; }
+.vault-editor-inline .vault-player-time { font-size: .67rem; }
+.vault-editor-inline .vault-player-volume { inline-size: 45px; min-inline-size: 30px; }
+.vault-editor-inline .vault-player-speed { inline-size: 55px; min-inline-size: 50px; font-size: .7rem; }
+.vault-editor-inline .vault-text-editor { padding: 10px; font-size: .79rem; }
+@container (min-width: 720px) {
+  .vault-editor-inline > .vault-editor .vault-editor-workspace { grid-template-columns: minmax(0, 1fr) 220px; grid-template-rows: minmax(0, 1fr); }
+  .vault-editor-inline > .vault-editor .vault-editor-tools { display: flex; }
+  .vault-editor-inline > .vault-editor .vault-editor-tools .vault-editor-pair { display: grid; }
+  .vault-editor-inline > .vault-editor .vault-editor-workspace:has(.vault-editor-tools[hidden]) { grid-template-columns: minmax(0, 1fr); }
+}

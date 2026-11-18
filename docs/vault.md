@@ -15,10 +15,12 @@ Disabling Vault blocks uploads, downloads, and both kinds of shares. Completed f
 ## Manage files
 
 1. On the Rooms overview, select **ZeloteZ Vault** below **Live now** on the right. The entry appears only when Vault is enabled.
-2. Switch between the **My vault** and **Shared with me** tabs. The banner's breadcrumb trail shows the current location; select a parent folder to return to it. For deeper paths, **…** opens the other ancestors.
-3. Create folders, choose **Upload files**, or drop files into the file manager. Multiple files are processed in sequence.
-4. Select a file's name to open its local preview, player, or editing tools. The item menu provides **Play** for audio/video and **Open and edit** for editable formats, as well as **Download**, renaming, moving, sharing, and deletion. Only files can be shared; folders organize your own storage.
-5. Search and sort the current folder. When its contents exceed the available space, use the previous/next page buttons. The page size adapts to your window, keeping the banner, tabs, and controls in view without scrolling the whole page.
+2. The first column, **Files**, contains your own files and folders and the **Shared With Me** folder. Open **Shared With Me → sender's username** to browse that member's read-only shares.
+3. Open a folder to show its contents in the next column. The root column and up to three subfolder columns are visible together. Deeper folders reuse the rightmost column. The banner's breadcrumbs retain the complete path; select an ancestor to return, or use **…** to reach ancestors hidden from the breadcrumb bar.
+4. Select a file row to open its preview, player, or editing tools beside the folders. The preview stays open while you browse other folders. Use **×** in the preview to close the file.
+5. Right-click a row or use its **⋯** button for actions such as **Open**, **Download**, renaming, moving, sharing, and deletion. The menu also opens with the keyboard's context-menu key or **Shift+F10**. Available actions depend on the item; received shares cannot change the sender's original file.
+6. Create folders, choose **Upload files**, or drop local files into one of your own folders. Multiple files upload in sequence. To move your own Vault files or folders, drag them onto another own folder or the root breadcrumb, or choose **Move** in the item menu. A folder cannot be moved into itself or one of its descendants. **Shared With Me** and its sender folders are read-only destinations. Only files can be shared; folders organize your own storage.
+7. Search and sort the current folder. Long lists scroll inside their columns, and the preview scrolls within its own area; the banner and overall page stay in place. There are no previous/next pages.
 
 Active transfers appear as compact progress notifications and can be cancelled there. Completed and cancelled transfers produce a notification and leave no permanent history panel. Keep the Vault view open until a transfer finishes; leaving it or signing out cancels active work. An incomplete upload is not a downloadable file and its reservation is released on cancellation or stale-upload cleanup. Deleting a folder also deletes its contents and their shares. Deletion cannot be undone.
 
@@ -26,7 +28,7 @@ Open the gear button **Vault settings** for the privacy information and optional
 
 ## Open, play, and edit locally
 
-Select a file name, **Play** for audio/video, or **Open and edit** for an editable file in its menu. The file is authenticated and decrypted on your device; previewing and editing do not send plaintext to the server or an external editing service. HTML, SVG, and source code are handled as plain text and never executed in the editor. Public sharing links continue to provide downloads; these editing tools are part of the signed-in Vault.
+Select a file row or choose **Open** in its menu. Its player or editing tools appear in the separate preview area. The file is authenticated and decrypted on your device; previewing and editing do not send plaintext to the server or an external editing service. HTML, SVG, and source code are handled as plain text and never executed in the editor. Public sharing links continue to provide downloads; these editing tools are part of the signed-in Vault.
 
 | File type | Available tools | Local limits |
 | --- | --- | --- |
@@ -53,13 +55,13 @@ Text copies preserve the detected UTF-8 or UTF-16 LE/BE encoding, BOM, and line-
 
 Office editing creates a simplified copy of the document's paragraphs and tables or the workbook's cells. Complex layout, images, charts, and embedded objects are omitted. Formulas are displayed and saved as text; they are not calculated, and macros or external data connections are not run. Use the original in a suitable Office application when you need those features or exact layout preservation. The cell, row, and text limits apply across the entire document or workbook. Office contents are additionally limited to 16 MiB after decompression and 4 MiB per XML part.
 
-Inside an archive, select a file and choose **Open selected file**, **Download selected file**, or **Save to Vault**. Opening a member remains local. **Save to Vault** creates one new file under the member's name, with fresh encryption, in the original archive's Vault folder. For a member-shared archive, the copy goes to the root of **My vault**. Archive folders provide navigation; they are not imported as a Vault folder tree. The original archive and its shares stay unchanged. Larger members remain listed, but local opening, extraction, and individual downloads are disabled above 32 MiB; use **Download original archive** instead. The expanded-content limit also bounds extracted data during one opening. ZIP64, password-protected ZIPs, symbolic or hard links, and unsupported compression methods require a suitable local application. Unsafe or damaged archives are refused.
+Inside an archive, select a file and choose **Open selected file**, **Download selected file**, or **Save to Vault**. Opening a member remains local. Use **Back to archive** to return from its preview to the archive contents. **Save to Vault** creates one new file under the member's name, with fresh encryption, in the original archive's Vault folder. For a member-shared archive, the copy goes to the root of **Files**. Archive folders provide navigation; they are not imported as a Vault folder tree. The original archive and its shares stay unchanged. Larger members remain listed, but local opening, extraction, and individual downloads are disabled above 32 MiB; use **Download original archive** instead. The expanded-content limit also bounds extracted data during one opening. ZIP64, password-protected ZIPs, symbolic or hard links, and unsupported compression methods require a suitable local application. Unsafe or damaged archives are refused.
 
 PDF previews are passive. Saved PDF copies remove interactive links, forms, attachments, and embedded scripts. Added notes are embedded as image overlays, so their text is not selectable. Existing page content remains page content; this is page management and annotation, not a full document-layout editor. Password-protected or unsupported PDFs may not open.
 
-For images, PDFs, text, and supported Office files, choose a copy name and **Save encrypted copy**. Each save uploads a new file with fresh encryption; the original file and its existing shares remain unchanged. An edited copy of your own file is saved in the same folder. An edited copy of a member share is saved in the root of **My vault** and belongs to you; it does not change the sender's file. Saving a copy needs enough free Vault storage for the additional file. Share the new copy separately if needed.
+For images, PDFs, text, and supported Office files, choose a copy name and **Save encrypted copy**. Each save uploads a new file with fresh encryption; the original file and its existing shares remain unchanged. An edited copy of your own file is saved in the same folder. An edited copy of a member share is saved in the root of **Files** and belongs to you; it does not change the sender's file. Saving a copy needs enough free Vault storage for the additional file. Share the new copy separately if needed.
 
-Unsaved changes remain only in the open editor. Closing an editor with unsaved edits asks for confirmation. Leaving Vault or signing out cancels work and discards local edits. There is no automatic draft recovery.
+Unsaved changes remain only in the open editor. Switching files, closing the editor, or leaving Vault asks you to confirm whether to discard them. Signing out or the end of your session cancels work immediately and discards local edits. There is no automatic draft recovery.
 
 Other formats can still be stored, shared, and downloaded for a suitable local application. Office formats beyond DOCX and XLSX, such as PPTX, ODT, ODS, and older DOC or XLS files, do not have built-in editing tools.
 
@@ -80,13 +82,13 @@ After confirmation, **Go to room** opens the selected channel and watch party. T
 
 The original remains in Vault. Ending the watch party or leaving the room does **not** automatically revoke this share. Revoke it in the original file's **Share → Active shares** list when needed; otherwise it expires after 24 hours. As with other shares, downloaded copies and keys already obtained cannot be recalled. Room membership changes do not retract a capability already received.
 
-A received member share cannot be forwarded directly into a room. You must first place a file of your own in **My vault**, for example by downloading and uploading your own copy. Creating room playback requires an explicit confirmation; opening the private player alone does not share anything.
+A received member share cannot be forwarded directly into a room. You must first place a file of your own in **Files**, for example by downloading and uploading your own copy. Creating room playback requires an explicit confirmation; opening the private player alone does not share anything.
 
 ## Share a file
 
 Open a file's **Share** menu and choose an expiry:
 
-- **Member:** search for an active Rooms member and select the intended account. The recipient finds the file under **Shared with me** and needs their own account encryption key to open it.
+- **Member:** search for an active Rooms member and select the intended account. The recipient finds the file under **Shared With Me → sender's username** and needs their own account encryption key to open it.
 - **Link:** create a link for someone without a Rooms account. Send the complete link privately. The part after `#` contains the access capability and decryption key. The decryption key is not sent to the server. The receiving page removes these secrets from the address bar after opening the link.
 
 Treat a full sharing link like the file itself: anyone holding it can download and forward the file until the share expires or is revoked. You can show an existing link again from its share list; its saved copy is encrypted for your account.

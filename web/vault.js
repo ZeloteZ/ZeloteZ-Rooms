@@ -1,7 +1,8 @@
 import { locale, t } from "./i18n.js";
 import { api, button, closeDialog, copyField, el, field, form, notify, select, showDialog, status, tell } from "./ui.js";
 import { createVaultClient, uploadNativeVaultSelection } from "./vault-client.js";
-import { openVaultEditor } from "./vault-editor.js";
+import { mountVaultEditor } from "./vault-editor.js";
+import { createVaultExplorerModel, vaultExplorerView, navigateVaultExplorer, validateVaultExplorerMove } from "./vault-explorer-model.js";
 import { vaultFileKind } from "./vault-media-edit.js";
 import { canShareVaultPlayback, openVaultRoomShare } from "./vault-room-share.js";
 
@@ -68,249 +69,427 @@ export function renderVault(context) {
   const { signal, user } = context;
   const client = context.vault ?? createVaultClient(context);
   const feedback = status(t("Opening your vault…", "Dein Vault wird geöffnet …"));
-  const rows = el("div", { class: "vault-entries", role: "list", "aria-label": t("Vault files", "Vault-Dateien"), tabindex: 0 });
   const breadcrumbList = el("ol", { class: "vault-breadcrumb-list" });
   const breadcrumbs = el("nav", { class: "vault-breadcrumbs", "aria-label": t("Folder path", "Ordnerpfad") }, breadcrumbList);
+  const quotaLabel = el("p", { class: "vault-quota-label subtle" });
+  const quotaBar = el("progress", { class: "vault-quota-bar", max: 1, value: 0, "aria-label": t("Storage used", "Belegter Speicher") });
+  const quota = el("div", { class: "vault-quota", hidden: true }, quotaLabel, quotaBar);
+  const settingsTitle = t("Vault settings", "Vault-Einstellungen");
+  const settingsButton = button("⚙", () => openSettings(), { class: "ghost vault-settings-button", title: settingsTitle, "aria-label": settingsTitle, "aria-haspopup": "dialog" });
   const banner = el("div", { class: "room-header-content vault-header" },
     el("a", { class: "room-home-link", href: "#/rooms" }, t("Home", "Home")),
     el("div", { class: "room-hero vault-hero" },
-      el("span", { class: "vault-banner-icon vault-lock", "aria-hidden": "true" }),
-      el("div", { class: "vault-banner-copy" }, el("h1", { id: "vault-heading", tabindex: -1 }, "ZeloteZ Vault"), breadcrumbs)));
-  const quotaLabel = el("p", { class: "vault-quota-label subtle" });
-  const quotaBar = el("progress", { class: "vault-quota-bar", max: 1, value: 0,
-    "aria-label": t("Storage used", "Belegter Speicher") });
-  const quota = el("div", { class: "vault-quota", hidden: true }, quotaLabel, quotaBar);
+      el("h1", { id: "vault-heading", class: "sr-only", tabindex: -1 }, t("Files", "Dateien")), breadcrumbs,
+      el("div", { class: "vault-header-actions" }, quota, settingsButton)));
   const transfers = el("div", { class: "vault-transfers", "aria-label": t("File transfers", "Dateiübertragungen"), hidden: true });
   const search = el("input", { type: "search", placeholder: t("Find in this folder", "In diesem Ordner suchen"),
     "aria-label": t("Find in this folder", "In diesem Ordner suchen"), autocomplete: "off", maxlength: 255 });
-  const sorting = select([["name", t("Name", "Name")], ["date", t("Recently changed", "Zuletzt geändert")],
-    ["size", t("Size", "Größe")]], "name");
+  const sorting = select([["name", t("Name", "Name")], ["date", t("Recently changed", "Zuletzt geändert")], ["size", t("Size", "Größe")]], "name");
   sorting.setAttribute("aria-label", t("Sort files", "Dateien sortieren"));
   const picker = el("input", { type: "file", multiple: true, hidden: true, "aria-label": t("Choose files", "Dateien auswählen") });
-  const upload = button(t("Upload files", "Dateien hochladen"), () => picker.click(), { class: "primary", disabled: true });
+  let pickerDestination = null;
+  const upload = button(t("Upload files", "Dateien hochladen"), () => pickFiles(activeFolderRef()), { class: "primary", disabled: true });
   const newFolder = button(t("New folder", "Neuer Ordner"), () => editName(), { disabled: true });
   const refreshLabel = t("Refresh", "Aktualisieren");
-  const refreshButton = button("↻", () => refresh(),
-    { class: "ghost icon-button", disabled: true, title: refreshLabel, "aria-label": refreshLabel });
-  const settingsTitle = t("Vault settings", "Vault-Einstellungen");
-  const settingsButton = button("⚙", () => openSettings(),
-    { class: "ghost vault-settings-button", title: settingsTitle, "aria-label": settingsTitle, "aria-haspopup": "dialog" });
+  const refreshButton = button("↻", () => refresh(), { class: "ghost icon-button", disabled: true, title: refreshLabel, "aria-label": refreshLabel });
+  const folderStatus = el("span", { class: "vault-folder-status subtle", role: "status" });
   const toolbar = el("div", { class: "vault-toolbar", hidden: true },
     el("div", { class: "inline vault-toolbar-actions" }, upload, newFolder, refreshButton, picker),
-    el("div", { class: "vault-toolbar-filters" }, search, sorting));
-  const ownTab = button(t("My vault", "Mein Vault"), () => setView(false),
-    { class: "vault-tab", id: "vault-own-tab", role: "tab", "aria-selected": "true", "aria-controls": "vault-file-panel", tabindex: 0 });
-  const sharedTab = button(t("Shared with me", "Mit mir geteilt"), () => setView(true),
-    { class: "vault-tab", id: "vault-shared-tab", role: "tab", "aria-selected": "false", "aria-controls": "vault-file-panel", tabindex: -1 });
-  const views = el("div", { class: "vault-views", role: "tablist", "aria-label": t("Vault view", "Vault-Ansicht"), hidden: true }, ownTab, sharedTab);
-  const empty = el("div", { class: "vault-empty", hidden: true });
-  const dropHint = el("p", { class: "subtle vault-drop-hint", hidden: true },
-    t("Drop files here to encrypt and upload them.", "Ziehe Dateien hierher, um sie verschlüsselt hochzuladen."));
-  const fileArea = el("div", { class: "vault-file-area" }, feedback, empty, rows);
-  const previousPage = button("‹", () => changePage(-1), { class: "ghost icon-button", "aria-label": t("Previous page", "Vorherige Seite") });
-  const nextPage = button("›", () => changePage(1), { class: "ghost icon-button", "aria-label": t("Next page", "Nächste Seite") });
-  const pageLabel = el("span", { class: "vault-page-label", role: "status" });
-  const itemCount = el("span", { class: "vault-item-count subtle" });
-  const pagination = el("div", { class: "vault-pagination", hidden: true }, el("div", { class: "vault-footer-copy" }, itemCount, dropHint),
-    el("div", { class: "inline vault-page-controls" }, previousPage, pageLabel, nextPage));
-  const filePanel = el("section", { class: "vault-file-panel", id: "vault-file-panel", role: "tabpanel", "aria-labelledby": ownTab.id, tabindex: 0 },
-    toolbar, fileArea, pagination);
-  const browser = el("section", { class: "panel vault-browser", "aria-label": t("Vault file manager", "Vault-Dateimanager") },
-    el("div", { class: "vault-browser-heading" }, views, quota, settingsButton), filePanel);
-  const page = el("section", { class: "secondary-page vault-page", "aria-labelledby": "vault-heading" },
-    browser, transfers);
-  let snapshot = { entries: [], enabled: false };
-  let parentId = null;
-  let generation = 0;
-  let uploading = false;
-  let received = false;
-  let pageIndex = 0;
-  let pageSize = 8;
-  const jobs = new Set();
-  const queue = [];
-  let ownedDialog = null;
-  let refreshNative = () => {};
+    el("div", { class: "vault-toolbar-filters" }, search, sorting), folderStatus);
+  const columns = el("div", { class: "vault-columns", "aria-label": t("Folders", "Ordner") });
+  const previewEmpty = el("div", { class: "vault-preview-empty" },
+    el("span", { class: "vault-preview-symbol", "aria-hidden": "true" }, "▤"),
+    el("h2", {}, t("Choose a file", "Wähle eine Datei")),
+    el("p", { class: "muted" }, t("Open a file beside your folders. Your files stay encrypted in Vault.",
+      "Öffne eine Datei neben deinen Ordnern. Deine Dateien bleiben im Vault verschlüsselt.")));
+  const previewTitle = el("h2", { class: "vault-preview-name", tabindex: -1 });
+  const previewPath = el("p", { class: "vault-preview-path subtle" });
+  const previewShared = el("span", { class: "vault-shared-badge", hidden: true }, t("Shared", "Geteilt"));
+  const previewClose = button("×", () => closePreview(), { class: "ghost icon-button", "aria-label": t("Close file", "Datei schließen"), title: t("Close file", "Datei schließen") });
+  const previewHeader = el("header", { class: "vault-preview-heading", hidden: true },
+    el("div", { class: "vault-preview-heading-copy" }, previewTitle, previewPath), previewShared, previewClose);
+  const previewBody = el("div", { class: "vault-preview-body" }, previewEmpty);
+  const preview = el("section", { class: "vault-preview", "aria-label": t("File preview", "Dateivorschau") }, previewHeader, previewBody);
+  const explorer = el("div", { class: "vault-explorer", hidden: true }, columns, preview);
+  const browser = el("section", { class: "panel vault-browser", "aria-label": t("Vault file manager", "Vault-Dateimanager") }, toolbar, feedback, explorer);
+  const page = el("section", { class: "secondary-page vault-page", "aria-labelledby": "vault-heading" }, browser, transfers);
+  const menu = el("div", { class: "vault-context-menu", role: "menu", hidden: true, "aria-label": t("File actions", "Dateiaktionen") });
+  page.append(menu);
+  let snapshot = { entries: [], receivedEntries: [], enabled: false };
+  let model = buildModel(snapshot);
+  let navigation = ["root"];
+  let view = vaultExplorerView(model, navigation);
+  let parentId = null, generation = 0, uploading = false;
+  let previewRef = null, previewSession = null, previewScope = null, previewLoading = false, previewFingerprint = "", previewRequest = 0;
+  let discardPrompt = null;
+  let menuRef = null, menuTrigger = null, activeDrag = null, suppressClickUntil = 0, moving = false;
+  const dragScope = crypto.randomUUID();
+  const dragType = "application/x-zelotez-vault-entry";
+  const columnNodes = new Map();
+  const jobs = new Set(), queue = [];
+  let ownedDialog = null, refreshNative = () => {};
   const desktop = globalThis.roomsVault;
   const integration = desktop ? desktopPanel() : null;
 
   function current() { return !signal.aborted; }
-  function vaultDialog(title, content) { ownedDialog = content; showDialog(title, content); }
-  function report(error) {
-    if (current() && error?.name !== "AbortError") notify(error.message || t("The vault request failed.", "Die Vault-Anfrage ist fehlgeschlagen."));
+  function buildModel(value) {
+    return createVaultExplorerModel(value, { actorId: user.id, rootName: t("Files", "Dateien"),
+      sharedName: t("Shared With Me", "Mit mir geteilt"), unknownSenderName: t("Unknown sender", "Unbekannter Absender"),
+      lockedName: t("Encrypted item", "Verschlüsseltes Element") });
+  }
+  function vaultDialog(title, content) { closeMenu(); ownedDialog = content; showDialog(title, content); }
+  function report(error) { if (current() && error?.name !== "AbortError") notify(error.message || t("The vault request failed.", "Die Vault-Anfrage ist fehlgeschlagen.")); }
+  function activeFolderRef() { return view.selected?.ref ?? "root"; }
+  function ownDestination(ref) {
+    const node = model.node(ref);
+    if (ref === "root") return { parentId: null };
+    if (!node?.entry || !node.container || node.readOnly || node.locked || node.entry.ownerId !== user.id) return null;
+    return { parentId: node.entry.id };
   }
   function openSettings() {
     const content = el("div", { class: "stack vault-settings-dialog" },
       el("p", { class: "muted" }, t("Private files. Encrypted before upload.", "Private Dateien. Vor dem Upload verschlüsselt.")),
-      el("p", { class: "subtle" },
-        t("File names and contents are encrypted on your device. Keep access to your account keys; the operator cannot recover your files without them.",
-          "Dateinamen und Inhalte werden auf deinem Gerät verschlüsselt. Bewahre den Zugang zu deinen Kontoschlüsseln: Der Betreiber kann deine Dateien ohne sie nicht wiederherstellen.")),
-      integration);
+      el("p", { class: "subtle" }, t("File names and contents are encrypted on your device. Keep access to your account keys; the operator cannot recover your files without them.",
+        "Dateinamen und Inhalte werden auf deinem Gerät verschlüsselt. Bewahre den Zugang zu deinen Kontoschlüsseln: Der Betreiber kann deine Dateien ohne sie nicht wiederherstellen.")), integration);
     vaultDialog(t("Vault settings", "Vault-Einstellungen"), content);
   }
-  function openEntry(entry) {
-    void openVaultEditor({ entry, client, signal, onSaved: async () => { await refresh(); },
-      ...(canShareVaultPlayback(entry, user) ? { onShare: () => sharePlayback(entry) } : {}) }).catch(report);
+  function fingerprint(entry) { return JSON.stringify([entry?.id, entry?.receivedShareId, entry?.envelope, entry?.descriptor]); }
+  function confirmDiscard() {
+    if (!current()) return false;
+    if (discardPrompt) return discardPrompt.promise;
+    const dialog = el("dialog", { class: "dialog vault-discard-dialog", "aria-labelledby": "vault-discard-heading" });
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    const finish = accepted => {
+      if (discardPrompt?.dialog !== dialog) return;
+      discardPrompt = null; signal.removeEventListener("abort", aborted);
+      if (dialog.open) dialog.close(); dialog.remove(); resolve(accepted);
+    };
+    const aborted = () => finish(false);
+    const keep = button(t("Keep editing", "Weiter bearbeiten"), () => finish(false), { class: "primary" });
+    dialog.append(el("div", { class: "dialog-body" },
+      el("h2", { id: "vault-discard-heading" }, t("Discard unsaved changes?", "Ungespeicherte Änderungen verwerfen?")),
+      el("p", { class: "muted" }, t("Your changes are only on this device until you save an encrypted copy.",
+        "Deine Änderungen bleiben auf diesem Gerät, bis du eine verschlüsselte Kopie speicherst.")),
+      el("div", { class: "inline" }, keep, button(t("Discard changes", "Änderungen verwerfen"), () => finish(true), { class: "danger" }))));
+    discardPrompt = { dialog, promise, cancel: () => finish(false) }; page.append(dialog);
+    dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+    dialog.addEventListener("close", () => finish(false));
+    signal.addEventListener("abort", aborted, { once: true });
+    dialog.showModal(); keep.focus(); return promise;
   }
-  function sharePlayback(entry) {
-    return openVaultRoomShare({ entry, client, user, signal }).catch(report);
+  async function closePreview(force = false) {
+    if (force) discardPrompt?.cancel();
+    const closing = previewSession;
+    if (!force && closing && !await closing.canClose()) return false;
+    if (closing !== previewSession) return previewSession === null;
+    previewSession = null; previewRef = null;
+    closing?.dispose(); previewScope?.abort(); previewScope = null;
+    previewFingerprint = ""; previewLoading = false; previewHeader.hidden = true;
+    previewBody.replaceChildren(previewEmpty); previewTitle.textContent = ""; previewPath.textContent = "";
+    paintSelection(); return true;
   }
-  function fileKind(entry) {
-    const kind = vaultFileKind(entry);
-    return kind === "other" ? "file" : kind;
+  async function openFile(ref) {
+    const node = model.node(ref);
+    if (!current() || !node?.entry || node.container || node.locked) return;
+    closeMenu();
+    if (previewRef === ref && previewSession && !previewSession.closed) return;
+    const request = ++previewRequest;
+    if (!await closePreview() || request !== previewRequest || !current()) return;
+    const fresh = model.node(ref);
+    if (!fresh?.entry || fresh.container || fresh.locked) return;
+    previewRef = ref; previewScope = new AbortController();
+    const lifetime = AbortSignal.any([signal, previewScope.signal]);
+    previewLoading = true; previewFingerprint = fingerprint(fresh.entry);
+    const sessionClient = Object.create(client);
+    const currentEntry = () => {
+      const latest = model.node(ref);
+      if (!latest?.entry || latest.locked || latest.container) throw new Error(t("This vault item is unavailable.", "Dieses Vault-Element ist nicht verfügbar."));
+      return latest.entry;
+    };
+    sessionClient.saveEditedCopy = (_entry, blob, options) => client.saveEditedCopy(currentEntry(), blob, options);
+    sessionClient.download = (_entry, options) => client.download(currentEntry(), options);
+    if (client.prepareDownload) sessionClient.prepareDownload = (_entry, options) => client.prepareDownload(currentEntry(), options);
+    sessionClient.upload = (file, _destination, options) => {
+      const latest = currentEntry();
+      return client.upload(file, latest.receivedShareId ? null : latest.parentId ?? null, options);
+    };
+    const session = mountVaultEditor({ entry: fresh.entry, client: sessionClient, signal: lifetime, externalHeader: true, confirmDiscard,
+      onSaved: async () => { await refresh(); },
+      onClose: () => { if (previewSession === session) closePreview(true); },
+      ...(canShareVaultPlayback(fresh.entry, user) ? { onShare: () => sharePlayback(model.node(ref)?.entry) } : {}) });
+    previewSession = session; previewHeader.hidden = false; previewBody.replaceChildren(session.node);
+    paintPreviewHeading(); paintSelection();
+    void Promise.resolve(session.ready).catch(report).finally(() => { if (previewSession === session) previewLoading = false; });
   }
-  function fileGlyph(entry) {
-    return { image: "▧", video: "▷", audio: "♪", pdf: "PDF", text: "≡", office: "▤", archive: "▣", file: "▤" }[fileKind(entry)];
+  function paintPreviewHeading() {
+    const node = model.node(previewRef);
+    if (!node || !previewSession) return;
+    previewTitle.textContent = node.name; previewTitle.title = node.name;
+    previewPath.textContent = model.path(previewRef).slice(0, -1).map(item => item.name).join(" / ");
+    previewPath.title = previewPath.textContent;
+    previewShared.hidden = !node.readOnly;
+  }
+  function reconcilePreview() {
+    if (!previewRef) return;
+    const node = model.node(previewRef);
+    if (!snapshot.enabled || !node?.entry || node.locked || node.container) { closePreview(true); return; }
+    if (previewLoading && previewFingerprint !== fingerprint(node.entry)) {
+      const ref = previewRef; closePreview(true); openFile(ref); return;
+    }
+    paintPreviewHeading();
+  }
+  function sharePlayback(entry) { if (entry) return openVaultRoomShare({ entry, client, user, signal }).catch(report); }
+  function fileKind(entry) { const kind = vaultFileKind(entry); return kind === "other" ? "file" : kind; }
+  function entryIcon(node) {
+    const kind = node.locked ? "locked" : node.ref === "shared" ? "shared" : node.synthetic ? "sender" : node.container ? "folder" : fileKind(node.entry);
+    const paths = {
+      folder: ["M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z"],
+      shared: ["M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z", "M9 14h6m-3-3 3 3-3 3"],
+      sender: ["M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z", "M5 20v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"],
+      locked: ["M6 11h12v10H6Z", "M8 11V7a4 4 0 0 1 8 0v4m-4 4v2"],
+      image: ["M4 4h16v16H4Z", "M4 16l5-5 4 4 3-3 4 4", "M16 8h.01"],
+      video: ["M4 4h16v16H4Z", "m10 8 6 4-6 4Z"],
+      audio: ["M9 17V5l11-2v12", "M9 14c-6-1-7 6-2 6 2 0 2-2 2-3m11-5c-6-1-7 6-2 6 2 0 2-2 2-3"],
+      pdf: ["M5 3h9l5 5v13H5Z", "M14 3v5h5M8 13h8m-8 4h6"],
+      text: ["M5 3h9l5 5v13H5Z", "M14 3v5h5M8 12h8m-8 4h8"],
+      office: ["M4 4h16v16H4Z", "M4 9h16M4 14h16M10 9v11"],
+      archive: ["M5 3h14v18H5Z", "M11 3v2h2v2h-2v2h2v2h-2v2m0 3h2v3h-2Z"],
+      file: ["M5 3h9l5 5v13H5Z", "M14 3v5h5"],
+    };
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+    for (const d of paths[kind] ?? paths.file) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", d); svg.append(path);
+    }
+    return svg;
   }
   function entryName(entry) { return entry.name || t("Encrypted item", "Verschlüsseltes Element"); }
   function isFolder(entry) { return entry.kind === "folder"; }
   function parentOptions(excluded = new Set()) {
-    return [["", t("My vault", "Mein Vault")], ...snapshot.entries.filter(entry => isFolder(entry) && !excluded.has(entry.id) && !entry.locked)
+    return [["", t("Files", "Dateien")], ...snapshot.entries.filter(entry => isFolder(entry) && !excluded.has(entry.id) && !entry.locked)
       .map(entry => [entry.id, folderPath(entry)])];
   }
   function folderPath(entry) {
-    const parts = [entryName(entry)];
-    const visited = new Set([entry.id]);
-    let next = entry.parentId;
-    while (next && !visited.has(next)) {
-      visited.add(next);
-      const parent = snapshot.entries.find(item => item.id === next && isFolder(item));
-      if (!parent) break;
-      parts.unshift(entryName(parent));
-      next = parent.parentId;
-    }
-    return parts.join(" / ");
+    const node = model.node("own:" + entry.id);
+    return node ? model.path(node.ref).slice(1).map(item => item.name).join(" / ") : entryName(entry);
   }
-  function openFolder(id) {
-    parentId = id;
-    pageIndex = 0;
-    search.value = "";
+  function openFolder(ref, focus = false) {
+    const node = model.node(ref);
+    if (!node?.container || node.locked) return;
+    closeMenu(); navigation = navigateVaultExplorer(model, navigation, ref); search.value = "";
     paint();
-    rows.focus({ preventScroll: true });
-  }
-  function setView(shared) {
-    received = shared; parentId = null; search.value = ""; pageIndex = 0;
-    ownTab.setAttribute("aria-selected", String(!shared)); sharedTab.setAttribute("aria-selected", String(shared));
-    ownTab.tabIndex = shared ? -1 : 0; sharedTab.tabIndex = shared ? 0 : -1;
-    filePanel.setAttribute("aria-labelledby", shared ? sharedTab.id : ownTab.id);
-    paint();
-  }
-  function changePage(delta) {
-    pageIndex = Math.max(0, pageIndex + delta);
-    paint(); rows.focus({ preventScroll: true });
+    const list = columnNodes.get(ref)?.list;
+    list?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+    if (focus) (list?.querySelector(".vault-entry-hit") ?? list)?.focus({ preventScroll: true });
   }
   function paintBreadcrumbs() {
-    const chain = [];
-    const visited = new Set();
-    let id = parentId;
-    while (id && !visited.has(id)) {
-      visited.add(id);
-      const entry = snapshot.entries.find(item => item.id === id && isFolder(item));
-      if (!entry) { parentId = null; break; }
-      chain.unshift(entry);
-      id = entry.parentId;
-    }
-    const rootName = received ? t("Shared with me", "Mit mir geteilt") : t("My vault", "Mein Vault");
-    const crumb = (name, action, active = false) => el("li", {}, button(name, action,
-      { class: "ghost", title: name, "aria-current": active ? "page" : null }));
+    const crumb = node => { const control = button(node.name, () => openFolder(node.ref, true),
+      { class: "ghost", title: node.name, "aria-current": node.ref === activeFolderRef() ? "page" : null });
+      bindDrop(control, node.ref); return el("li", {}, control); };
     const separator = () => el("li", { class: "vault-path-separator", "aria-hidden": "true" }, "›");
-    const parts = [crumb(rootName, () => received ? setView(true) : openFolder(null), received || !chain.length)];
-    if (!received && chain.length > 3) {
-      const ancestors = chain.slice(0, -2);
+    const chain = view.breadcrumbs;
+    const parts = [crumb(chain[0])];
+    if (chain.length > 4) {
       parts.push(separator(), el("li", {}, el("details", { class: "vault-path-overflow" },
         el("summary", { class: "button ghost", "aria-label": t("Parent folders", "Übergeordnete Ordner") }, "…"),
-        el("div", { class: "vault-path-ancestors" }, ancestors.map(entry => button(entryName(entry), () => openFolder(entry.id), { class: "ghost" }))))));
+        el("div", { class: "vault-path-ancestors" }, chain.slice(1, -2).map(node => button(node.name, () => openFolder(node.ref, true), { class: "ghost" }))))));
     }
-    const visible = received ? [] : chain.length > 3 ? chain.slice(-2) : chain;
-    for (const entry of visible) parts.push(separator(), crumb(entryName(entry), () => openFolder(entry.id), entry.id === parentId));
-    breadcrumbList.replaceChildren(...parts);
-    breadcrumbs.title = [rootName, ...(received ? [] : chain.map(entryName))].join(" / ");
+    for (const node of chain.length > 4 ? chain.slice(-2) : chain.slice(1)) parts.push(separator(), crumb(node));
+    breadcrumbList.replaceChildren(...parts); breadcrumbs.title = chain.map(node => node.name).join(" / ");
+  }
+  function sortedItems(items, ref) {
+    const query = ref === activeFolderRef() ? search.value.trim().toLocaleLowerCase(locale()) : "";
+    return items.filter(node => !query || node.name.toLocaleLowerCase(locale()).includes(query)).sort((a, b) =>
+      Number(b.ref === "shared") - Number(a.ref === "shared") || Number(b.container) - Number(a.container) || (sorting.value === "date" ? new Date(b.entry?.updatedAt ?? 0) - new Date(a.entry?.updatedAt ?? 0)
+        : sorting.value === "size" ? (b.entry?.plainBytes ?? b.entry?.size ?? 0) - (a.entry?.plainBytes ?? a.entry?.size ?? 0)
+          : a.name.localeCompare(b.name, locale(), { numeric: true })));
   }
   function paint() {
     if (!current()) return;
+    closeMenu(); view = vaultExplorerView(model, navigation); navigation = view.path;
     const enabled = snapshot.enabled === true;
-    refreshNative();
-    views.hidden = !enabled;
-    toolbar.hidden = !enabled;
-    quota.hidden = !enabled;
-    breadcrumbs.hidden = !enabled;
-    dropHint.hidden = !enabled || received;
-    upload.hidden = received;
-    newFolder.hidden = received;
-    upload.disabled = !enabled;
-    newFolder.disabled = !enabled;
+    parentId = ownDestination(activeFolderRef())?.parentId ?? null;
+    refreshNative(); toolbar.hidden = !enabled; explorer.hidden = !enabled; quota.hidden = !enabled; breadcrumbs.hidden = !enabled;
+    const writable = enabled && !!ownDestination(activeFolderRef());
+    upload.disabled = !writable; newFolder.disabled = !writable; search.disabled = !enabled; sorting.disabled = !enabled;
     refreshButton.disabled = false;
-    if (!enabled) {
-      rows.replaceChildren(); empty.hidden = true; pagination.hidden = true;
-      tell(feedback, t("ZeloteZ Vault is not enabled on this instance.", "ZeloteZ Vault ist auf dieser Instanz nicht aktiviert."));
-      return;
-    }
-    const used = Number(snapshot.usedBytes) || 0;
-    const reserved = Number(snapshot.reservedBytes) || 0;
-    const limit = Math.max(0, Number(snapshot.quotaBytes) || 0);
+    if (!enabled) { columns.replaceChildren(); columnNodes.clear(); closePreview(true);
+      tell(feedback, t("ZeloteZ Vault is not enabled on this instance.", "ZeloteZ Vault ist auf dieser Instanz nicht aktiviert.")); return; }
+    const used = Number(snapshot.usedBytes) || 0, reserved = Number(snapshot.reservedBytes) || 0, limit = Math.max(0, Number(snapshot.quotaBytes) || 0);
     quotaLabel.textContent = t("{used} of {limit} used", "{used} von {limit} belegt", { used: vaultBytes(used), limit: vaultBytes(limit) })
       + (reserved ? " · " + t("{size} uploading", "{size} im Upload", { size: vaultBytes(reserved) }) : "");
-    quotaBar.max = Math.max(1, limit); quotaBar.value = Math.min(used + reserved, limit);
+    quota.title = quotaLabel.textContent; quotaBar.max = Math.max(1, limit); quotaBar.value = Math.min(used + reserved, limit);
     paintBreadcrumbs();
-    const query = search.value.trim().toLocaleLowerCase();
-    const entries = (received ? snapshot.receivedEntries ?? [] : snapshot.entries).filter(entry => (received || (entry.parentId ?? null) === parentId) && entry.state !== "uploading" &&
-      (!query || entryName(entry).toLocaleLowerCase().includes(query)));
-    entries.sort((a, b) => Number(isFolder(b)) - Number(isFolder(a)) || (sorting.value === "date"
-      ? new Date(b.updatedAt) - new Date(a.updatedAt) : sorting.value === "size" ? (b.plainBytes ?? b.size ?? 0) - (a.plainBytes ?? a.size ?? 0)
-        : entryName(a).localeCompare(entryName(b), locale(), { numeric: true })));
-    pageIndex = Math.min(pageIndex, Math.max(0, Math.ceil(entries.length / pageSize) - 1));
-    const first = pageIndex * pageSize;
-    rows.replaceChildren(...entries.slice(first, first + pageSize).map(entryRow));
-    pagination.hidden = false;
-    previousPage.disabled = !pageIndex;
-    nextPage.disabled = first + pageSize >= entries.length;
-    pageLabel.textContent = t("{page} / {pages}", "{page} / {pages}", { page: pageIndex + 1, pages: Math.max(1, Math.ceil(entries.length / pageSize)) });
-    itemCount.textContent = t("{count} items", "{count} Elemente", { count: entries.length });
-    rows.hidden = !entries.length;
-    empty.hidden = !!entries.length;
-    empty.replaceChildren(el("span", { class: "vault-empty-icon", "aria-hidden": "true" }, "◇"),
-      el("h2", {}, query ? t("No matching files", "Keine passenden Dateien") : received ? t("Nothing shared with you yet", "Noch nichts mit dir geteilt") : t("This folder is empty", "Dieser Ordner ist leer")),
-      el("p", { class: "muted" }, query ? t("Try another name.", "Versuche einen anderen Namen.")
-        : received ? t("Files shared directly with your account appear here.", "Dateien, die direkt mit deinem Konto geteilt werden, erscheinen hier.")
-          : t("Add files or create a folder to get started.", "Füge Dateien hinzu oder erstelle einen Ordner.")));
+    const activeCount = sortedItems(model.children(activeFolderRef()), activeFolderRef()).length;
+    folderStatus.textContent = t("{count} items", "{count} Elemente", { count: activeCount });
+    const keep = new Set(view.columns.map(column => column.ref));
+    for (const [ref, value] of columnNodes) if (!keep.has(ref)) { value.node.remove(); columnNodes.delete(ref); }
+    for (const column of view.columns) {
+      let value = columnNodes.get(column.ref);
+      if (!value) {
+        const title = el("h2", { class: "vault-column-title" });
+        const count = el("span", { class: "vault-column-count subtle" });
+        const up = button("↑", () => {
+          const fresh = model.node(column.ref); if (fresh?.parentRef) openFolder(fresh.parentRef, true);
+        }, { class: "ghost icon-button", "aria-label": t("Parent folder", "Übergeordneter Ordner"), title: t("Parent folder", "Übergeordneter Ordner") });
+        const list = el("div", { class: "vault-column-entries", role: "list", tabindex: 0 });
+        const empty = el("p", { class: "vault-column-empty subtle", hidden: true });
+        const heading = el("header", { class: "vault-column-heading" }, el("div", {}, title, count), up);
+        const node = el("section", { class: "vault-column", "data-folder-ref": column.ref }, heading, list, empty);
+        list.addEventListener("keydown", event => columnKey(event, column.ref));
+        node.addEventListener("contextmenu", event => { if (!event.target.closest(".vault-entry")) { event.preventDefault(); openBlankMenu(column.ref, event); } });
+        bindDrop(node, column.ref); value = { node, title, count, up, list, empty }; columnNodes.set(column.ref, value);
+      }
+      value.title.textContent = column.node.name; value.title.title = model.path(column.ref).map(item => item.name).join(" / ");
+      value.node.setAttribute("aria-label", value.title.title); value.up.hidden = column.ref === "root";
+      const items = sortedItems(column.items, column.ref), scroll = value.list.scrollTop;
+      const focused = value.list.contains(document.activeElement) ? document.activeElement.closest("[data-vault-ref]")?.dataset.vaultRef : null;
+      value.list.replaceChildren(...items.map(node => entryRow(node, column)));
+      value.list.scrollTop = scroll; value.count.textContent = t("{count} items", "{count} Elemente", { count: items.length });
+      value.empty.hidden = !!items.length; value.empty.textContent = search.value && column.ref === activeFolderRef()
+        ? t("No matching files", "Keine passenden Dateien") : t("This folder is empty", "Dieser Ordner ist leer");
+      const columnIndex = view.columns.indexOf(column);
+      if (value.node !== columns.children[columnIndex]) columns.insertBefore(value.node, columns.children[columnIndex] ?? null);
+      if (focused) [...value.list.querySelectorAll(".vault-entry-hit")].find(hit => hit.closest("[data-vault-ref]")?.dataset.vaultRef === focused)?.focus({ preventScroll: true });
+    }
+    columns.style.setProperty("--vault-columns", view.columns.length);
+    reconcilePreview(); paintSelection();
   }
-  function entryRow(entry) {
-    const locked = entry.locked === true;
-    const name = entryName(entry);
-    const kind = fileKind(entry);
-    const openLabel = kind === "audio" || kind === "video" ? t("Play", "Abspielen")
-      : kind === "file" || kind === "archive" ? t("Open", "Öffnen") : t("Open and edit", "Öffnen und bearbeiten");
-    const primary = button(name, () => isFolder(entry) ? openFolder(entry.id) : openEntry(entry),
-      { class: "ghost vault-entry-name", disabled: locked, title: name });
-    const actions = el("details", { class: "vault-entry-menu" },
-      el("summary", { class: "button ghost", "aria-label": t("Actions for {name}", "Aktionen für {name}", { name }) }, "⋯"));
-    const menu = el("div", { class: "vault-entry-actions" },
-      !isFolder(entry) && button(openLabel, () => openEntry(entry), { disabled: locked }),
-      canShareVaultPlayback(entry, user) && button(t("Play in a room", "In einem Raum abspielen"), () => void sharePlayback(entry)),
-      !isFolder(entry) && button(t("Download", "Herunterladen"), () => download(entry), { disabled: locked }),
-      !entry.receivedShareId && button(t("Rename", "Umbenennen"), () => editName(entry), { disabled: locked }),
-      !entry.receivedShareId && button(t("Move", "Verschieben"), () => moveEntry(entry), { disabled: locked }),
-      !entry.receivedShareId && !isFolder(entry) && button(t("Share", "Teilen"), () => shareEntry(entry), { disabled: locked }),
-      !entry.receivedShareId && button(t("Delete", "Löschen"), () => deleteEntry(entry), { class: "danger" }));
-    menu.addEventListener("click", event => { if (event.target.closest("button")) actions.open = false; });
-    actions.append(menu);
-    actions.addEventListener("toggle", () => {
-      if (!actions.open) return;
-      for (const other of rows.querySelectorAll("details[open]")) if (other !== actions) other.open = false;
-      const trigger = actions.querySelector("summary").getBoundingClientRect();
-      const width = Math.min(210, document.documentElement.clientWidth - 24);
-      menu.style.inlineSize = width + "px";
-      menu.style.insetInlineEnd = Math.max(12, document.documentElement.clientWidth - trigger.right) + "px";
-      const height = menu.getBoundingClientRect().height;
-      const top = trigger.bottom + height + 12 <= innerHeight ? trigger.bottom + 5 : Math.max(12, trigger.top - height - 5);
-      menu.style.insetBlockStart = top + "px";
+  function paintSelection() {
+    for (const row of columns.querySelectorAll(".vault-entry")) {
+      const ref = row.dataset.vaultRef;
+      const selected = view.columns.some(column => column.selectedRef === ref) || previewRef === ref;
+      row.dataset.selected = String(selected);
+      row.querySelector(".vault-entry-hit")?.setAttribute("aria-pressed", String(selected));
+    }
+  }
+  function entryRow(node, column) {
+    const entry = node.entry, locked = node.locked, shared = node.readOnly && node.ref !== "root";
+    const details = node.synthetic ? (node.ref === "shared" ? t("Shared files", "Geteilte Dateien") : t("Shared by {name}", "Geteilt von {name}", { name: node.name }))
+      : locked ? t("This item could not be decrypted.", "Dieses Element konnte nicht entschlüsselt werden.")
+        : node.container ? t("Folder", "Ordner") : vaultBytes(entry?.plainBytes ?? entry?.size);
+    const hit = button("", () => { if (Date.now() < suppressClickUntil) return; node.container ? openFolder(node.ref) : openFile(node.ref); },
+      { class: "ghost vault-entry-hit", disabled: locked, "aria-label": node.name, "aria-pressed": "false", title: node.name });
+    hit.append(...[el("span", { class: "vault-entry-icon", "aria-hidden": "true", "data-kind": node.container ? "folder" : fileKind(entry) },
+      entryIcon(node)),
+      el("span", { class: "vault-entry-title" }, el("span", { class: "vault-entry-name" }, node.name), el("span", { class: "subtle" }, details)),
+      shared && el("span", { class: "vault-shared-mark", title: t("Shared", "Geteilt"), "aria-label": t("Shared", "Geteilt") }, "↗"),
+      node.container && el("span", { class: "vault-entry-arrow", "aria-hidden": "true" }, "›")].filter(Boolean));
+    const actions = button("⋯", event => openNodeMenu(node.ref, event.currentTarget),
+      { class: "ghost vault-entry-more", "aria-haspopup": "menu", "aria-label": t("Actions for {name}", "Aktionen für {name}", { name: node.name }) });
+    const row = el("div", { class: "vault-entry", role: "listitem", "data-vault-ref": node.ref, "data-vault-id": entry?.uiId || entry?.id || node.ref }, hit, actions);
+    row.addEventListener("click", event => { if (!event.target.closest("button,a,input,select,textarea") && !locked && Date.now() >= suppressClickUntil)
+      node.container ? openFolder(node.ref) : openFile(node.ref); });
+    row.addEventListener("contextmenu", event => { event.preventDefault(); event.stopPropagation(); openNodeMenu(node.ref, hit, event); });
+    const movable = !!entry && !node.readOnly && !locked && entry.ownerId === user.id && entry.state === "ready";
+    row.draggable = movable;
+    row.addEventListener("dragstart", event => {
+      if (!movable || moving || !event.dataTransfer) { event.preventDefault(); return; }
+      closeMenu(); activeDrag = { ref: node.ref, scope: dragScope }; event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData(dragType, JSON.stringify(activeDrag)); row.classList.add("vault-drag-source");
     });
-    return el("div", { class: "vault-entry", role: "listitem", "data-vault-id": entry.uiId || entry.id },
-      el("span", { class: "vault-entry-icon", "aria-hidden": "true", "data-kind": isFolder(entry) ? "folder" : fileKind(entry) }, locked ? "◇" : isFolder(entry) ? "▱" : fileGlyph(entry)),
-      el("div", { class: "vault-entry-title" }, primary,
-        el("span", { class: "subtle" }, locked ? t("This item could not be decrypted.", "Dieses Element konnte nicht entschlüsselt werden.")
-          : isFolder(entry) ? t("Folder", "Ordner") : entry.type || t("File", "Datei"))),
-      el("span", { class: "vault-entry-size subtle" }, isFolder(entry) ? "—" : vaultBytes(entry.plainBytes ?? entry.size)),
-      el("time", { class: "vault-entry-date subtle", datetime: entry.updatedAt || entry.createdAt }, date(entry.updatedAt || entry.createdAt)), actions);
+    row.addEventListener("dragend", () => { activeDrag = null; suppressClickUntil = Date.now() + 250; clearDropStates(); row.classList.remove("vault-drag-source"); });
+    if (node.container) bindDrop(row, node.ref);
+    return row;
+  }
+  function columnKey(event, ref) {
+    if (event.altKey || event.ctrlKey || event.metaKey || !event.target.matches(".vault-entry-hit")) return;
+    const value = columnNodes.get(ref), hits = [...value.list.querySelectorAll(".vault-entry-hit:not(:disabled)")], index = hits.indexOf(event.target);
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault(); hits[event.key === "Home" ? 0 : event.key === "End" ? hits.length - 1 : Math.max(0, Math.min(hits.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))]?.focus();
+    } else if (event.key === "ArrowRight") {
+      const node = model.node(event.target.closest("[data-vault-ref]")?.dataset.vaultRef);
+      event.preventDefault(); if (node?.container) openFolder(node.ref, true); else if (node) { openFile(node.ref); previewTitle.focus({ preventScroll: true }); }
+    } else if (event.key === "ArrowLeft") {
+      const index = view.columns.findIndex(column => column.ref === ref), previous = view.columns[index - 1];
+      if (previous) { event.preventDefault(); const list = columnNodes.get(previous.ref)?.list;
+        (list?.querySelector('.vault-entry[data-selected="true"] .vault-entry-hit') ?? list?.querySelector(".vault-entry-hit"))?.focus({ preventScroll: true }); }
+    } else if (event.key === "ContextMenu" || event.key === "F10" && event.shiftKey) { event.preventDefault(); openNodeMenu(event.target.closest("[data-vault-ref]")?.dataset.vaultRef, event.target); }
+  }
+  function closeMenu(focus = false) {
+    menu.hidden = true; menu.replaceChildren();
+    for (const row of columns.querySelectorAll('[data-context="true"]')) delete row.dataset.context;
+    if (focus && menuTrigger?.isConnected) menuTrigger.focus({ preventScroll: true });
+    menuRef = null; menuTrigger?.setAttribute("aria-expanded", "false"); menuTrigger = null;
+  }
+  function positionMenu(trigger, point) {
+    menu.hidden = false;
+    const box = trigger?.getBoundingClientRect(), width = Math.min(218, innerWidth - 20);
+    menu.style.inlineSize = width + "px";
+    const x = point?.clientX ?? (box ? box.right - width : 10), y = point?.clientY ?? (box ? box.bottom + 5 : 10);
+    menu.style.left = Math.max(10, Math.min(innerWidth - width - 10, x)) + "px";
+    menu.style.top = Math.max(10, Math.min(innerHeight - menu.getBoundingClientRect().height - 10, y)) + "px";
+  }
+  function menuAction(label, action, disabled = false, danger = false) {
+    return button(label, () => { closeMenu(); action(); }, { role: "menuitem", disabled, class: danger ? "danger" : "ghost" });
+  }
+  function openNodeMenu(ref, trigger, point) {
+    const node = model.node(ref); if (!node) return;
+    if (!point && !menu.hidden && menuRef === ref) { closeMenu(true); return; }
+    closeMenu(); menuRef = ref; menuTrigger = trigger; trigger?.setAttribute("aria-expanded", "true");
+    const action = fn => { const fresh = model.node(ref); if (fresh) fn(fresh); };
+    const entry = node.entry;
+    menu.replaceChildren(...[menuAction(node.container ? t("Open folder", "Ordner öffnen") : t("Open", "Öffnen"), () => action(fresh => fresh.container ? openFolder(ref) : openFile(ref)), node.locked),
+      entry && !node.container && menuAction(t("Download", "Herunterladen"), () => action(fresh => download(fresh.entry)), node.locked),
+      entry && canShareVaultPlayback(entry, user) && menuAction(t("Play in a room", "In einem Raum abspielen"), () => action(fresh => void sharePlayback(fresh.entry))),
+      entry && !node.readOnly && menuAction(t("Rename", "Umbenennen"), () => action(fresh => editName(fresh.entry)), node.locked),
+      entry && !node.readOnly && menuAction(t("Move", "Verschieben"), () => action(fresh => moveEntry(fresh.entry)), node.locked || moving),
+      entry && !node.readOnly && !node.container && menuAction(t("Share", "Teilen"), () => action(fresh => shareEntry(fresh.entry)), node.locked),
+      entry && !node.readOnly && menuAction(t("Delete", "Löschen"), () => action(fresh => deleteEntry(fresh.entry)), false, true)].filter(Boolean));
+    const row = [...columns.querySelectorAll(".vault-entry")].find(item => item.dataset.vaultRef === ref); if (row) row.dataset.context = "true";
+    positionMenu(trigger, point); if (!point) menu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
+  }
+  function openBlankMenu(ref, point) {
+    if (!ownDestination(ref)) return;
+    closeMenu(); menuRef = ref;
+    menu.replaceChildren(menuAction(t("Upload files", "Dateien hochladen"), () => pickFiles(ref)),
+      menuAction(t("New folder", "Neuer Ordner"), () => editName(undefined, ref)), menuAction(t("Refresh", "Aktualisieren"), () => refresh()));
+    positionMenu(null, point);
+  }
+  function pickFiles(ref) {
+    const destination = ownDestination(ref); if (!destination) return;
+    pickerDestination = destination.parentId; picker.click();
+  }
+  function clearDropStates() { for (const item of page.querySelectorAll(".vault-drop-active")) item.classList.remove("vault-drop-active"); }
+  function internalDrag(event) { return activeDrag?.scope === dragScope && Array.from(event.dataTransfer?.types ?? []).includes(dragType); }
+  function bindDrop(target, ref) {
+    target.addEventListener("dragover", event => {
+      if (!snapshot.enabled || moving) return;
+      const internal = internalDrag(event), external = Array.from(event.dataTransfer?.types ?? []).includes("Files");
+      if (!internal && !external) return;
+      const allowed = internal ? validateVaultExplorerMove(model, activeDrag.ref, ref, { actorId: user.id }).ok : !!ownDestination(ref);
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = allowed ? internal ? "move" : "copy" : "none";
+      target.classList.toggle("vault-drop-active", allowed);
+    });
+    target.addEventListener("dragleave", event => { if (!target.contains(event.relatedTarget)) target.classList.remove("vault-drop-active"); });
+    target.addEventListener("drop", event => {
+      const internal = internalDrag(event), external = Array.from(event.dataTransfer?.types ?? []).includes("Files");
+      if (!internal && !external) return;
+      event.preventDefault(); event.stopPropagation(); clearDropStates();
+      if (internal) {
+        let payload; try { payload = JSON.parse(event.dataTransfer.getData(dragType)); } catch { return; }
+        if (payload?.scope !== dragScope || payload.ref !== activeDrag.ref) return;
+        const sourceRef = activeDrag.ref; activeDrag = null; suppressClickUntil = Date.now() + 250;
+        void performMove(sourceRef, ref);
+      } else {
+        const destination = ownDestination(ref); if (!destination) return;
+        const directory = Array.from(event.dataTransfer.items ?? []).some(item => item.webkitGetAsEntry?.()?.isDirectory);
+        if (directory) { notify(t("Use the desktop app’s file manager integration to upload folders.", "Nutze die Dateimanager-Integration der Desktop-App, um Ordner hochzuladen.")); return; }
+        addFiles(event.dataTransfer.files ?? [], destination.parentId);
+      }
+    });
+  }
+  async function performMove(sourceRef, destinationRef) {
+    if (!current() || moving) return;
+    const checked = validateVaultExplorerMove(model, sourceRef, destinationRef, { actorId: user.id });
+    if (!checked.ok) { notify(t("This item cannot be moved to that folder.", "Dieses Element kann nicht in diesen Ordner verschoben werden.")); return; }
+    moving = true;
+    try {
+      await client.move(checked.entry, checked.parentId, { signal });
+      if (current()) { await refresh(); notify(t("Item moved.", "Element verschoben.")); }
+    } catch (error) { report(error); }
+    finally { moving = false; }
   }
   async function refresh() {
     const request = ++generation;
@@ -318,7 +497,8 @@ export function renderVault(context) {
     try {
       const result = await client.list({ signal });
       if (!current() || generation !== request) return;
-      snapshot = { ...result, entries: Array.isArray(result.entries) ? result.entries : [] };
+      snapshot = { ...result, entries: Array.isArray(result.entries) ? result.entries : [], receivedEntries: Array.isArray(result.receivedEntries) ? result.receivedEntries : [] };
+      model = buildModel(snapshot);
       tell(feedback, ""); paint();
     } catch (error) {
       if (current()) tell(feedback, snapshot.enabled ? "" : error.message, "error");
@@ -335,17 +515,20 @@ export function renderVault(context) {
     });
     vaultDialog(title, content); input.focus(); input.select();
   }
-  function editName(entry) {
+  function editName(entry, folderRef = activeFolderRef()) {
     if (entry) nameDialog(t("Rename item", "Element umbenennen"), entryName(entry), name => client.rename(entry, name, { signal }));
     else {
-      const destination = parentId;
-      nameDialog(t("New folder", "Neuer Ordner"), "", name => client.createFolder(destination, name, { signal }));
+      const target = ownDestination(folderRef); if (!target) return;
+      nameDialog(t("New folder", "Neuer Ordner"), "", name => client.createFolder(target.parentId, name, { signal }));
     }
   }
   function moveEntry(entry) {
     const destination = select(parentOptions(vaultDescendants(snapshot.entries, entry.id)), entry.parentId ?? "");
     const content = form(field(t("Destination folder", "Zielordner"), destination), t("Move", "Verschieben"), async () => {
-      await client.move(entry, destination.value || null, { signal });
+      const ref = destination.value ? "own:" + destination.value : "root";
+      const checked = validateVaultExplorerMove(model, "own:" + entry.id, ref, { actorId: user.id });
+      if (!checked.ok) throw new Error(t("This item cannot be moved to that folder.", "Dieses Element kann nicht in diesen Ordner verschoben werden."));
+      await client.move(checked.entry, checked.parentId, { signal });
       if (current()) { closeDialog(); await refresh(); }
     });
     vaultDialog(t("Move {name}", "{name} verschieben", { name: entryName(entry) }), content);
@@ -356,6 +539,8 @@ export function renderVault(context) {
         "Diesen Ordner, seinen gesamten Inhalt und zugehörige Freigabelinks löschen? Das kann nicht rückgängig gemacht werden.")
       : t("Delete this file and its sharing links? This cannot be undone.", "Diese Datei und ihre Freigabelinks löschen? Das kann nicht rückgängig gemacht werden.");
     const content = form(el("p", {}, description), t("Delete permanently", "Endgültig löschen"), async () => {
+      const affected = vaultDescendants(snapshot.entries, entry.id);
+      if (previewRef && affected.has(model.node(previewRef)?.entry?.id) && !await closePreview()) return;
       await client.delete(entry, { signal });
       if (current()) { closeDialog(); await refresh(); }
     });
@@ -404,9 +589,9 @@ export function renderVault(context) {
     }
     uploading = false;
   }
-  function addFiles(files) {
+  function addFiles(files, destination = parentId) {
     if (!snapshot.enabled || !current()) return;
-    for (const file of files) queue.push({ file, destination: parentId });
+    for (const file of files) queue.push({ file, destination });
     void processQueue();
   }
   function download(entry) {
@@ -601,52 +786,42 @@ export function renderVault(context) {
     void statusIntegration(); void pendingSelection();
     return panel;
   }
-  views.addEventListener("keydown", event => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const shared = event.key === "End" ? true : event.key === "Home" ? false : !received;
-    setView(shared); (shared ? sharedTab : ownTab).focus({ preventScroll: true });
-  });
-  search.addEventListener("input", () => { pageIndex = 0; paint(); });
-  sorting.addEventListener("change", () => { pageIndex = 0; paint(); });
-  picker.addEventListener("change", () => { addFiles(picker.files ?? []); picker.value = ""; });
-  browser.addEventListener("dragover", event => {
-    if (snapshot.enabled && event.dataTransfer?.types.includes("Files")) { event.preventDefault(); browser.classList.add("vault-drop-active"); }
-  });
-  browser.addEventListener("dragleave", event => { if (!browser.contains(event.relatedTarget)) browser.classList.remove("vault-drop-active"); });
-  browser.addEventListener("drop", event => {
-    browser.classList.remove("vault-drop-active");
-    if (!snapshot.enabled || !event.dataTransfer?.files.length) return;
-    event.preventDefault(); addFiles(event.dataTransfer.files);
-  });
-  document.addEventListener("click", event => {
-    for (const menu of rows.querySelectorAll("details[open]")) if (!menu.contains(event.target)) menu.open = false;
+  search.addEventListener("input", paint);
+  sorting.addEventListener("change", paint);
+  picker.addEventListener("change", () => { addFiles(picker.files ?? [], pickerDestination); picker.value = ""; });
+  document.addEventListener("pointerdown", event => {
+    if (!menu.hidden && !menu.contains(event.target) && !menuTrigger?.contains(event.target)) closeMenu();
   }, { signal });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") for (const menu of rows.querySelectorAll("details[open]")) menu.open = false;
-  }, { signal });
+  document.addEventListener("keydown", event => { if (event.key === "Escape" && !menu.hidden) { event.preventDefault(); closeMenu(true); } }, { signal });
+  menu.addEventListener("keydown", event => {
+    const controls = [...menu.querySelectorAll("button:not(:disabled)")], index = controls.indexOf(document.activeElement);
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      controls[event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : (index + controls.length + (event.key === "ArrowDown" ? 1 : -1)) % controls.length]?.focus();
+    } else if (event.key === "Tab") closeMenu();
+  });
+  columns.addEventListener("scroll", () => closeMenu(), { capture: true, passive: true });
   const toast = document.querySelector("#toast");
-  function fitRows() {
+  function fitViewport() {
     if (!current()) return;
+    closeMenu();
     if (toast) page.style.setProperty("--vault-toast-offset", toast.hidden ? "0px" : toast.getBoundingClientRect().height + 10 + "px");
-    if (!fileArea.clientHeight) return;
-    const rowHeight = Number.parseFloat(getComputedStyle(page).getPropertyValue("--vault-row-height")) || 60;
-    const fitting = Math.max(1, Math.floor(fileArea.clientHeight / rowHeight));
-    if (fitting !== pageSize) { pageSize = fitting; paint(); }
   }
-  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fitRows) : null;
-  observer?.observe(fileArea);
+  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fitViewport) : null;
   if (toast) observer?.observe(toast);
-  globalThis.addEventListener?.("resize", fitRows, { signal });
+  globalThis.addEventListener?.("resize", fitViewport, { signal });
+  globalThis.addEventListener?.("beforeunload", event => {
+    if (previewSession?.dirty) { event.preventDefault(); event.returnValue = ""; }
+  }, { signal });
   signal.addEventListener("abort", () => {
-    observer?.disconnect();
+    observer?.disconnect(); closeMenu(); activeDrag = null; closePreview(true);
     queue.length = 0; for (const job of jobs) job.abort();
     if (ownedDialog?.isConnected) closeDialog();
     snapshot = { entries: [], enabled: false }; client.close?.();
   }, { once: true });
   paintBreadcrumbs();
   void refresh();
-  return { node: page, header: banner };
+  return { node: page, header: banner, canLeave: () => previewSession?.canClose() ?? true };
 }
 
 export function renderVaultAdminPanel({ signal, approval }) {

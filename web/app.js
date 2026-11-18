@@ -56,6 +56,7 @@ const roomIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 let user = null;
 let view;
 let activeTopic;
+let pageLeave = null, renderedHash = null, renderGeneration = 0;
 let workspaceSession;
 let player;
 let videoDock;
@@ -397,6 +398,7 @@ async function showWorkspace(nextUser, unlocked = true) {
 }
 
 function enterAuth() {
+  pageLeave = null; renderedHash = null; renderGeneration++;
   clearQuickLinks();
   if (user) void window.roomsVault?.cancelArchive?.().catch(() => {});
   if (user) void forgetMemberQuickChatDevices(user.id);
@@ -632,6 +634,13 @@ function showTutorial(route, page, banner) {
 
 async function render(force = false) {
   if (!user) return;
+  const attempt = ++renderGeneration, account = user, leave = pageLeave;
+  if (leave && !await leave()) {
+    if (attempt === renderGeneration && account === user && leave === pageLeave && renderedHash !== null)
+      history.replaceState(history.state, "", renderedHash);
+    return;
+  }
+  if (attempt !== renderGeneration || account !== user) return;
   const route = getRoute();
   if (desktop && route.page === "downloads") {
     history.replaceState(history.state, "", "#/rooms");
@@ -654,6 +663,7 @@ async function render(force = false) {
   player.setLocation();
   voice.setLocation(null);
   if (view) view.abort();
+  pageLeave = null;
   activeTopic = null;
   view = new AbortController();
   const { signal } = view;
@@ -675,7 +685,7 @@ async function render(force = false) {
         route.target = undefined;
       }
     }
-    let page, banner;
+    let page, banner, canLeave;
     if (route.page === "friends") page = await renderFriends(context);
     else if (route.page === "direct") page = await renderDirect(context, route.topicId, route.target?.messageId);
     else if (route.page === "invites" && user.admin) page = await renderAdmin({ ...context, onSecurity: openAccountSecurity });
@@ -685,6 +695,7 @@ async function render(force = false) {
       const vault = renderVault(context);
       page = vault.node;
       banner = vault.header;
+      canLeave = vault.canLeave;
     }
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       const quick = quickViewerHeading();
@@ -701,6 +712,7 @@ async function render(force = false) {
     }
     else page = await renderTopics(context);
     if (current()) {
+      pageLeave = canLeave ?? null; renderedHash = requestedHash;
       workspace.replaceChildren(...(vaultLocked ? [el("div", { class: "panel stack", role: "status" },
         el("p", {}, t("Your chats and Vault files are locked. If you find your previous encryption password, update it to unlock them.",
           "Deine Chats und Vault-Dateien sind gesperrt. Wenn du das bisherige Verschlüsselungspasswort wiederfindest, kannst du sie damit entsperren.")),
