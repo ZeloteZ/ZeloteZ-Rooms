@@ -13,14 +13,14 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango, Xdp, XdpGtk
 
 from app_audio import list_audio_outputs, validate_audio_output
 from i18n import decimal, t
-from media import CapturePipeline, CaptureWorker, Gst
+from media import CapturePipeline, CaptureWorker, Gst, rooms_capture_available
 from model import QUALITY_PRESETS, Quality, parse_destination, picture_bounds, region_from_drag, validate_key
 
 
 AUDIO_MODES = ("off", "application", "system")
 
 
-def initialize_media(embedded_preview=False):
+def initialize_media(embedded_preview=False, *, engine="standard"):
     Gst.init(None)
     # Protocol debug output can contain RTMP authentication arguments.
     Gst.debug_set_active(False)
@@ -32,6 +32,8 @@ def initialize_media(embedded_preview=False):
     if missing:
         raise RuntimeError(t("Missing GStreamer elements. {elements}. See desktop/README.md.",
                              elements=", ".join(missing)))
+    if engine == "rooms" and not rooms_capture_available():
+        raise RuntimeError(t("Rooms Capture is unavailable on this system."))
 
 
 def add_capture_style():
@@ -94,8 +96,8 @@ class CroppedPreview(Gtk.Widget):
 
 
 class CaptureWindow(Adw.ApplicationWindow):
-    def __init__(self, app, room_session, *, parent=None, preview_frame=None, on_metrics=None):
-        initialize_media(preview_frame is not None)
+    def __init__(self, app, room_session, *, parent=None, preview_frame=None, on_metrics=None, engine="standard"):
+        initialize_media(preview_frame is not None, engine=engine)
         title = t("Screen sharing")
         super().__init__(application=app, title=title, default_width=860, default_height=650)
         if parent is not None:
@@ -118,6 +120,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.drag_start = None
         self.source_dimensions = None
         self.capture_type = None
+        self.capture_engine = engine
         self.audio_sources = ()
         self.audio_scan = None
         self.audio_output = None
@@ -253,6 +256,12 @@ class CaptureWindow(Adw.ApplicationWindow):
         options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         source = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
         source.append(label(t("Capture source"), "section-title"))
+        self.engine_picker = None
+        if rooms_capture_available():
+            self.engine_picker = Gtk.DropDown.new_from_strings([t("Standard"), t("Rooms Capture")])
+            self.engine_picker.set_selected(1 if self.capture_engine == "rooms" else 0)
+            self.engine_picker.connect("notify::selected", self.engine_changed)
+            field(source, t("_Capture engine"), self.engine_picker)
         modes = Gtk.Box(homogeneous=True)
         modes.add_css_class("linked")
         self.monitor = Gtk.ToggleButton(label=t("Monitor"), active=True)
@@ -480,6 +489,8 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.monitor.set_sensitive(can_pick)
         self.area.set_sensitive(can_pick)
         self.app_source.set_sensitive(can_pick)
+        if self.engine_picker is not None:
+            self.engine_picker.set_sensitive(can_pick)
         for widget in (self.resolution, self.rate):
             widget.set_sensitive(not busy)
         self.audio_panel.set_sensitive(not busy)
@@ -547,6 +558,13 @@ class CaptureWindow(Adw.ApplicationWindow):
         if self.state == "ready":
             self.notice(t("Drag a rectangle in the preview.") if self.area.get_active() else "")
 
+    def engine_changed(self, picker, _property):
+        self.capture_engine = "rooms" if picker.get_selected() == 1 else "standard"
+        if self.capture is not None:
+            self.cleanup(preserve_audio=True)
+            self.set_state("idle")
+            self.notice()
+
     def choose_monitor(self, _button):
         self.cleanup(preserve_audio=True)
         self.capture_type = self.selected_capture_type()
@@ -598,7 +616,8 @@ class CaptureWindow(Adw.ApplicationWindow):
                 self.fd = None
                 self.fail(t("PipeWire couldn’t open a capture connection."))
                 return
-            capture = CapturePipeline.from_portal(self.fd, node_id, properties.get("pipewire-serial"))
+            capture = CapturePipeline.from_portal(self.fd, node_id, properties.get("pipewire-serial"),
+                                                  engine=self.capture_engine)
             self.begin_preview(capture, self.fd)
         except GLib.Error:
             self.fail(t("Screen sharing couldn’t start."))

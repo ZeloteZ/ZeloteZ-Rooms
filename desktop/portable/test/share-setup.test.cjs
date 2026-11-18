@@ -12,7 +12,7 @@ const action = { source: 1, height: 1440, fps: 60, region: null, audioMode: "non
 const snapshot = "data:image/jpeg;base64,/9j/2Q==";
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function fixture({ portal = false } = {}) {
+function fixture({ portal = false, native = false } = {}) {
   const handlers = new Map();
   const timers = new Set();
   const thumbnail = { isEmpty: () => portal, toJPEG: () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) };
@@ -46,10 +46,11 @@ function fixture({ portal = false } = {}) {
   const evt = { sender: web, senderFrame: web.mainFrame };
   const dialogs = [];
   const grants = [];
+  const startNative = native ? () => {} : undefined;
   const begin = module.exports.installShareSetup(web, {
-    portal, audio, allowed: url => url === web.mainFrame.url,
-    createOwner({ source, valid, onEnded }) {
-      const owner = { source, valid, onEnded, frame: { trustedOutput: true }, configurations: [], closed: false,
+    portal, audio, startNative, allowed: url => url === web.mainFrame.url,
+    createOwner({ source, valid, onEnded, startNative }) {
+      const owner = { source, valid, onEnded, startNative, frame: { trustedOutput: true }, configurations: [], closed: false,
         snapshot: async () => ({ thumbnail: snapshot, aspect: 2, width: 1920, height: 960 }),
         configure: async options => { owner.configurations.push(options); return owner.frame; },
         delivered: () => { owner.deliveredToPage = true; }, close: () => { owner.closed = true; } };
@@ -103,6 +104,28 @@ test("one dialog confirms video, audio and quality with a single frame-bound han
   f.call("cancel", id);
   assert.equal(f.audio.clears, clears + 1);
   assert.equal(f.owners[0].closed, true);
+});
+
+test("the local engine choice stays bound to the approved preview", async () => {
+  const unsupported = fixture();
+  const standard = unsupported.open();
+  await standard.local.share.sources();
+  assert.equal(await standard.local.share.submit({ ...action, engine: "rooms" }), false);
+  assert.equal(unsupported.owners.length, 0);
+  standard.local.window.close();
+  await standard.done;
+
+  const supported = fixture({ native: true });
+  const { local, done } = supported.open();
+  assert.equal(local.state.roomsCaptureAvailable, true);
+  await local.share.sources();
+  assert.equal(await local.share.submit({ ...action, engine: "rooms", region: true }), "preview");
+  assert.equal(typeof supported.owners[0].startNative, "function");
+  const selection = { ...action, region: { x: .1, y: .1, width: .8, height: .8 } };
+  assert.equal(await local.share.submit({ ...selection, engine: "standard" }), false);
+  assert.equal(await local.share.submit({ ...selection, engine: "rooms" }), true);
+  await done;
+  assert.equal(supported.grants[0].video, supported.owners[0].frame);
 });
 
 test("the real snapshot supplies crop coordinates in the original dialog", async () => {

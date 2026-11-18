@@ -18,6 +18,8 @@ To open YouTube videos from the browser extension, start the installed app once 
 
 Open a live channel and click **Share screen** to choose the screen or window, quality and audio together. For a region, enable the crop option and select the area in the preview before starting. Linux systems using Wayland ask for permission in the system source picker.
 
+On supported desktops, the capture settings offer **Standard** and **Rooms Capture**. Standard is the default. Rooms Capture requires Windows 10 version 1903 or later with compatible D3D11 graphics. On Linux, select it in the native capture dialog when offered. The option appears when the corresponding backend is available.
+
 On Linux, set **Stream audio** to **Application audio** or **System audio** and choose the output when prompted. For application audio, start playback in the app so its output appears in the picker. System audio includes everything played through the selected device. The AppImage uses the PipeWire tools `pw-dump` and `pw-record` from your system for these modes.
 
 On Windows 11, choose **Application audio** and play sound in the app so it appears in the audio picker. For **System audio** on Windows 10 or 11, choose the playback device you want to stream. If your chosen source disconnects, start sharing again to select a source.

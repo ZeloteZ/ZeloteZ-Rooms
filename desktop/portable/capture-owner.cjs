@@ -16,7 +16,7 @@ function trustedSession() {
   ownerSession = session.fromPartition("rooms-trusted-capture-owner");
   const permission = (contents, name, details) => {
     const owner = owners.get(contents?.id);
-    return Boolean(owner && name === "display-capture" && details.isMainFrame && owner.owns(contents.mainFrame));
+    return Boolean(owner?.displayMedia && name === "display-capture" && details.isMainFrame && owner.owns(contents.mainFrame));
   };
   ownerSession.setPermissionCheckHandler((contents, name, _origin, details) => permission(contents, name, details));
   ownerSession.setPermissionRequestHandler((contents, name, callback, details) => callback(permission(contents, name, details)));
@@ -36,15 +36,16 @@ function sender(event) {
 
 ipcMain.on("rooms:capture-owner-reply", (event, id, value, error) => sender(event)?.reply(id, value, error));
 ipcMain.on("rooms:capture-owner-ended", event => sender(event)?.ended());
+ipcMain.on("rooms:capture-owner-native-ready", event => sender(event)?.nativeReady());
 
-function createCaptureOwner({ source, valid, onEnded }) {
+function createCaptureOwner({ source, valid, onEnded, startNative }) {
   const media = trustedSession();
   const window = new BrowserWindow({ width: 2, height: 2, useContentSize: true, show: false, frame: false,
     skipTaskbar: true, focusable: false, backgroundColor: "#000000",
     webPreferences: { session: media, preload: path.join(__dirname, "capture-owner-preload.cjs"),
       sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false } });
   const contents = window.webContents, contentsId = contents.id, pending = new Map();
-  let closed = false, request = 0, granted = false, monitor;
+  let closed = false, request = 0, granted = false, monitor, nativeCapture;
   const owns = frame => !closed && valid() && frame && !frame.detached && frame === contents.mainFrame && frame.url === address;
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
   contents.on("will-frame-navigate", event => event.preventDefault());
@@ -54,6 +55,7 @@ function createCaptureOwner({ source, valid, onEnded }) {
     if (closed) return;
     closed = true;
     clearInterval(monitor);
+    nativeCapture?.close();
     owners.delete(contentsId);
     for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error("Capture cancelled")); }
     pending.clear();
@@ -63,9 +65,18 @@ function createCaptureOwner({ source, valid, onEnded }) {
   contents.once("render-process-gone", ended);
   window.once("closed", ended);
   const owner = {
-    close, ended, owns,
+    close, ended, owns, displayMedia: !startNative,
+    nativeReady() {
+      if (!startNative || nativeCapture || !owns(contents.mainFrame)) return;
+      const target = () => owns(contents.mainFrame) ? contents.mainFrame : null;
+      try {
+        const capture = startNative(source, target, ended);
+        if (closed) capture.close();
+        else nativeCapture = capture;
+      } catch { ended(); }
+    },
     grant(event, callback) {
-      if (granted || !event.videoRequested || event.audioRequested || !event.userGesture || !owns(event.frame)) return callback(null);
+      if (startNative || granted || !event.videoRequested || event.audioRequested || !event.userGesture || !owns(event.frame)) return callback(null);
       granted = true;
       callback({ video: source });
     },
@@ -82,7 +93,7 @@ function createCaptureOwner({ source, valid, onEnded }) {
   const ready = (async () => {
     await window.loadFile(page);
     if (closed || !valid()) throw new Error("Capture cancelled");
-    return contents.executeJavaScript("window.roomsStartLocalCapture()", true);
+    return contents.executeJavaScript(startNative ? "window.roomsStartLocalCapture({ native: true })" : "window.roomsStartLocalCapture()", true);
   })();
   // The UI can cancel while the operating system is still opening a source.
   ready.catch(ended);
@@ -104,6 +115,7 @@ function createCaptureOwner({ source, valid, onEnded }) {
       const dimensions = await command("dimensions");
       const geometry = captureGeometry(dimensions, options);
       if (closed || !valid()) throw new Error("Capture cancelled");
+      nativeCapture?.setFrameRate(geometry.fps);
       window.setContentSize(geometry.width, geometry.height);
       await command("configure", geometry);
       return contents.mainFrame;

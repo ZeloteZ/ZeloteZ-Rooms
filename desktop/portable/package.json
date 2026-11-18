@@ -1,6 +1,6 @@
 {
   "name": "zelotez-rooms-desktop",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "ZeloteZ Rooms desktop client",
   "author": "ZeloteZ",
   "desktopName": "de.zelotez.rooms.desktop",
@@ -10,8 +10,11 @@
   "scripts": {
     "start": "electron .",
     "build:win-audio": "node windows-audio/build.cjs",
-    "prebuild:win": "npm run build:win-audio",
+    "build:win-video": "node windows-video/build.cjs",
+    "prebuild:win": "npm run build:win-audio && npm run build:win-video",
     "build:win": "electron-builder --win nsis --x64 --publish never",
+    "build:linux-video": "bash linux-video/build.sh",
+    "prebuild:linux": "npm run build:linux-video",
     "build:linux": "electron-builder --linux AppImage --x64 --publish never"
   },
   "devDependencies": {
@@ -42,6 +45,10 @@
         "from": "windows-audio",
         "to": "windows-audio",
         "filter": ["rooms-windows-audio.exe"]
+      }, {
+        "from": "windows-video",
+        "to": "windows-video",
+        "filter": ["rooms-windows-capture.exe"]
       }]
     },
     "linux": {
@@ -54,6 +61,10 @@
         "from": "..",
         "to": "native-capture",
         "filter": ["capture_helper.py", "streamer.py", "media.py", "model.py", "app_audio.py", "i18n.py", "capture.css"]
+      }, {
+        "from": "linux-video",
+        "to": "native-capture",
+        "filter": ["libgstroomscapture.so"]
       }]
     },
     "electronFuses": {

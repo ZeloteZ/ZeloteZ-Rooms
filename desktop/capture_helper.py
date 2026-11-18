@@ -123,10 +123,11 @@ class CaptureSession:
 
 
 class CaptureApp(Adw.Application):
-    def __init__(self, session, preview=None):
+    def __init__(self, session, preview=None, *, engine="standard"):
         super().__init__(application_id="de.zelotez.Rooms.Capture", flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.session = session
         self.preview = preview
+        self.engine = engine
         self.window = None
         self.stdin = sys.stdin.fileno()
         self.buffer = b""
@@ -135,11 +136,11 @@ class CaptureApp(Adw.Application):
         if self.window is None:
             Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
             if self.preview is None:
-                self.window = CaptureWindow(self, self.session)
+                self.window = CaptureWindow(self, self.session, engine=self.engine)
             else:
                 self.session.on_live = self.hide_capture
                 self.session.on_finish = self.finish_embedded
-                self.window = CaptureWindow(self, self.session, preview_frame=self.preview.send_frame,
+                self.window = CaptureWindow(self, self.session, preview_frame=self.preview.send_frame, engine=self.engine,
                                             on_metrics=self.session.send_metrics)
             GLib.io_add_watch(self.stdin, GLib.PRIORITY_DEFAULT,
                               GLib.IOCondition.IN | GLib.IOCondition.HUP | GLib.IOCondition.ERR, self.read_command)
@@ -190,6 +191,9 @@ class CaptureApp(Adw.Application):
 
 
 def main(argv):
+    engine = "rooms" if argv[-1:] == ["--engine=rooms"] else "standard"
+    if engine == "rooms":
+        argv = argv[:-1]
     probe = argv in (["--probe"], ["--probe-embedded"])
     embedded = argv[2:] == ["--preview-fd", "3"]
     if not probe:
@@ -203,7 +207,7 @@ def main(argv):
     try:
         if not Gtk.init_check():
             raise RuntimeError("A graphical session is required for native capture.")
-        initialize_media(embedded or argv == ["--probe-embedded"])
+        initialize_media(embedded or argv == ["--probe-embedded"], engine=engine)
         preview = PreviewPipe(3) if embedded else None
     except (GLib.Error, OSError, RuntimeError) as error:
         print(error, file=sys.stderr)
@@ -212,7 +216,7 @@ def main(argv):
         print("ok", flush=True)
         return 0
     GLib.set_application_name(i18n.APP_NAME)
-    return CaptureApp(CaptureSession(origin), preview).run([sys.argv[0]])
+    return CaptureApp(CaptureSession(origin), preview, engine=engine).run([sys.argv[0]])
 
 
 if __name__ == "__main__":

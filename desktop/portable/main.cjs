@@ -12,6 +12,7 @@ const { detachedVideo } = require("./detached-video.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
 const { registerLinuxShareLink } = require("./linux-share-link.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
+const { probeWindowsCapture, startWindowsCapture } = require("./windows-capture.cjs");
 const { createRememberedLogin } = require("./remembered-login.cjs");
 const { checkIntervals, findUpdate, latestReleasePage, releasePage } = require("./release-updates.cjs");
 const { parseShareLink, scheme: shareScheme, shareLinkFromArguments } = require("./share-link.cjs");
@@ -51,6 +52,7 @@ let desktopSettings = { language: "system", appearance: "dark", notifications: t
 let settingsWrites = Promise.resolve();
 let language = "en";
 let captureProgram;
+let windowsCaptureProgram;
 let pendingShare = shareLinkFromArguments(process.argv, serverOrigin);
 const text = (en, de, zh) => language === "zh-CN" ? zh : language === "de" ? de : en;
 const preferenceOptions = { language: ["system", "en", "de", "zh-CN"], appearance: ["dark", "system", "light"],
@@ -640,6 +642,7 @@ function installPermissions(window, web, origin, media, isActive) {
     (mode, sources) => choose(window, "audio", sources, { audioMode: mode, sources: sources.map(source => ({ name: source.title })) }));
   const configureShare = installShareSetup(web, {
     allowed: canShare, audio, portal: wayland, createOwner: createCaptureOwner, defaultLanguage: () => language,
+    startNative: windowsCaptureProgram ? (source, frame, ended) => startWindowsCapture(windowsCaptureProgram, source, frame, ended) : null,
     showDialog: state => localWindow("share", state, window),
   });
   const allowed = (contents, target, main) => isActive()
@@ -943,7 +946,7 @@ if (process.platform === "linux" && app.commandLine.hasSwitch("no-sandbox")) {
     const legacyLinuxAddress = await loadSettings();
     applyPreferences();
     await rm(path.join(app.getPath("userData"), "desktop-release-token.bin"), { force: true }).catch(() => {});
-    captureProgram = await nativeHelper();
+    [captureProgram, windowsCaptureProgram] = await Promise.all([nativeHelper(), probeWindowsCapture()]);
     const supplied = process.env.ZELOTEZ_ROOMS_ORIGIN;
     const origin = supplied === undefined ? desktopSettings.origin : serverOrigin(supplied);
     if (origin) {

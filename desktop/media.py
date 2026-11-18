@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from functools import lru_cache
 import os
+from pathlib import Path
 from queue import SimpleQueue
 from threading import Event, Thread
 
@@ -26,6 +28,21 @@ JPEG_PREVIEW_PIPELINE = (
     "video/x-raw,format=I420,width=640,height=360,pixel-aspect-ratio=1/1 ! jpegenc quality=70 ! "
     "appsink name=local_preview sync=false async=false emit-signals=true max-buffers=1 drop=true wait-on-eos=false"
 )
+
+
+@lru_cache(maxsize=1)
+def rooms_capture_available():
+    here = Path(__file__).resolve().parent
+    library = here / "libgstroomscapture.so"
+    if not library.is_file():
+        library = here / "portable" / "linux-video" / library.name
+    if not library.is_file():
+        return False
+    try:
+        plugin = Gst.Plugin.load_file(str(library))
+    except GLib.Error:
+        return False
+    return plugin is not None and Gst.ElementFactory.find("roomspipewiresrc") is not None
 
 
 @dataclass(frozen=True)
@@ -108,7 +125,16 @@ class CapturePipeline:
         self.publish_pad = None
 
     @classmethod
-    def from_portal(cls, fd, node_id, serial):
+    def from_portal(cls, fd, node_id, serial, *, engine="standard"):
+        if engine == "rooms":
+            if not rooms_capture_available():
+                raise RuntimeError(t("Rooms Capture is unavailable on this system."))
+            capture = cls("roomspipewiresrc name=source")
+            capture.source.set_property("portal-fd", fd)
+            capture.source.set_property("node-id", node_id)
+            if serial:
+                capture.source.set_property("node-serial", serial)
+            return capture
         capture = cls("pipewiresrc name=source client-name=ZeloteZ on-disconnect=error keepalive-time=125")
         capture.source.set_property("fd", fd)
         if serial and capture.source.find_property("target-object"):

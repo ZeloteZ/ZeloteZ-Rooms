@@ -415,6 +415,7 @@ export default Object.freeze({
   "Share options": "共享选项",
   "Share screen": "共享屏幕",
   "Share video": "分享视频",
+  "Share Video": "分享视频",
   "Share your screen": "共享你的屏幕",
   "Share YouTube video": "分享 YouTube 视频",
   "Shared an attachment": "分享了一个附件",

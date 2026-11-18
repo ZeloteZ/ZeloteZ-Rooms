@@ -228,7 +228,7 @@ export async function renderTopics(context) {
     el("header", { class: "home-heading page-heading" },
       el("h1", {}, greeting(context.user.displayName)),
       el("div", { class: "inline home-room-actions" },
-        button(t("Stream Now", "Jetzt streamen"), () => openStreamNow(context), { class: "primary", "aria-haspopup": "dialog" }),
+        button(t("Share Video", "Video teilen"), () => openStreamNow(context), { class: "primary", "aria-haspopup": "dialog" }),
         button("⚙", () => roomActions(context), {
           class: "icon-button", title: t("Room actions", "Raumaktionen"), "aria-label": t("Room actions", "Raumaktionen"), "aria-haspopup": "dialog",
         }))),

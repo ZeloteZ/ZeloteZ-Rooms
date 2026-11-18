@@ -5,6 +5,9 @@ node_modules/
 desktop/portable/dist/
 /desktop/portable/windows-audio/rooms-windows-audio.exe
 /desktop/portable/windows-audio/rooms-windows-audio.obj
+/desktop/portable/windows-video/rooms-windows-capture.exe
+/desktop/portable/windows-video/rooms-windows-capture.obj
+/desktop/portable/linux-video/libgstroomscapture.so
 /desktop-downloads/
 /.local-release/
 __pycache__/

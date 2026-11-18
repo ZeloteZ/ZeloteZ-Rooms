@@ -150,6 +150,7 @@ function setVideo(state, setup, selected) {
 function captureOwner(state, setup, video) {
   if (!state.owner) {
     const owner = state.createOwner({ source: video,
+      ...(setup.engine === "rooms" ? { startNative: state.startNative } : {}),
       valid: () => (state.setup === setup || state.issued?.id === setup.id) && state.valid(setup.frame),
       onEnded: () => { if (state.owner === owner) clear(state); } });
     state.owner = owner;
@@ -159,12 +160,16 @@ function captureOwner(state, setup, video) {
 
 async function submit(state, setup, input) {
   if (!state.open(setup) || !input || typeof input !== "object" || !Number.isInteger(input.source)) return false;
+  const engine = input.engine ?? "standard";
+  if (!(engine === "standard" || engine === "rooms" && state.startNative) ||
+      setup.engine && setup.engine !== engine) return false;
   const video = setup.video?.[input.source];
   if (!video || (setup.selectedVideo && setup.selectedVideo !== video)
       || !resolutions.includes(input.height) || !frameRates.includes(input.fps)) return false;
   if (!["configuring", "cropping"].includes(setup.phase)) return false;
 
   if (input.region === true && setup.phase === "configuring") {
+    setup.engine = engine;
     setup.selectedVideo = video;
     setup.phase = "preparing-preview";
     timeout(state, setup, 12_000);
@@ -186,6 +191,7 @@ async function submit(state, setup, input) {
   const selectedAudio = audioMode !== "none" && setup.audio?.mode === audioMode && Number.isInteger(audioSource)
     ? setup.audio.sources?.[audioSource] : undefined;
   if (audioMode === "none" ? audioSource !== null : !state.audio.modes.includes(audioMode) || !selectedAudio) return false;
+  setup.engine = engine;
   setup.result = {
     // The remote page receives only already-transformed output, never the raw
     // source or a crop that it is responsible for enforcing.
@@ -213,9 +219,9 @@ async function submit(state, setup, input) {
   } catch { clear(state); return false; }
 }
 
-function installShareSetup(web, { allowed, audio, portal, showDialog, createOwner, defaultLanguage = () => "en" }) {
+function installShareSetup(web, { allowed, audio, portal, showDialog, createOwner, startNative, defaultLanguage = () => "en" }) {
   const state = {
-    setup: null, issued: null, owner: null, audio, portal, createOwner,
+    setup: null, issued: null, owner: null, audio, portal, createOwner, startNative,
     valid: frame => Boolean(frame && !frame.detached && frame === web.mainFrame && allowed(frame.url)),
     open: setup => state.setup === setup && setup.local && !setup.local.window.isDestroyed() && state.valid(setup.frame),
   };
@@ -238,6 +244,7 @@ function installShareSetup(web, { allowed, audio, portal, showDialog, createOwne
     timeout(state, setup, 300_000);
     return new Promise(resolve => {
       const local = setup.local = showDialog({ language: setup.language, portal,
+        ...(startNative ? { roomsCaptureAvailable: true } : {}),
         audioModes: setup.legacy ? [] : audio.modes, ...(setup.legacy ? { legacyAudio: true } : {}) });
       local.share = {
         sources: () => videoSources(state, setup),

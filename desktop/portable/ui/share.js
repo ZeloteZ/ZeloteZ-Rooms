@@ -5,6 +5,7 @@ window.roomsShare = function roomsShare(state) {
   const get = id => document.getElementById(id);
   const t = (en, de, zh) => state.language === "zh-CN" ? zh : state.language === "de" ? de : en;
   const sourceSelect = get("share-source"), audioSelect = get("share-audio-source");
+  const engineSelect = get("share-engine");
   const modeSelect = get("share-audio-mode"), cropToggle = get("share-crop");
   const image = get("share-preview-image"), stage = get("share-preview-stage");
   const cropArea = get("share-crop-area"), cropBox = get("share-crop-rect");
@@ -29,6 +30,7 @@ window.roomsShare = function roomsShare(state) {
     "share-screen": t("Screen", "Bildschirm", "屏幕"),
     "share-window": t("Window", "Fenster", "窗口"),
     "share-options-heading": t("Stream settings", "Stream-Einstellungen", "直播设置"),
+    "share-engine-label": t("Capture engine", "Aufnahmeverfahren", "采集方式"),
     "share-quality-label": t("Resolution", "Auflösung", "分辨率"),
     "share-fps-label": t("Frame rate", "Bildrate", "帧率"),
     "share-crop-label": t("Share a selected area", "Ausgewählten Bereich teilen", "共享选定区域"),
@@ -39,6 +41,9 @@ window.roomsShare = function roomsShare(state) {
     "share-privacy-note": t("Your screen is shared only after you select Start sharing.", "Dein Bildschirm wird erst nach „Teilen starten“ übertragen.", "点击“开始共享”后才会传输画面。"),
   };
   for (const [id, label] of Object.entries(labels)) get(id).textContent = label;
+  get("share-engine-field").hidden = !state.roomsCaptureAvailable;
+  engineSelect.options[0].textContent = t("Standard", "Standard", "标准");
+  engineSelect.options[1].textContent = t("Rooms Capture", "Rooms Capture", "Rooms 采集");
   get("share-source-kinds").setAttribute("aria-label", t("Source type", "Quellentyp", "来源类型"));
   cropArea.setAttribute("aria-label", t("Selected sharing area", "Ausgewählter Freigabebereich", "选定的共享区域"));
   const audioLabels = [t("No audio", "Kein Ton", "无音频"), t("Application audio", "Anwendungston", "应用音频"), t("System audio", "Systemton", "系统音频")];
@@ -77,6 +82,7 @@ window.roomsShare = function roomsShare(state) {
       button.disabled = loading || submitting || previewLocked;
     }
     cropToggle.disabled = sourceMissing || submitting || previewWaiting;
+    engineSelect.disabled = submitting || previewLocked;
     modeSelect.disabled = submitting || audioLoading;
     get("share-height").disabled = submitting;
     get("share-fps").disabled = submitting;
@@ -262,6 +268,7 @@ window.roomsShare = function roomsShare(state) {
     render();
     try {
       const result = await bridge.submit({ source: selected, height: Number(get("share-height").value), fps: Number(get("share-fps").value),
+        ...(state.roomsCaptureAvailable ? { engine: engineSelect.value } : {}),
         region: cropToggle.checked ? hasActualPreview() ? { ...region } : true : null,
         audioMode: modeSelect.value, audioSource: modeSelect.value === "none" ? null : Number(audioSelect.value) });
       if (result === true) { closed = true; return; }
