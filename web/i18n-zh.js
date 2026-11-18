@@ -55,7 +55,7 @@ export default Object.freeze({
   "Add to queue": "添加到播放队列",
   "Add video": "添加视频",
   "All room members": "所有房间成员",
-  "All rooms": "所有房间",
+  "Home": "首页",
   "Allow design changes": "允许修改外观",
   "Allow guests with the link": "允许持有链接的访客访问",
   "Application audio": "应用音频",

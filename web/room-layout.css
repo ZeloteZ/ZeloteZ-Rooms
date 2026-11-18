@@ -89,6 +89,16 @@
 }
 
 .room-header .room-breadcrumb a:hover { color: #fff; text-decoration: underline; }
+.room-header .room-breadcrumb-home a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 26px;
+  padding-inline: 4px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
 .room-header .room-breadcrumb [aria-current] { color: var(--accent); font-weight: 650; }
 .room-header .room-actions { flex: 0 1 auto; min-inline-size: 0; }
 .room-header .room-actions .button { min-block-size: 34px; padding: 5px 8px; }

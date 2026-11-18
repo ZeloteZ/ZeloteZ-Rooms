@@ -611,7 +611,7 @@ function roomHeading(topic, title = topic.title) {
   const channelCrumb = el("li", { class: "room-breadcrumb-channel", hidden: true }, separator(), channelLabel);
   const breadcrumb = el("nav", { class: "room-breadcrumb", "aria-label": t("Breadcrumb", "Navigationspfad") },
     el("ol", { class: "room-breadcrumb-list", role: "list" },
-      el("li", { class: "room-breadcrumb-home" }, el("a", { href: "#/rooms" }, t("All rooms", "Alle Räume"))),
+      el("li", { class: "room-breadcrumb-home" }, el("a", { href: "#/rooms" }, t("Home", "Home"))),
       el("li", { class: "room-breadcrumb-room" }, separator(), heading),
       channelCrumb));
   const header = el("div", { class: "room-hero section-heading", "data-tutorial": "room-hero" },
