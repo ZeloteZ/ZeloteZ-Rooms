@@ -159,7 +159,7 @@ export function renderVault(context) {
     return kind === "other" ? "file" : kind;
   }
   function fileGlyph(entry) {
-    return { image: "▧", video: "▷", audio: "♪", pdf: "PDF", text: "≡", file: "▤" }[fileKind(entry)];
+    return { image: "▧", video: "▷", audio: "♪", pdf: "PDF", text: "≡", office: "▤", archive: "▣", file: "▤" }[fileKind(entry)];
   }
   function entryName(entry) { return entry.name || t("Encrypted item", "Verschlüsseltes Element"); }
   function isFolder(entry) { return entry.kind === "folder"; }
@@ -278,7 +278,7 @@ export function renderVault(context) {
     const name = entryName(entry);
     const kind = fileKind(entry);
     const openLabel = kind === "audio" || kind === "video" ? t("Play", "Abspielen")
-      : kind === "file" ? t("Open", "Öffnen") : t("Open and edit", "Öffnen und bearbeiten");
+      : kind === "file" || kind === "archive" ? t("Open", "Öffnen") : t("Open and edit", "Öffnen und bearbeiten");
     const primary = button(name, () => isFolder(entry) ? openFolder(entry.id) : openEntry(entry),
       { class: "ghost vault-entry-name", disabled: locked, title: name });
     const actions = el("details", { class: "vault-entry-menu" },

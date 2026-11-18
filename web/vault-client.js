@@ -7,6 +7,14 @@ export const BLOB_DOWNLOAD_LIMIT = 128 * 1024 * 1024;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const downloads = new Set();
+export function downloadVaultLocalBlob(blob, name) {
+  if (!(blob instanceof Blob) || blob.size > BLOB_DOWNLOAD_LIMIT) throw new Error(t(
+    "The local file is too large for this download.", "Die lokale Datei ist für diesen Download zu groß."));
+  const url = URL.createObjectURL(blob); downloads.add(url);
+  const anchor = document.createElement("a"); anchor.href = url; anchor.download = safeDownloadName(name); anchor.rel = "noopener noreferrer";
+  document.body.append(anchor); anchor.click(); anchor.remove();
+  setTimeout(() => { URL.revokeObjectURL(url); downloads.delete(url); }, 30000);
+}
 function revokeVaultDownloads() {
   for (const url of downloads) URL.revokeObjectURL(url);
   downloads.clear();

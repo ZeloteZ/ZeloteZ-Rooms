@@ -65,12 +65,14 @@ function selectionName(value) {
 }
 function fileType(name) {
   const extension = path.extname(name).slice(1).toLowerCase();
-  const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp",
-    mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mov: "video/quicktime",
-    mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/opus", m4a: "audio/mp4", aac: "audio/aac", weba: "audio/webm",
+  const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon",
+    mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mov: "video/quicktime", mkv: "video/x-matroska",
+    mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/opus", m4a: "audio/mp4", aac: "audio/aac", weba: "audio/webm", mka: "audio/x-matroska",
     pdf: "application/pdf", txt: "text/plain", md: "text/markdown", markdown: "text/markdown", csv: "text/csv", tsv: "text/tab-separated-values",
     json: "application/json", xml: "application/xml", svg: "image/svg+xml", html: "text/html", htm: "text/html", css: "text/css", vtt: "text/vtt",
-    zip: "application/zip" };
+    zip: "application/zip", tar: "application/x-tar", tgz: "application/gzip", gz: "application/gzip",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
   return Object.hasOwn(types, extension) ? types[extension] : "application/octet-stream";
 }
 async function planSelection(selected, { signal, maxBytes = MAX_ARCHIVE_BYTES, maxEntries = MAX_ENTRIES, maxDepth = MAX_DEPTH } = {}) {

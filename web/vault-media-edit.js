@@ -4,9 +4,9 @@ export const VAULT_EDITOR_LIMITS = Object.freeze({ inputBytes: 128 * 1024 ** 2, 
   pdfBytes: 64 * 1024 ** 2, imagePixels: 32 * 1024 ** 2, pdfPages: 500 });
 
 const textExtensions = new Set("txt md markdown csv tsv json jsonl yaml yml xml html htm css js mjs cjs jsx ts tsx py sh bash ini conf config toml sql srt vtt ics vcf svg tex rb go rs c cpp h hpp java php ps1 log env gitignore".split(" "));
-const imageExtensions = new Set("png jpg jpeg webp gif bmp avif".split(" "));
-const videoExtensions = new Set("mp4 webm ogv mov m4v".split(" "));
-const audioExtensions = new Set("mp3 wav flac ogg oga m4a aac opus weba".split(" "));
+const imageExtensions = new Set("png jpg jpeg webp gif bmp avif ico".split(" "));
+const videoExtensions = new Set("mp4 webm ogv mov m4v mkv".split(" "));
+const audioExtensions = new Set("mp3 wav flac ogg oga m4a aac opus weba mka".split(" "));
 
 export function vaultFileKind(entry = {}) {
   const name = String(entry.name ?? "").toLowerCase();
@@ -14,10 +14,13 @@ export function vaultFileKind(entry = {}) {
   const type = String(entry.type ?? "").toLowerCase().split(";", 1)[0].trim();
   if (type === "image/svg+xml" || textExtensions.has(extension) || type.startsWith("text/") ||
       ["application/json", "application/xml", "application/x-yaml", "application/javascript"].includes(type)) return "text";
+  if (["docx", "xlsx"].includes(extension) || ["application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"].includes(type)) return "office";
+  if (/\.(?:zip|tar|tgz|tar\.gz)$/u.test(name) || ["application/zip", "application/x-zip-compressed", "application/x-tar"].includes(type)) return "archive";
   if (type === "application/pdf" || extension === "pdf") return "pdf";
-  if (/^image\/(png|jpeg|webp|gif|bmp|avif)$/u.test(type)) return "image";
-  if (/^video\/(mp4|webm|ogg|quicktime)$/u.test(type)) return "video";
-  if (/^audio\/(mpeg|mp3|wav|x-wav|flac|ogg|mp4|aac|webm|opus)$/u.test(type)) return "audio";
+  if (/^image\/(png|jpeg|webp|gif|bmp|avif|x-icon|vnd\.microsoft\.icon)$/u.test(type)) return "image";
+  if (/^video\/(mp4|webm|ogg|quicktime|x-matroska|matroska)$/u.test(type)) return "video";
+  if (/^audio\/(mpeg|mp3|wav|x-wav|flac|ogg|mp4|aac|webm|opus|x-matroska|matroska)$/u.test(type)) return "audio";
   if (imageExtensions.has(extension)) return "image";
   if (videoExtensions.has(extension)) return "video";
   if (audioExtensions.has(extension)) return "audio";
@@ -64,8 +67,52 @@ export function rasterImageType(bytes) {
   if (["GIF87a", "GIF89a"].includes(ascii(0, 6))) return "image/gif";
   if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
   if (bytes.length >= 14 && ascii(0, 2) === "BM") return "image/bmp";
-  if (bytes.length >= 16 && ascii(4, 8) === "ftyp" && (ascii(8, 12) === "avif" || ascii(8, 12) === "avis")) return "image/avif";
+  if (bytes.length >= 16 && ascii(4, 8) === "ftyp") {
+    if (["avif", "avis"].includes(ascii(8, 12))) return "image/avif";
+    const size = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0);
+    if (size >= 16 && size <= 4096 && size % 4 === 0) {
+      for (let offset = 16; offset + 4 <= Math.min(size, bytes.length); offset += 4) {
+        if (["avif", "avis"].includes(ascii(offset, offset + 4))) return "image/avif";
+      }
+    }
+  }
+  if (bytes.length >= 6 && bytes[0] === 0 && bytes[1] === 0 && bytes[2] === 1 && bytes[3] === 0 &&
+      bytes[4] + bytes[5] * 256 >= 1 && bytes[4] + bytes[5] * 256 <= 256) return "image/x-icon";
   return null;
+}
+
+export async function validateIconImage(blob, { signal } = {}) {
+  const invalid = () => new Error(t("This icon is invalid or exceeds the local image limits.", "Dieses Icon ist ungültig oder überschreitet die lokalen Bildgrenzen."));
+  abortEditor(signal);
+  if (!(blob instanceof Blob) || blob.size < 22 || blob.size > VAULT_EDITOR_LIMITS.inputBytes) throw invalid();
+  const header = new Uint8Array(await blob.slice(0, 4102).arrayBuffer());
+  abortEditor(signal);
+  if (rasterImageType(header) !== "image/x-icon") throw invalid();
+  const view = new DataView(header.buffer), count = view.getUint16(4, true), directorySize = 6 + count * 16;
+  if (directorySize > header.byteLength) throw invalid();
+  for (let index = 0; index < count; index++) {
+    const start = 6 + index * 16, width = header[start] || 256, height = header[start + 1] || 256;
+    const size = view.getUint32(start + 8, true), offset = view.getUint32(start + 12, true);
+    if (header[start + 3] !== 0 || !size || offset < directorySize || offset + size > blob.size) throw invalid();
+    const bytes = new Uint8Array(await blob.slice(offset, offset + Math.min(size, 124)).arrayBuffer());
+    abortEditor(signal);
+    const image = new DataView(bytes.buffer);
+    if (rasterImageType(bytes) === "image/png") {
+      if (bytes.length < 24 || String.fromCharCode(...bytes.slice(12, 16)) !== "IHDR" ||
+          image.getUint32(16) !== width || image.getUint32(20) !== height) throw invalid();
+    } else {
+      if (bytes.length < 12) throw invalid();
+      const dibSize = image.getUint32(0, true);
+      if (![12, 40, 52, 56, 108, 124].includes(dibSize) || bytes.length < dibSize) throw invalid();
+      const actualWidth = dibSize === 12 ? image.getUint16(4, true) : image.getInt32(4, true);
+      const actualHeight = dibSize === 12 ? image.getUint16(6, true) : image.getInt32(8, true);
+      if (actualWidth !== width || actualHeight !== height * 2) throw invalid();
+      const bits = image.getUint16(dibSize === 12 ? 10 : 14, true);
+      if (![1, 4, 8, 16, 24, 32].includes(bits)) throw invalid();
+      if (dibSize >= 40 && (image.getUint32(20, true) > size || ![0, 3].includes(image.getUint32(16, true)))) throw invalid();
+    }
+  }
+  return { images: count };
 }
 
 export async function mediaDuration(media, { signal } = {}) {

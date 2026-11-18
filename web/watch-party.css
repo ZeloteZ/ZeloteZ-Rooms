@@ -186,7 +186,7 @@
 #dialog progress { inline-size: 100%; accent-color: var(--accent); }
 .vault-room-media { display: grid; place-items: center; min-inline-size: 0; min-block-size: 0; inline-size: 100%; block-size: 100%; overflow: hidden; }
 .vault-room-media > p { max-inline-size: 55ch; padding: 18px; text-align: center; }
-.vault-room-file { inline-size: 100%; block-size: 100%; object-fit: contain; }
+.vault-room-file { inline-size: 100%; min-inline-size: 0; block-size: 100%; min-block-size: 0; object-fit: contain; }
 .vault-room-audio { align-content: center; gap: 18px; padding: 20px; }
 .vault-room-audio > strong { max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vault-room-audio audio { block-size: 0; inline-size: 0; }

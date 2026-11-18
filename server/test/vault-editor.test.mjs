@@ -11,7 +11,7 @@ test('file classification keeps executable markup in a plain-text editor and ref
   for (const entry of [{ name: 'page.html', type: 'text/html' }, { name: 'drawing.svg', type: 'image/svg+xml' },
     { name: 'app.js', type: 'application/javascript' }, { name: 'config.xml', type: 'application/xml' }, { name: 'data.csv' }]) assert.equal(media.vaultFileKind(entry), 'text');
   for (const [name, kind] of [['photo.png', 'image'], ['clip.mp4', 'video'], ['voice.mp3', 'audio'], ['manual.pdf', 'pdf']]) assert.equal(media.vaultFileKind({ name }), kind);
-  for (const name of ['file.exe', 'file.docx', 'file.xlsx', 'file.zip']) assert.equal(media.vaultFileKind({ name }), 'other');
+  for (const name of ['file.exe', 'file.doc', 'file.xls', 'file.heic', 'file.tiff']) assert.equal(media.vaultFileKind({ name }), 'other');
   assert.equal(media.vaultFileKind({ name: 'untrusted.html', type: 'image/png' }), 'text');
   assert.equal(media.vaultFileKind({ name: 'sound-edited.webm', type: 'audio/webm;codecs=opus' }), 'audio');
   assert.equal(media.vaultFileKind({ name: 'clip.ogg', type: 'video/ogg' }), 'video');

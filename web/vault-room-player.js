@@ -1,6 +1,7 @@
 import { t } from "./i18n.js";
 import { openVaultWatch } from "./vault-watch.js";
 import { editorEvent, mediaDuration } from "./vault-media-edit.js";
+import { mountVaultMediaLanguages } from "./vault-language-controls.js";
 
 export function createVaultRoomPlayer(party, channelId, handlers, ownerDocument, signal) {
   const scope = new AbortController();
@@ -12,7 +13,8 @@ export function createVaultRoomPlayer(party, channelId, handlers, ownerDocument,
   note.setAttribute("role", "status");
   note.textContent = t("Decrypting Vault media on this device…", "Vault-Medium wird auf diesem Gerät entschlüsselt …");
   element.append(note);
-  let media, url, source, name = "", duration = 0, volume = 1, muted = false, stopped = false;
+  let media, url, source, decryptedBlob, languages, name = "", duration = 0, volume = 1, muted = false, stopped = false;
+  let playbackReady = false, wasSwitching = false;
   const visible = () => {
     const bounds = element.getBoundingClientRect();
     const view = element.ownerDocument.defaultView;
@@ -32,6 +34,7 @@ export function createVaultRoomPlayer(party, channelId, handlers, ownerDocument,
     visibility?.disconnect();
     ownerDocument.removeEventListener("visibilitychange", visible);
     source?.close(); source = null;
+    languages?.dispose(); languages = null; decryptedBlob = null; playbackReady = false;
     if (media) { media.pause(); media.removeAttribute("src"); media.load(); }
     if (url) URL.revokeObjectURL(url);
     url = null; name = ""; media = null;
@@ -47,14 +50,15 @@ export function createVaultRoomPlayer(party, channelId, handlers, ownerDocument,
       } });
       if (lifetime.aborted) { source.close(); source = null; return; }
       name = source.name;
-      const audio = source.type.startsWith("audio/");
+      const audio = source.kind === "audio" || source.type.startsWith("audio/");
       media = ownerDocument.createElement(audio ? "audio" : "video");
       media.className = "vault-room-file";
       media.setAttribute("aria-label", name);
       media.preload = "auto"; media.playsInline = true;
       media.volume = volume; media.muted = muted;
       const ready = editorEvent(media, "loadedmetadata", { signal: lifetime });
-      url = URL.createObjectURL(source.blob);
+      decryptedBlob = source.blob;
+      url = URL.createObjectURL(decryptedBlob);
       media.src = url;
       source.close(); source = null;
       if (audio) {
@@ -66,14 +70,36 @@ export function createVaultRoomPlayer(party, channelId, handlers, ownerDocument,
       } else element.replaceChildren(media);
       await ready;
       if (lifetime.aborted) return;
+      if (media.readyState < 2) await editorEvent(media, "loadeddata", { signal: lifetime });
+      if (lifetime.aborted) return;
+      const checkPicture = () => {
+        if (!audio && (!(media.videoWidth > 0) || !(media.videoHeight > 0))) throw new Error(t(
+          "This device cannot decode the video picture. Download the file for another player.",
+          "Dieses Gerät kann das Videobild nicht dekodieren. Lade die Datei für einen anderen Player herunter."));
+      };
+      checkPicture();
       duration = await mediaDuration(media, { signal: lifetime });
       if (lifetime.aborted) return;
-      media.addEventListener("ended", () => { if (!stopped) handlers.onEnded?.(); });
-      media.addEventListener("error", () => { if (!stopped) handlers.onError?.(); });
+      languages = mountVaultMediaLanguages(media, decryptedBlob, { signal: lifetime, ownerDocument,
+        onChange(state) {
+          if (stopped || !playbackReady) return;
+          const finished = wasSwitching && !state.switching;
+          wasSwitching = state.switching;
+          if (finished) {
+            try { checkPicture(); handlers.onReady?.(); visible(); }
+            catch (error) { handlers.onError?.(error); }
+          }
+        },
+      });
+      element.append(languages.element);
+      media.addEventListener("ended", () => { if (!stopped && !languages?.switching) handlers.onEnded?.(); });
+      media.addEventListener("error", () => { if (!stopped && !languages?.switching) handlers.onError?.(); });
+      playbackReady = true;
       handlers.onReady?.(); visible();
     } catch (error) {
       if (lifetime.aborted) return;
       source?.close(); source = null;
+      languages?.dispose(); languages = null; decryptedBlob = null; playbackReady = false;
       if (media) { media.pause(); media.removeAttribute("src"); media.load(); media = null; }
       if (url) { URL.revokeObjectURL(url); url = null; }
       element.replaceChildren(note);
@@ -85,9 +111,9 @@ export function createVaultRoomPlayer(party, channelId, handlers, ownerDocument,
   })();
   return {
     element, vaultId: party.id, privateTitle: () => name,
-    play: () => media?.play().catch(error => { if (!stopped && error.name === "NotAllowedError") handlers.onBlocked?.(); }),
-    pause: () => media?.pause(),
-    seek(seconds) { if (media && Number.isFinite(seconds)) media.currentTime = Math.max(0, Math.min(seconds, duration || seconds)); },
+    play: () => !languages?.switching && media?.play().catch(error => { if (!stopped && error.name === "NotAllowedError") handlers.onBlocked?.(); }),
+    pause: () => { if (!languages?.switching) media?.pause(); },
+    seek(seconds) { if (media && !languages?.switching && Number.isFinite(seconds)) media.currentTime = Math.max(0, Math.min(seconds, duration || seconds)); },
     setVolume(value, nextMuted) { volume = value; muted = nextMuted; if (media) { media.volume = value; media.muted = nextMuted; } },
     getTime: () => media?.currentTime ?? 0, getDuration: () => duration, destroy,
   };

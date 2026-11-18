@@ -30,22 +30,32 @@ Select a file name, **Play** for audio/video, or **Open and edit** for an editab
 
 | File type | Available tools | Local limits |
 | --- | --- | --- |
-| Images, including PNG, JPEG, WebP, GIF, BMP, and AVIF | Crop edges, rotate, flip horizontally or vertically, and export as PNG, JPEG, or WebP | 128 MiB input and 33,554,432 decoded pixels |
-| Videos and audio that your browser can decode | Local player with playback controls | 128 MiB input; available codecs depend on your browser |
+| Images, including PNG, JPEG, WebP, GIF, BMP, AVIF, and validated ICO icons | Crop edges, rotate, flip horizontally or vertically, and export as PNG, JPEG, or WebP | 128 MiB input and 33,554,432 decoded pixels |
+| Videos and audio, including supported MKV files | Local player with playback controls | 128 MiB input; available codecs depend on your browser and operating system |
 | PDF | Preview individual pages, reorder, rotate, delete pages, and position text notes | 64 MiB input, up to 500 pages; at least one page must remain |
-| UTF-8 text, Markdown, JSON, CSV, configuration files, and common source-code formats | Edit text, toggle line wrapping, and see line/character counts; JSON syntax is checked before saving | 2 MiB of UTF-8 text |
+| Text, Markdown, JSON, CSV, configuration files, and common source-code formats | Edit UTF-8 or BOM-marked UTF-16 text, toggle line wrapping, and see line/character counts; JSON syntax is checked before saving | 2 MiB including encoding and BOM |
+| DOCX documents and XLSX spreadsheets | Edit paragraphs, tables, and spreadsheet cells; save a simplified DOCX or XLSX copy | 32 MiB input; 2 MiB of text, 20,000 cells, 2,000 rows, 64 columns per row, and 20 worksheets |
+| ZIP, TAR, TAR.GZ, and TGZ archives | Browse folders, open supported member files locally, download a member, or save it as a new encrypted Vault file | 64 MiB input, 128 MiB expanded content, 2,000 entries; up to 32 MiB per extracted file |
 
 Image exports are static and remove the source image's metadata; animated images become a static image. Exported editing copies are limited to 128 MiB.
 
-Audio and video open in a local player and are not edited or exported in Vault. Playback requires a codec supported by your browser. For unsupported codecs or files above the player limit, download the original and open it in a suitable local application.
+Audio and video open in a local player and are not edited or exported in Vault. MKV playback supports combinations such as H.264/AAC and VP9/Opus when the browser and operating system provide the required codecs. An MKV filename alone does not guarantee playback. For unsupported codecs or files above the player limit, download the original and open it in a suitable local application.
+
+For supported MKV and MP4 files, **Audio** and **Subtitles** controls appear when multiple audio tracks or embedded subtitles are available. **Original audio (default)** restores the file's initial audio choice; **Off** disables subtitles. Embedded SRT and simple ASS text in MKV, and `mov_text` subtitles in MP4, can be displayed as passive text captions. ASS layout and styling are not preserved. Bitmap subtitle formats such as PGS are unavailable and shown as disabled choices; download the original for a suitable local player. Tracks come from the locally decrypted file, without contacting an external subtitle service. Your choices apply only on your device, including during Vault playback in a room: every viewer chooses independently, and the room's shared playback state and other viewers' language choices are unchanged.
+
+Text copies preserve the detected UTF-8 or UTF-16 LE/BE encoding, BOM, and line-ending style. UTF-16 input needs a BOM for automatic detection. Invalid Unicode and binary data are refused; other text encodings must be converted in a suitable local application first.
+
+Office editing creates a simplified copy of the document's paragraphs and tables or the workbook's cells. Complex layout, images, charts, and embedded objects are omitted. Formulas are displayed and saved as text; they are not calculated, and macros or external data connections are not run. Use the original in a suitable Office application when you need those features or exact layout preservation. The cell, row, and text limits apply across the entire document or workbook. Office contents are additionally limited to 16 MiB after decompression and 4 MiB per XML part.
+
+Inside an archive, select a file and choose **Open selected file**, **Download selected file**, or **Save to Vault**. Opening a member remains local. **Save to Vault** creates one new file under the member's name, with fresh encryption, in the original archive's Vault folder. For a member-shared archive, the copy goes to the root of **My vault**. Archive folders provide navigation; they are not imported as a Vault folder tree. The original archive and its shares stay unchanged. Larger members remain listed, but local opening, extraction, and individual downloads are disabled above 32 MiB; use **Download original archive** instead. The expanded-content limit also bounds extracted data during one opening. ZIP64, password-protected ZIPs, symbolic or hard links, and unsupported compression methods require a suitable local application. Unsafe or damaged archives are refused.
 
 PDF previews are passive. Saved PDF copies remove interactive links, forms, attachments, and embedded scripts. Added notes are embedded as image overlays, so their text is not selectable. Existing page content remains page content; this is page management and annotation, not a full document-layout editor. Password-protected or unsupported PDFs may not open.
 
-For images, PDFs, and text, choose a copy name and **Save encrypted copy**. Each save uploads a new file with fresh encryption; the original file and its existing shares remain unchanged. An edited copy of your own file is saved in the same folder. An edited copy of a member share is saved in the root of **My vault** and belongs to you; it does not change the sender's file. Saving a copy needs enough free Vault storage for the additional file. Share the new copy separately if needed.
+For images, PDFs, text, and supported Office files, choose a copy name and **Save encrypted copy**. Each save uploads a new file with fresh encryption; the original file and its existing shares remain unchanged. An edited copy of your own file is saved in the same folder. An edited copy of a member share is saved in the root of **My vault** and belongs to you; it does not change the sender's file. Saving a copy needs enough free Vault storage for the additional file. Share the new copy separately if needed.
 
 Unsaved changes remain only in the open editor. Closing an editor with unsaved edits asks for confirmation. Leaving Vault or signing out cancels work and discards local edits. There is no automatic draft recovery.
 
-Other formats, including office documents and archives, can be stored, shared, and downloaded for a suitable local application. They do not have built-in editing tools.
+Other formats can still be stored, shared, and downloaded for a suitable local application. Office formats beyond DOCX and XLSX, such as PPTX, ODT, ODS, and older DOC or XLS files, do not have built-in editing tools.
 
 ## Download files
 

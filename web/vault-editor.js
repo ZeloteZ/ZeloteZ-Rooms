@@ -1,6 +1,13 @@
 import { t } from "./i18n.js";
 import { button, closeDialog, el, field, notify, select, showDialog, status, tell } from "./ui.js";
-import { VAULT_EDITOR_LIMITS, abortEditor, canvasBlob, editedFileName, editorEvent, createVaultPlayback, formatMediaTime, imageCrop, mediaDuration, rasterImageType, vaultFileKind } from "./vault-media-edit.js";
+import { VAULT_EDITOR_LIMITS, abortEditor, canvasBlob, editedFileName, editorEvent, createVaultPlayback, formatMediaTime, imageCrop, mediaDuration, rasterImageType, validateIconImage, vaultFileKind } from "./vault-media-edit.js";
+import { decodeVaultText, encodeVaultText } from "./vault-text-codec.js";
+import { officeEditor } from "./vault-office-editor.js";
+import { VAULT_OFFICE_LIMITS } from "./vault-office.js";
+import { archiveViewer, archiveError } from "./vault-archive-viewer.js";
+import { VAULT_ARCHIVE_LIMITS } from "./vault-archive.js";
+import { downloadVaultLocalBlob } from "./vault-client.js";
+import { mountVaultMediaLanguages } from "./vault-language-controls.js";
 
 export { vaultFileKind, editedFileName } from "./vault-media-edit.js";
 
@@ -19,6 +26,7 @@ export async function openVaultEditor({ entry, client, signal, onSaved, onShare 
   let dirty = false, saving = false, builder = null, alive = true;
   const kind = vaultFileKind(entry);
   const playbackOnly = kind === "video" || kind === "audio";
+  const archiveOnly = kind === "archive";
   const filename = el("input", { type: "text", value: playbackOnly ? entry.name : editedFileName(entry.name, kind === "image" ? "png" : undefined),
     maxlength: 255, autocomplete: "off", spellcheck: false, "aria-label": t("Copy name", "Name der Kopie") });
   const feedback = status(t("Decrypting on this device…", "Wird auf diesem Gerät entschlüsselt …"));
@@ -26,14 +34,18 @@ export async function openVaultEditor({ entry, client, signal, onSaved, onShare 
   const stage = el("div", { class: "vault-editor-stage", "aria-busy": true });
   const tools = el("aside", { class: "vault-editor-tools", hidden: playbackOnly, "aria-label": t("Editing tools", "Bearbeitungswerkzeuge") });
   const save = button(t("Save encrypted copy", "Verschlüsselte Kopie speichern"), saveCopy, { class: "primary", disabled: true });
-  const shell = el("section", { class: "vault-editor" + (playbackOnly ? " vault-editor-player" : ""), "data-editor-kind": kind },
+  const shell = el("section", { class: "vault-editor" + (playbackOnly ? " vault-editor-player" : archiveOnly ? " vault-editor-browser" : ""), "data-editor-kind": kind },
     !playbackOnly && el("div", { class: "vault-editor-intro" },
       el("span", { class: "vault-editor-kind" }, ({ image: t("Image", "Bild"), video: t("Video", "Video"), audio: t("Audio", "Audio"),
-        pdf: "PDF", text: t("Text", "Text"), other: t("File", "Datei") })[kind]),
-      el("p", {}, t("Edit locally. Save an encrypted copy; the original and its shares stay unchanged.",
-        "Bearbeite lokal und speichere eine verschlüsselte Kopie. Original und Freigaben bleiben erhalten."))),
+        pdf: "PDF", text: t("Text", "Text"), office: "Office", archive: t("Archive", "Archiv"), other: t("File", "Datei") })[kind]),
+      el("p", {}, archiveOnly ? t("Open files locally or save an extracted file to Vault. The original archive stays unchanged.",
+        "Öffne Dateien lokal oder speichere entpackte Dateien in Vault. Das Originalarchiv bleibt unverändert.")
+        : kind === "office" ? t("Edit text and tables locally. Copies omit complex layout and images; formulas stay text.",
+          "Bearbeite Text und Tabellen lokal. Kopien übernehmen kein komplexes Layout und keine Bilder; Formeln bleiben Text.")
+          : t("Edit locally. Save an encrypted copy; the original and its shares stay unchanged.",
+            "Bearbeite lokal und speichere eine verschlüsselte Kopie. Original und Freigaben bleiben erhalten."))),
     el("div", { class: "vault-editor-workspace" }, stage, tools),
-    !playbackOnly && el("footer", { class: "vault-editor-footer" }, field(t("Copy name", "Name der Kopie"), filename), save),
+    !playbackOnly && !archiveOnly && el("footer", { class: "vault-editor-footer" }, field(t("Copy name", "Name der Kopie"), filename), save),
     el("div", { class: "vault-editor-feedback", "aria-live": "polite" }, progress, feedback));
   const update = value => {
     if (!alive) return;
@@ -125,13 +137,43 @@ export async function openVaultEditor({ entry, client, signal, onSaved, onShare 
       tools.hidden = true; const footer = shell.querySelector(".vault-editor-footer"); if (footer) footer.hidden = true;
       tell(feedback, ""); progress.hidden = true; return;
     }
-    const maximum = kind === "text" ? VAULT_EDITOR_LIMITS.textBytes : kind === "pdf" ? VAULT_EDITOR_LIMITS.pdfBytes : VAULT_EDITOR_LIMITS.inputBytes;
+    const maximum = kind === "text" ? VAULT_EDITOR_LIMITS.textBytes : kind === "pdf" ? VAULT_EDITOR_LIMITS.pdfBytes
+      : kind === "office" ? VAULT_OFFICE_LIMITS.inputBytes : archiveOnly ? VAULT_ARCHIVE_LIMITS.inputBytes : VAULT_EDITOR_LIMITS.inputBytes;
     const blob = await client.readBlob(entry, { signal: lifetime, maxBytes: maximum, onProgress: update });
     abortEditor(lifetime);
     const environment = { signal: lifetime, stage, tools, filename, objectUrl, disposers, dirtyChanged, update, onShare: entry.receivedShareId ? undefined : onShare };
     if (kind === "image") builder = await imageEditor(blob, environment);
     else if (kind === "text") builder = await textEditor(blob, entry, environment);
     else if (kind === "pdf") builder = await pdfEditor(blob, environment);
+    else if (kind === "office") builder = await officeEditor(blob, entry, environment);
+    else if (archiveOnly) builder = await archiveViewer(blob, entry, { ...environment,
+      onDownloadOriginal: async () => {
+        try { const prepared = client.prepareDownload?.(entry); await client.download(entry, { signal: lifetime, prepared, onProgress: update }); }
+        catch (error) { if (alive && error?.name !== "AbortError") tell(feedback, error.message, "error"); }
+      },
+      onDownload: ({ entry: member, blob: file }) => downloadVaultLocalBlob(file, member.name),
+      onExtract: async ({ entry: member, blob: file }) => {
+        const parentId = entry.receivedShareId ? null : entry.parentId ?? null;
+        const saved = await client.upload(new File([file], member.name, { type: file.type || "application/octet-stream" }), parentId, { signal: lifetime, onProgress: update });
+        await onSaved?.(saved);
+        if (alive) notify(t("Extracted file saved with new encryption.", "Entpackte Datei neu verschlüsselt gespeichert."));
+      },
+      onPreview: async ({ entry: member, blob: file }) => {
+        const parentId = entry.receivedShareId ? null : entry.parentId ?? null;
+        const nested = { id: crypto.randomUUID(), name: member.name, type: file.type, kind: "file", parentId, descriptor: { size: file.size } };
+        const nestedClient = {
+          readBlob: async (_entry, options = {}) => {
+            abortEditor(options.signal);
+            if (file.size > options.maxBytes) throw new Error(t("This file exceeds the preview limit.", "Diese Datei überschreitet die Vorschaugrenze."));
+            return file;
+          },
+          download: async () => downloadVaultLocalBlob(file, member.name),
+          upload: (next, destination, options) => client.upload(next, destination, options),
+          saveEditedCopy: (_entry, next, options) => client.upload(new File([next], options.name, { type: next.type || file.type }), parentId, options),
+        };
+        await openVaultEditor({ entry: nested, client: nestedClient, signal, onSaved });
+      },
+    });
     else { await mediaPlayer(blob, kind, environment); builder = null; }
     abortEditor(lifetime);
     save.disabled = !builder; progress.hidden = true;
@@ -139,7 +181,7 @@ export async function openVaultEditor({ entry, client, signal, onSaved, onShare 
   } catch (error) {
     if (alive && error?.name !== "AbortError") {
       releasePreview();
-      tell(feedback, error.message, "error"); progress.hidden = true;
+      tell(feedback, error?.code?.startsWith("VAULT_ARCHIVE_") ? archiveError(error) : error.message, "error"); progress.hidden = true;
       stage.replaceChildren(el("div", { class: "vault-editor-unavailable" }, el("p", {}, t("Download this file to open it in a suitable app.", "Lade diese Datei herunter, um sie in einer passenden App zu öffnen.")), downloadControl()));
       tools.hidden = true; const footer = shell.querySelector(".vault-editor-footer"); if (footer) footer.hidden = true;
     }
@@ -149,17 +191,15 @@ export async function openVaultEditor({ entry, client, signal, onSaved, onShare 
 async function textEditor(blob, entry, { signal, stage, tools, dirtyChanged }) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   abortEditor(signal);
-  const bom = bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191;
-  let text;
+  let decoded;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    if (text.includes("\0")) throw new Error();
-  } catch { throw new Error(t("This file is not supported UTF-8 text.", "Diese Datei enthält keinen unterstützten UTF-8-Text.")); }
+    decoded = decodeVaultText(bytes);
+  } catch (error) { throw new Error(error.code === "VAULT_TEXT_BINARY" ? t("This file contains binary data and cannot be edited as text.", "Diese Datei enthält Binärdaten und kann nicht als Text bearbeitet werden.")
+    : t("This file is not supported UTF-8 or UTF-16 text.", "Diese Datei enthält keinen unterstützten UTF-8- oder UTF-16-Text.")); }
   finally { bytes.fill(0); }
   const input = el("textarea", { class: "vault-text-editor", spellcheck: false, autocapitalize: "off", autocomplete: "off",
     "aria-label": t("File text", "Dateitext"), maxlength: VAULT_EDITOR_LIMITS.textBytes });
-  const lineEnding = text.includes("\r\n") ? "\r\n" : "\n";
-  input.value = text; text = null;
+  input.value = decoded.value; decoded.value = "";
   const wrap = el("input", { type: "checkbox", checked: true });
   const counter = el("p", { class: "subtle vault-editor-counter" });
   function count() { counter.textContent = t("{lines} lines · {characters} characters", "{lines} Zeilen · {characters} Zeichen",
@@ -167,22 +207,27 @@ async function textEditor(blob, entry, { signal, stage, tools, dirtyChanged }) {
   input.addEventListener("input", () => { dirtyChanged(); count(); });
   wrap.addEventListener("change", () => { input.wrap = wrap.checked ? "soft" : "off"; });
   tools.append(el("h3", {}, t("Text tools", "Textwerkzeuge")), field(t("Wrap lines", "Zeilen umbrechen"), wrap), counter,
+    el("p", { class: "subtle" }, decoded.encoding.toUpperCase()),
     el("p", { class: "subtle" }, t("HTML, SVG and code stay plain text and are never executed here.", "HTML, SVG und Code bleiben reiner Text und werden hier niemals ausgeführt.")));
   stage.append(input); count();
   return async () => {
-    const output = input.value.replace(/\r?\n/gu, lineEnding);
-    if (new TextEncoder().encode(output).byteLength + (bom ? 3 : 0) > VAULT_EDITOR_LIMITS.textBytes) throw new Error(t("Text editing supports files up to 2 MiB.", "Textbearbeitung unterstützt Dateien bis 2 MiB."));
+    const output = input.value;
     if (/\.json$/iu.test(entry.name ?? "")) {
       try { JSON.parse(output); } catch { throw new Error(t("Fix the JSON syntax before saving.", "Korrigiere vor dem Speichern die JSON-Syntax.")); }
     }
-    return new Blob([bom ? "\ufeff" : "", output], { type: blob.type || "text/plain;charset=utf-8" });
+    let encoded;
+    try { encoded = encodeVaultText(output, decoded); }
+    catch { throw new Error(t("Text editing supports files up to 2 MiB with valid Unicode.", "Textbearbeitung unterstützt gültigen Unicode-Text bis 2 MiB.")); }
+    try { return new Blob([encoded], { type: blob.type || "text/plain;charset=" + decoded.encoding }); }
+    finally { encoded.fill(0); }
   };
 }
 
 async function imageEditor(blob, { signal, stage, tools, filename, objectUrl, disposers, dirtyChanged }) {
-  const type = rasterImageType(new Uint8Array(await blob.slice(0, 32).arrayBuffer()));
+  const type = rasterImageType(new Uint8Array(await blob.slice(0, 4096).arrayBuffer()));
   abortEditor(signal);
   if (!type) throw new Error(t("This file is not a supported raster image.", "Diese Datei ist kein unterstütztes Rasterbild."));
+  if (type === "image/x-icon") await validateIconImage(blob, { signal });
   const image = el("img", { alt: "", decoding: "async" });
   disposers.push(() => image.removeAttribute("src"));
   const ready = editorEvent(image, "load", { signal }); image.src = objectUrl(new Blob([blob], { type })); await ready;
@@ -254,10 +299,13 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
   abortEditor(signal);
   if (media.readyState < 2) await editorEvent(media, "loadeddata", { signal });
   abortEditor(signal);
+  if (kind === "video" && (!media.videoWidth || !media.videoHeight)) throw new Error(t(
+    "This device cannot decode the video picture. Download the original to use another player.",
+    "Dieses Gerät kann das Videobild nicht dekodieren. Lade das Original für einen anderen Player herunter."));
   try { await mediaDuration(media, { signal }); }
   catch (error) { if (signal.aborted) throw error; try { media.currentTime = 0; } catch {} }
   abortEditor(signal);
-  let playback;
+  let playback, languages;
   const player = el("section", { class: "vault-player vault-player-" + kind, "data-playing": "false", "aria-label": t("Private media player", "Privater Medienplayer") });
   const visual = el("div", { class: "vault-player-visual", tabindex: 0, "aria-label": kind === "video" ? t("Video playback", "Videowiedergabe") : t("Audio playback", "Audiowiedergabe") }, media);
   if (kind === "audio") visual.append(el("div", { class: "vault-audio-art", "aria-hidden": true }, playerIcon("music"),
@@ -273,7 +321,8 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
   speed.classList.add("vault-player-speed"); speed.setAttribute("aria-label", t("Playback speed", "Wiedergabegeschwindigkeit"));
   const playerStatus = status();
   const actions = el("div", { class: "vault-player-actions" }, play, counter, el("span", { class: "vault-player-spacer" }), mute, volume, speed);
-  player.append(visual, el("div", { class: "vault-player-controls" }, seek, actions), playerStatus);
+  const controls = el("div", { class: "vault-player-controls" }, seek, actions);
+  player.append(visual, controls, playerStatus);
   playback = createVaultPlayback(media, { signal, onState(value) {
     if (signal.aborted) return;
     const playing = !value.paused && !value.ended;
@@ -281,7 +330,8 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
     play.replaceChildren(playerIcon(playing ? "pause" : "play"));
     const label = playing ? t("Pause", "Pausieren") : t("Play", "Abspielen");
     play.setAttribute("aria-label", label); play.title = label;
-    seek.disabled = !value.duration;
+    seek.disabled = languages?.switching || !value.duration;
+    play.disabled = languages?.switching === true;
     seek.value = String(value.duration ? Math.max(0, Math.min(1000, value.currentTime / value.duration * 1000)) : 0);
     seek.setAttribute("aria-valuetext", formatMediaTime(value.currentTime) + " / " + formatMediaTime(value.duration));
     counter.textContent = formatMediaTime(value.currentTime) + " / " + formatMediaTime(value.duration);
@@ -291,6 +341,14 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
     mute.title = mute.getAttribute("aria-label"); volume.value = String(value.muted ? 0 : value.volume); speed.value = String(value.rate);
   }, onError(error) { if (!signal.aborted) tell(playerStatus, error.message, "error"); } });
   disposers.push(() => playback.dispose());
+  languages = mountVaultMediaLanguages(media, blob, { signal, onError(error) {
+    if (!signal.aborted) tell(playerStatus, error.message, "error");
+  }, onChange(value) {
+    for (const control of [play, seek, volume, speed, mute]) control.disabled = value.switching;
+    if (!value.switching) seek.disabled = !Number.isFinite(media.duration);
+  } });
+  controls.append(languages.element);
+  disposers.push(() => languages.dispose());
   seek.addEventListener("input", () => { if (Number.isFinite(media.duration)) playback.seek(media.duration * checkedNumber(seek) / 1000); });
   volume.addEventListener("input", () => playback.volume(checkedNumber(volume)));
   speed.addEventListener("change", () => playback.rate(checkedNumber(speed)));

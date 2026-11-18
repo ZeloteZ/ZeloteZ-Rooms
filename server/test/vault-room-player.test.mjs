@@ -7,6 +7,7 @@ import test from 'node:test'
 const moduleUrl = new URL('../../web/vault-room-player.js', import.meta.url)
 const source = (await readFile(moduleUrl, 'utf8'))
   .replace('import { openVaultWatch } from "./vault-watch.js";', 'const openVaultWatch = options => globalThis.__vaultRoomReviewOpen(options);')
+  .replace('import { mountVaultMediaLanguages } from "./vault-language-controls.js";', 'const mountVaultMediaLanguages = (...args) => globalThis.__vaultRoomLanguages(...args);')
   .replace(/from "\.\/([^"]+)"/gu, (_, path) => 'from ' + JSON.stringify(new URL(path, moduleUrl).href))
 const { createVaultRoomPlayer } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 const flush = () => new Promise(resolve => setImmediate(resolve))
@@ -16,6 +17,7 @@ class Element extends EventTarget {
     super(); this.tag = tag; this.ownerDocument = owner; this.state = state; this.children = []; this.attributes = new Map()
     this.classList = { add() {} }; this.currentTime = 0; this.duration = 10; this.volume = 1; this.muted = false
     this.paused = true; this.pauseCalls = 0; this.loadCalls = 0; this.isConnected = false
+    this.readyState = state.data === 'pending' ? 1 : 2; this.videoWidth = state.picture ? 640 : 0; this.videoHeight = state.picture ? 360 : 0
     this.bounds = { width: 640, height: 360, top: 20, left: 20, right: 660, bottom: 380 }
     this.visibility = 'visible'
   }
@@ -34,10 +36,10 @@ class Element extends EventTarget {
   load() { this.loadCalls++ }
 }
 
-function fixture(t, { metadata = 'ready', type = 'video/mp4' } = {}) {
-  const prior = { opener: globalThis.__vaultRoomReviewOpen, location: globalThis.location, storage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
+function fixture(t, { metadata = 'ready', data = 'ready', picture = true, type = 'video/mp4' } = {}) {
+  const prior = { opener: globalThis.__vaultRoomReviewOpen, languages: globalThis.__vaultRoomLanguages, location: globalThis.location, storage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
     create: URL.createObjectURL, revoke: URL.revokeObjectURL }
-  const state = { metadata, media: [], observers: [], sources: [], created: [], revoked: [], events: [], players: [], visibilityListeners: new Set() }
+  const state = { metadata, data, picture, media: [], languages: [], observers: [], sources: [], created: [], revoked: [], events: [], players: [], visibilityListeners: new Set() }
   class Observer {
     constructor(callback) { this.callback = callback; this.disconnected = false; state.observers.push(this) }
     observe(element) { this.element = element }
@@ -64,13 +66,20 @@ function fixture(t, { metadata = 'ready', type = 'video/mp4' } = {}) {
     state.players.push(value); return value
   }
   globalThis.__vaultRoomReviewOpen = options => state.open(options)
+  globalThis.__vaultRoomLanguages = (media, blob, options) => {
+    assert.ok(blob instanceof Blob); assert.equal(state.sources[0].blob, null, 'account keys close before track controls receive the retained blob')
+    const value = { element: new Element('div', owner, state), blob, options, switching: false, disposed: 0,
+      change(switching) { this.switching = switching; options.onChange({ switching }) },
+      dispose() { this.disposed++; this.blob = null } }
+    state.languages.push(value); return value
+  }
   globalThis.location = new URL('https://rooms.example.test/#/vault')
   globalThis.localStorage = { getItem() { return 'en' } }
   URL.createObjectURL = blob => { assert.ok(blob instanceof Blob); state.events.push('create URL'); const url = 'blob:private-room-' + state.created.length; state.created.push(url); return url }
   URL.revokeObjectURL = url => state.revoked.push(url)
   t.after(async () => {
     state.players.forEach(player => player.destroy()); await flush()
-    globalThis.__vaultRoomReviewOpen = prior.opener; globalThis.location = prior.location
+    globalThis.__vaultRoomReviewOpen = prior.opener; globalThis.__vaultRoomLanguages = prior.languages; globalThis.location = prior.location
     if (prior.storage) Object.defineProperty(globalThis, 'localStorage', prior.storage); else delete globalThis.localStorage
     URL.createObjectURL = prior.create; URL.revokeObjectURL = prior.revoke
   })
@@ -161,7 +170,38 @@ test('closing while metadata is pending prevents late decoder events from making
 test('audio room playback uses a passive audio surface and closes its key holder immediately', async t => {
   const state = fixture(t, { type: 'audio/webm' })
   const player = state.player(); player.element.isConnected = true; await flush()
-  assert.equal(state.media[0].tag, 'audio'); assert.equal(player.element.children.length, 3)
+  assert.equal(state.media[0].tag, 'audio'); assert.equal(player.element.children.length, 4)
   assert.equal(state.sources[0].closes, 1); assert.equal(state.sources[0].blob, null)
   player.destroy(); assert.deepEqual(state.revoked, state.created)
+})
+
+test('room readiness waits for actual decoded data rather than container metadata alone', async t => {
+  const state = fixture(t, { data: 'pending' }); let ready = 0
+  const player = state.player({ onReady() { ready++ } }); await flush()
+  assert.equal(ready, 0); assert.equal(state.languages.length, 0)
+  state.media[0].readyState = 2; state.media[0].dispatchEvent(new Event('loadeddata')); await flush()
+  assert.equal(ready, 1); assert.equal(state.languages.length, 1)
+  player.destroy(); assert.equal(state.languages[0].disposed, 1); assert.equal(state.languages[0].blob, null)
+})
+
+test('a video with audio but no decodable picture cannot become a ready black player', async t => {
+  const state = fixture(t, { picture: false }); let ready = 0, errors = 0
+  state.player({ onReady() { ready++ }, onError(error) { errors++; assert.match(error.message, /video picture/u) } })
+  await flush(); assert.equal(ready, 0); assert.equal(errors, 1); assert.equal(state.languages.length, 0)
+  assert.deepEqual(state.revoked, state.created); assert.equal(state.media[0].src, '')
+})
+
+test('language changes stay local, ignore temporary decoder events and resynchronize only after switching', async t => {
+  const state = fixture(t); let ready = 0, errors = 0, ended = 0
+  const player = state.player({ onReady() { ready++ }, onError() { errors++ }, onEnded() { ended++ } }); await flush()
+  const language = state.languages[0], media = state.media[0]; media.currentTime = 3
+  language.change(true); player.seek(8); await player.play(); player.pause()
+  assert.equal(player.getTime(), 3); assert.equal(media.paused, true); assert.equal(media.pauseCalls, 0)
+  media.dispatchEvent(new Event('error')); media.dispatchEvent(new Event('ended'))
+  assert.equal(errors, 0); assert.equal(ended, 0); assert.equal(ready, 1)
+  language.change(false); assert.equal(ready, 2)
+  player.seek(8); await player.play(); assert.equal(player.getTime(), 8); assert.equal(media.paused, false)
+  language.options.onError?.(new Error('Track selection unavailable'))
+  assert.equal(errors, 0, 'optional track selection does not invalidate ordinary room playback')
+  player.destroy(); assert.equal(language.disposed, 1); assert.equal(language.blob, null)
 })
