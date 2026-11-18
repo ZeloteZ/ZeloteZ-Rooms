@@ -6,5 +6,6 @@ desktop/portable/dist/
 /desktop/portable/windows-audio/rooms-windows-audio.exe
 /desktop/portable/windows-audio/rooms-windows-audio.obj
 /desktop-downloads/
+/.local-release/
 __pycache__/
 *.py[cod]
