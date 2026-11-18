@@ -48,6 +48,14 @@ body[data-settings-view="preferences"] .note { margin-bottom: 16px; }
 #preferences .settings-row strong { font-size: .91rem; }
 #preferences .settings-row small { line-height: 1.35; }
 
+.desktop-version {
+  align-self: center;
+  margin-inline-end: auto;
+  color: var(--muted);
+  font-size: .78rem;
+  font-variant-numeric: tabular-nums;
+}
+
 #preferences .settings-row select {
   max-width: 44%;
   min-width: min(7rem, 44%);

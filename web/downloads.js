@@ -1,12 +1,9 @@
 import { t } from "./i18n.js";
 import { el } from "./ui.js";
+import { bundledRelease } from "./site-version.js";
+export { isDesktopApp } from "./site-version.js";
 
 const releases = "https://github.com/ZeloteZ/ZeloteZ-Rooms/releases";
-const versionPattern = /^(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}$/u;
-
-export function isDesktopApp() {
-  return window.roomsDesktop === true || Boolean(window.webkit?.messageHandlers?.roomsCapture);
-}
 
 export async function suggestedDownloadPlatform(browserNavigator = navigator) {
   const agent = browserNavigator.userAgent ?? "";
@@ -27,15 +24,6 @@ export async function suggestedDownloadPlatform(browserNavigator = navigator) {
   const details = [browserNavigator.platform, browserNavigator.oscpu, agent].filter(Boolean).join(" ");
   if (/arm|aarch64|i[3-6]86/iu.test(details)) return null;
   return /x86_64|amd64|Win64|WOW64|\bx64\b/iu.test(details) ? platform : null;
-}
-
-async function bundledRelease(signal) {
-  const response = await fetch("/desktop-release.json", { signal, credentials: "omit", redirect: "error", cache: "no-store" });
-  if (!response.ok) return null;
-  const release = await response.json();
-  if (release?.product !== "zelotez-rooms" || release.protocol !== 1 ||
-      typeof release.version !== "string" || !versionPattern.test(release.version) || !Array.isArray(release.artifacts)) return null;
-  return release;
 }
 
 function releaseAsset(version, filename) {

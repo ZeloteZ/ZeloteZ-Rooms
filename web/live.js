@@ -893,13 +893,13 @@ export function renderLive(context, channel, player, voiceMount, playerMount = e
   const body = el("div", { class: "live-channel-body" },
     el("div", { class: "live-channel-watch" }, playerMount, preview,
       nativePreview && el("div", { class: "live-channel-native" }, nativePreview), watchSlot, watchHint));
+  const tools = el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish);
   const sidebar = mountViewSidebar(body, el("div", { class: "live-channel-support" },
-    el("div", { class: "live-channel-support-toolbar" }, watchActions, tablist), people, chatPanel, queuePanel), signal);
+    el("div", { class: "live-channel-support-toolbar" }, watchActions, tablist), people, chatPanel, queuePanel), tools, signal);
   const node = el("section", {
     class: "panel live-channel", "aria-label": channel.title,
   }, el("header", { class: "live-channel-toolbar" },
-    el("div", { class: "live-channel-title" }, liveTitle),
-    el("div", { class: "inline live-channel-tools" }, shareSettings, reserve, watchParty.share, finish), feedback), body);
+    el("div", { class: "live-channel-title" }, liveTitle), tools, feedback), body);
   updatePanels();
   node.addEventListener("open-message", event => {
     if (event.detail?.messageId) showChatTarget(event.detail);

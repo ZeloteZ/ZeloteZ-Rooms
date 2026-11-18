@@ -68,6 +68,7 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
     <section class="guest-room" hidden>
       <header class="guest-heading">
         <h1 class="guest-room-title"></h1>
+        <div class="quick-view-actions"></div>
       </header>
       <div class="quick-view-layout">
         <div class="guest-player-slot"><section class="panel guest-player">
@@ -103,10 +104,10 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
   const passwordLabel = find(".guest-password-label");
   const enter = find("button[type=submit]");
   const room = find(".guest-room");
-  const heading = find(".guest-heading");
+  const shareActions = find(".quick-view-actions");
   const title = find(".guest-room-title");
   const support = find(".quick-view-support");
-  const sidebar = mountViewSidebar(find(".quick-view-layout"), support, signal);
+  const sidebar = mountViewSidebar(find(".quick-view-layout"), support, shareActions, signal);
   const supportToolbar = find(".quick-view-support-toolbar");
   const supportTabs = find(".quick-view-support-tabs");
   const chatTab = find("button[data-pane=chat]");
@@ -149,14 +150,14 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
   queueSlot.setAttribute("aria-labelledby", queueTab.id);
 
   function mountHost() {
-    if (host?.shareActions) heading.append(host.shareActions);
+    shareActions.prepend(...(host?.shareActions ?? []));
     if (host?.actions) supportToolbar.prepend(host.actions);
     // The shared snapshot is ready before the host's controls may have finished loading.
     queueSlot.replaceChildren(...[host?.queue, viewerQueue.node].filter(Boolean));
   }
 
   function removeHostActions() {
-    host?.shareActions?.remove();
+    for (const action of host?.shareActions ?? []) action.remove();
     host?.actions?.remove();
   }
 

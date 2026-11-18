@@ -421,6 +421,7 @@ function showSettings(error = false, suggested = "", focusUpdates = false) {
     currentOrigin,
     error,
     focusUpdates,
+    version: app.getVersion(),
     preferences: Object.fromEntries(Object.keys(preferenceOptions).map(name => [name, desktopSettings[name]])),
   }, parent);
   settingsWindow = local.window;

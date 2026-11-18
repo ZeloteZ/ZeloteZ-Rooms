@@ -3,7 +3,7 @@ import { t } from "./i18n.js";
 const preference = "rooms-view-sidebar-width";
 let nextId = 0;
 
-export function mountViewSidebar(layout, panel, signal) {
+export function mountViewSidebar(layout, panel, actions, signal) {
   panel.id ||= "view-sidebar-" + ++nextId;
   const sidebar = layout.ownerDocument.createElement("div");
   sidebar.className = "view-sidebar";
@@ -14,6 +14,7 @@ export function mountViewSidebar(layout, panel, signal) {
     </div>
     <div class="view-sidebar-clip"></div>`;
   const toggle = sidebar.querySelector(".view-sidebar-toggle");
+  const rail = sidebar.querySelector(".view-sidebar-rail");
   const divider = sidebar.querySelector(".view-sidebar-divider");
   toggle.setAttribute("aria-controls", panel.id);
   divider.setAttribute("aria-controls", panel.id);
@@ -38,7 +39,7 @@ export function mountViewSidebar(layout, panel, signal) {
     if (!divider.offsetWidth || !layout.clientWidth) return null;
     const style = getComputedStyle(sidebar);
     const total = layout.clientWidth;
-    const min = parseFloat(getComputedStyle(panel).minInlineSize) + toggle.offsetWidth + parseFloat(style.columnGap);
+    const min = parseFloat(getComputedStyle(panel).minInlineSize) + divider.offsetWidth + parseFloat(style.columnGap);
     const max = Math.max(min, total * parseFloat(style.getPropertyValue("--view-sidebar-max-ratio")));
     return { total, min, max, current: sidebar.getBoundingClientRect().width };
   }
@@ -79,14 +80,15 @@ export function mountViewSidebar(layout, panel, signal) {
   }
 
   function setCollapsed(collapsed) {
-    if (collapsed) {
-      const focused = panel.ownerDocument.activeElement;
-      if (focused === divider || panel.contains(focused)) toggle.focus({ preventScroll: true });
-      finishDrag();
-    }
+    if (collapsed === sidebar.hasAttribute("data-collapsed")) return;
+    const focused = panel.ownerDocument.activeElement;
+    const restoreFocus = focused === toggle || collapsed && (focused === divider || panel.contains(focused));
+    if (collapsed) finishDrag();
     sidebar.toggleAttribute("data-collapsed", collapsed);
     panel.inert = collapsed;
+    (collapsed ? actions : rail).append(toggle);
     updateLabels();
+    if (restoreFocus) toggle.focus({ preventScroll: true });
   }
 
   toggle.addEventListener("click", () => setCollapsed(!sidebar.hasAttribute("data-collapsed")), { signal });

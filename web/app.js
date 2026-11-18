@@ -5,7 +5,8 @@ import { editProfile } from "./appearance.js";
 import { showAccountSecurity } from "./account-security.js";
 import { setupIsAvailable, setupKeyForm, setupProgress } from "./setup.js";
 import { renderHowItWorks } from "./how-it-works.js";
-import { isDesktopApp, renderDownloads } from "./downloads.js";
+import { renderDownloads } from "./downloads.js";
+import { isDesktopApp, showSiteVersion } from "./site-version.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 import { forgetMemberQuickChatDevices } from "./quick-chat-crypto.js";
 import { clearQuickLinks, confirmYoutubeRoom, mountQuickRoomDock, quickSource } from "./quick-start.js";
@@ -74,6 +75,7 @@ const navLabels = {
 };
 
 document.documentElement.lang = language();
+void showSiteVersion();
 navigation.setAttribute("aria-label", t("Main navigation", "Hauptnavigation"));
 for (const link of navigation.querySelectorAll("[data-nav]")) link.textContent = navLabels[link.dataset.nav];
 document.querySelector(".skip-link").textContent = t("Skip to content", "Zum Inhalt springen");

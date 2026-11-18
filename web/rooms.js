@@ -615,9 +615,8 @@ function roomHeading(topic, title = topic.title) {
       channelCrumb));
   const hero = el("div", { class: "room-hero section-heading", "data-tutorial": "room-hero" },
     el("div", { class: "room-title" }, breadcrumb, !topic.temporary && tag(topic)));
-  const home = el("a", { class: "room-home-link", href: "#/rooms" },
-    el("span", { "aria-hidden": "true" }, "←"), t("Home", "Home"));
-  const header = el("div", { class: "room-header-content" }, home, hero);
+  const home = el("a", { class: "room-home-link", href: "#/rooms" }, t("Home", "Home"));
+  const header = el("div", { class: "room-header-content", "data-channel-overview": !topic.temporary && topic.joined === true }, home, hero);
   applyTopicDesign(hero, topic.appearance);
   return { header, hero, setTitle(title) {
     if (roomLabel.textContent !== title) roomLabel.textContent = heading.title = title;
@@ -661,7 +660,7 @@ function renderQuickTopic(context, topic, channels, selectedId, target) {
   });
   if (child.shareSource === "screen") screen?.prepare();
   else if (child.shareSource) setup?.prepareSource(child.shareSource);
-  const shareActions = el("div", { class: "quick-view-actions" }, screen?.actions, setup?.share);
+  const shareActions = [screen?.actions, setup?.share].filter(Boolean);
   const node = renderGuestViewer({ publicId: topic.id, signal: context.signal, member: true, accountId: context.user.id,
     onAccountChanged: context.onAccountChanged, videoDock: context.videoDock,
     host: {

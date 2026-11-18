@@ -1,3 +1,8 @@
+:root {
+  --room-channel-width: clamp(9rem, 15vi, 14rem);
+  --room-channel-gap: 11px;
+}
+
 .room-actions { gap: 6px; }
 .room-action-icon { display: none; }
 .room-settings-delete { padding-block-start: 15px; border-block-start: 1px solid var(--line); }
@@ -15,34 +20,46 @@
 .room-header-content {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
   gap: clamp(8px, 1.2vw, 17px);
+}
+
+@media (width > 900px) and (height > 500px) {
+  .room-header-content[data-channel-overview] {
+    grid-template-columns: var(--room-channel-width) minmax(0, 1fr);
+    column-gap: var(--room-channel-gap);
+  }
+}
+
+.room-header-content > :is(.room-home-link, .room-hero) {
+  min-block-size: 52px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
 }
 
 .room-home-link {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-block-size: 36px;
-  border-radius: 4px;
+  justify-content: center;
+  padding-inline: clamp(10px, 1.15vi, 16px);
   color: var(--accent);
   font-size: .86rem;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.room-home-link:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.room-home-link:hover {
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: #fff;
+}
 
 .room-header .room-hero {
   align-items: center;
   gap: 6px 12px;
-  min-block-size: 52px;
   min-inline-size: 0;
   margin: 0;
   padding: 6px 9px;
   overflow: visible;
-  border: 1px solid var(--line);
-  border-radius: 13px;
   background: linear-gradient(92deg, #111321f0, #111321b8 70%, #1113219e), var(--topic-banner, url("/standby.webp")) center / cover;
 }
 
@@ -124,10 +141,10 @@
 }
 
 .room-layout {
-  grid-template-columns: clamp(9rem, 15vi, 14rem) minmax(0, 1fr);
+  grid-template-columns: var(--room-channel-width) minmax(0, 1fr);
   grid-template-areas: "channels content";
   grid-template-rows: minmax(0, 1fr);
-  gap: 11px;
+  gap: var(--room-channel-gap);
   align-items: stretch;
   min-block-size: 0;
   min-inline-size: 0;
@@ -283,16 +300,22 @@
 
 .live-channel-body {
   --view-sidebar-default: 34.6%;
-  --live-support-row: minmax(var(--live-support-min, 6rem), 1fr);
+  --live-support-row-min: var(--live-support-min, 6rem);
+  --live-support-row-grow: 1fr;
   display: grid;
-  grid-template: "watch" minmax(var(--live-player-min, 6.5rem), 1.15fr) "support" var(--live-support-row) / minmax(0, 1fr);
+  grid-template: "watch" minmax(var(--live-player-min, 6.5rem), 1.15fr)
+    "support" minmax(var(--live-support-row-min), var(--live-support-row-grow)) / minmax(0, 1fr);
   gap: clamp(6px, 1.15dvh, 12px);
   min-block-size: 0;
   min-inline-size: 0;
   overflow: auto;
   scrollbar-width: thin;
+  transition: grid-template-rows var(--view-sidebar-motion), row-gap var(--view-sidebar-motion);
 }
-.live-channel-body:has(> .view-sidebar[data-collapsed]) { --live-support-row: var(--view-sidebar-control); }
+.live-channel-body:has(> .view-sidebar[data-collapsed]) {
+  --live-support-row-min: 0px;
+  --live-support-row-grow: 0fr;
+}
 .live-channel-body > .view-sidebar { grid-area: support; }
 .live-channel[data-watching] .live-channel-body { --view-sidebar-default: 29%; }
 .live-channel[data-watching] .live-channel-body { gap: clamp(8px, 1.4vi, 16px); }
@@ -426,12 +449,16 @@
 
 @container live-channel (min-width: 50rem) {
   .live-channel-body {
-    --view-sidebar-areas: "rail pane";
-    --view-sidebar-columns: var(--view-sidebar-control) minmax(0, 1fr);
+    --view-sidebar-rows: "rail pane" minmax(0, 1fr);
+    --view-sidebar-columns: var(--view-sidebar-rail) minmax(0, 1fr);
     --view-sidebar-divider-display: block;
     --view-sidebar-panel-min: 15rem;
+    --view-sidebar-exit: 12px 0;
+    --view-sidebar-chevron-x: -1px;
+    --view-sidebar-chevron-y: 0;
+    --view-sidebar-chevron-angle: 45deg;
     grid-template: "watch support" minmax(var(--live-player-min, 8rem), 1fr) / minmax(0, 1fr) var(--view-sidebar-width);
-    transition: grid-template-columns 220ms ease;
+    transition: grid-template-columns var(--view-sidebar-motion), column-gap var(--view-sidebar-motion);
   }
   .live-channel-body[data-resizing-view-sidebar] { transition: none; }
 }
@@ -474,7 +501,8 @@
 }
 
 @media (max-width: 520px), (max-height: 680px) {
-  .topic-view[data-joined], .room-layout { gap: 7px; }
+  :root { --room-channel-gap: 7px; }
+  .topic-view[data-joined] { gap: 7px; }
   .room-actions .button { min-height: 32px; padding: 4px 7px; font-size: .77rem; }
   .room-layout .conversation-heading, .room-layout .message-form { padding-block: 8px; }
   .room-layout .chat-title { gap: 3px; }

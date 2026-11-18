@@ -67,6 +67,7 @@ function settings(state) {
     control("current-server-label").textContent = t("Current server", "Aktueller Server", "当前服务器");
     control("current-server").textContent = state.currentOrigin || t("Not connected", "Nicht verbunden", "未连接");
     control("change-server").textContent = state.currentOrigin ? t("Change…", "Wechseln …", "更换…") : t("Set address…", "Adresse eingeben …", "设置地址…");
+    control("desktop-version").textContent = t("Version {version}", "Version {version}", "版本 {version}").replace("{version}", state.version);
     control("done").textContent = state.currentOrigin ? t("Done", "Fertig", "完成") : t("Continue setup", "Einrichtung fortsetzen", "继续设置");
     control("address-label").textContent = t("Server address", "Serveradresse", "服务器地址");
     control("language").options[0].textContent = t("System", "System", "跟随系统");

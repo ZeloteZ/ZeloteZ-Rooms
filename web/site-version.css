@@ -1,0 +1,9 @@
+.site-version {
+  justify-self: start;
+  margin-inline-start: max(8px, env(safe-area-inset-left));
+  padding-block-end: max(4px, env(safe-area-inset-bottom));
+  color: var(--faint);
+  font-size: .6875rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}

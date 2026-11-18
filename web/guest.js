@@ -1,5 +1,6 @@
 import { language, languages as supportedLanguages, setLanguage, t } from "./i18n.js";
 import { renderGuestViewer } from "./guest-viewer.js";
+import { showSiteVersion } from "./site-version.js";
 
 const publicId = /^\/guest\/([a-f0-9-]+)\/?$/u.exec(location.pathname)?.[1];
 const mount = document.querySelector("#guest-view");
@@ -25,6 +26,7 @@ function updateLanguage() {
   document.documentElement.lang = language();
   languages.value = language();
   languageLabel.textContent = t("Language", "Sprache");
+  void showSiteVersion();
   viewer?.dispatchEvent(new Event("guest-language"));
 }
 
