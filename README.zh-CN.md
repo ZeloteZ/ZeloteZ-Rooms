@@ -28,6 +28,8 @@
 | 管理和维护实例 | [管理](docs/zh-CN/administration.md) · [运行维护](docs/zh-CN/operations.md) |
 | 解决问题 | [故障排查](docs/zh-CN/troubleshooting.md) |
 
+文档完整介绍初始化、权限、网络、备份、恢复与已知限制，并提供 [English](docs/README.md)、[Deutsch](docs/de/README.md) 和[简体中文](docs/zh-CN/README.md)版本。客户端连接到已有实例；创建账户需要该实例运营者的邀请。
+
 ## 许可证与贡献
 
 源码采用 [PolyForm Noncommercial 1.0.0](LICENSE)。超出许可证允许范围的商业使用需要单独授权。第三方组件保留各自的许可证。详情见[许可说明](LICENSING.md)。

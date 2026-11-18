@@ -28,7 +28,7 @@ Chat encryption, media transport, and uploaded videos have different privacy pro
 | Manage and maintain it | [Administration](docs/administration.md) · [Operations](docs/operations.md) |
 | Resolve a problem | [Troubleshooting](docs/troubleshooting.md) |
 
-The documentation covers setup, permissions, networking, backups, recovery, and known limitations in [English](docs/README.md), [Deutsch](docs/de/README.md), and [简体中文](docs/zh-CN/README.md). A client connects to an existing instance; account creation requires its operator's invitation.
+The documentation covers setup, permissions, networking, backups, recovery and known limitations in [English](docs/README.md), [Deutsch](docs/de/README.md), and [简体中文](docs/zh-CN/README.md). A client connects to an existing instance; account creation requires its operator's invitation.
 
 ## License and contributions
 
