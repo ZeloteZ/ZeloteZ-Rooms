@@ -58,6 +58,55 @@ function safeName(value) {
       /[. ]$/u.test(value) || /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/iu.test(value) || Buffer.byteLength(value) > 255) throw fail("VAULT_INVALID_NAME");
   return value;
 }
+function selectionName(value) {
+  if (typeof value !== "string" || !value.trim() || value === "." || value === ".." ||
+      /[\/\\\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(value) || Buffer.byteLength(value) > 255) throw fail("VAULT_INVALID_NAME");
+  return value;
+}
+function fileType(name) {
+  const extension = path.extname(name).slice(1).toLowerCase();
+  const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp",
+    mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", ogv: "video/ogg", mov: "video/quicktime",
+    mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/opus", m4a: "audio/mp4", aac: "audio/aac", weba: "audio/webm",
+    pdf: "application/pdf", txt: "text/plain", md: "text/markdown", markdown: "text/markdown", csv: "text/csv", tsv: "text/tab-separated-values",
+    json: "application/json", xml: "application/xml", svg: "image/svg+xml", html: "text/html", htm: "text/html", css: "text/css", vtt: "text/vtt",
+    zip: "application/zip" };
+  return Object.hasOwn(types, extension) ? types[extension] : "application/octet-stream";
+}
+async function planSelection(selected, { signal, maxBytes = MAX_ARCHIVE_BYTES, maxEntries = MAX_ENTRIES, maxDepth = MAX_DEPTH } = {}) {
+  if (!Array.isArray(selected) || !selected.length || selected.length > MAX_SELECTION ||
+      selected.some(value => typeof value !== "string" || !path.isAbsolute(value)) ||
+      !Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > MAX_ARCHIVE_BYTES ||
+      !Number.isSafeInteger(maxEntries) || maxEntries < 0 || maxEntries > MAX_ENTRIES ||
+      !Number.isSafeInteger(maxDepth) || maxDepth < 0 || maxDepth > MAX_DEPTH) throw fail("VAULT_ARCHIVE_FAILED");
+  const names = [], items = [];
+  let totalBytes = 0, entryCount = 0, metadataBytes = 0;
+  try {
+    for (const selectedFile of selected) {
+      signal?.throwIfAborted();
+      const file = path.resolve(selectedFile), name = selectionName(path.basename(file));
+      const info = await lstat(file, { bigint: true }); signal?.throwIfAborted();
+      if (info.isSymbolicLink()) throw fail("VAULT_SYMLINK");
+      let item;
+      if (info.isFile()) {
+        if (info.size > BigInt(maxBytes - totalBytes)) throw fail("VAULT_LIMIT");
+        const size = Number(info.size);
+        item = { kind: "file", name, type: fileType(name), size, entry: { file, name, info, ancestors: [] } };
+        totalBytes += size; entryCount += 1; metadataBytes += Buffer.byteLength(name);
+      } else if (info.isDirectory()) {
+        const archiveName = selectionName(name + ".zip");
+        const plan = await planArchive([file], { signal, maxBytes: maxBytes - totalBytes, maxEntries: maxEntries - entryCount, maxDepth });
+        if (!plan.entries[0].info.isDirectory() || !same(info, plan.entries[0].info)) throw fail();
+        item = { kind: "directory", name: archiveName, type: "application/zip", plan };
+        totalBytes += plan.totalBytes; entryCount += plan.entries.length;
+        metadataBytes += plan.entries.reduce((total, entry) => total + Buffer.byteLength(entry.name), 0);
+      } else throw fail("VAULT_ARCHIVE_FAILED");
+      if (!Number.isSafeInteger(totalBytes) || totalBytes > maxBytes || entryCount > maxEntries || metadataBytes > 1024 * 1024) throw fail("VAULT_LIMIT");
+      names.push(name); items.push(item);
+    }
+    return { names, items, totalBytes };
+  } catch (error) { throw failure(error); }
+}
 async function planArchive(selected, { signal, maxBytes = MAX_ARCHIVE_BYTES, maxEntries = MAX_ENTRIES, maxDepth = MAX_DEPTH } = {}) {
   if (!Array.isArray(selected) || !selected.length || selected.length > MAX_SELECTION ||
       selected.some(value => typeof value !== "string" || !path.isAbsolute(value))) throw fail("VAULT_ARCHIVE_FAILED");
@@ -215,4 +264,168 @@ async function createVaultArchive(plan, { signal } = {}) {
     throw failure(caught);
   }
 }
-module.exports = { parseVaultArguments, planArchive, createVaultArchive, MAX_READ_BYTES, MAX_ARCHIVE_BYTES, MAX_SELECTION };
+function selectionArchiveSize(plan, signal) {
+  const zip = new ZipFile();
+  let size, error;
+  zip.on("error", caught => { error ||= failure(caught); });
+  zip.outputStream.on("error", () => {});
+  try {
+    for (const entry of plan.entries) {
+      signal?.throwIfAborted();
+      if (entry.info.isDirectory()) zip.addEmptyDirectory(entry.name, { mtime: new Date(Number(entry.info.mtimeMs)), mode: 0o40755 });
+      else zip.addReadStreamLazy(entry.name, { size: Number(entry.info.size), compress: false,
+        mtime: new Date(Number(entry.info.mtimeMs)), mode: 0o100600 }, () => {});
+    }
+    // Stored entries have a size determined entirely by their metadata. No
+    // source callback opens a file, and this short-lived ZIP is discarded.
+    zip.end(total => { size = total; });
+    if (error) throw error;
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_ARCHIVE_BYTES) throw fail("VAULT_LIMIT");
+    return size;
+  } finally { zip.outputStream.destroy(); }
+}
+function selectionLastModified(info) {
+  const value = Number(info.mtimeMs);
+  return Number.isSafeInteger(value) && value >= 0 && value <= 8640000000000000 ? value : undefined;
+}
+function createRawSelectionSource(item, { signal } = {}) {
+  const entry = item.entry;
+  let handle = null, closing = null, position = 0, reading = false, closed = false, finished = false, error = null;
+  const check = () => {
+    if (closed) throw error || abortError();
+    signal?.throwIfAborted();
+  };
+  async function close() {
+    const previous = handle; handle = null;
+    if (previous) closing = Promise.allSettled([closing, previous.close()]);
+    const pending = closing;
+    await pending;
+    if (closing === pending) closing = null;
+  }
+  function stop(reason) {
+    closed = true; error ||= failure(reason);
+    signal?.removeEventListener("abort", onAbort);
+    return close();
+  }
+  const onAbort = () => { void stop(abortError()); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  async function verifyPath() {
+    const info = await lstat(entry.file, { bigint: true }); check();
+    if (info.isSymbolicLink()) throw fail("VAULT_SYMLINK");
+    if (!info.isFile() || !same(entry.info, info)) throw fail();
+  }
+  return {
+    id: randomUUID(), kind: "file", name: item.name, type: item.type, size: item.size,
+    lastModified: selectionLastModified(entry.info),
+    async read(offset, length) {
+      check();
+      if (finished || reading || !Number.isSafeInteger(offset) || offset !== position || !Number.isSafeInteger(length) ||
+          length < 0 || length > MAX_READ_BYTES || offset + length > item.size || (!length && item.size !== 0)) throw fail("VAULT_ARCHIVE_FAILED");
+      reading = true;
+      const result = Buffer.alloc(length);
+      try {
+        if (!handle) {
+          await verifyPath();
+          handle = await open(entry.file, O_RDONLY | O_NOFOLLOW | O_NONBLOCK); check();
+        }
+        const before = await handle.stat({ bigint: true }); check();
+        if (!before.isFile() || !same(entry.info, before)) throw fail();
+        let written = 0;
+        while (written < length) {
+          const chunk = await handle.read(result, written, length - written, position + written); check();
+          if (!chunk.bytesRead) throw fail();
+          written += chunk.bytesRead;
+        }
+        const after = await handle.stat({ bigint: true }); check();
+        if (!after.isFile() || !same(entry.info, after)) throw fail();
+        await verifyPath();
+        if (position + length === item.size) {
+          await close(); check(); finished = true;
+          signal?.removeEventListener("abort", onAbort);
+        }
+        position += length;
+        return result;
+      } catch (caught) {
+        result.fill(0); await stop(caught); throw error;
+      } finally { reading = false; }
+    },
+    async cancel() { await stop(abortError()); return true; },
+  };
+}
+function createDirectorySelectionSource(item, { signal } = {}) {
+  const size = selectionArchiveSize(item.plan, signal);
+  let archive = null, opening = null, reading = false, closed = false, position = 0, error = null;
+  const check = () => {
+    if (closed) throw error || abortError();
+    signal?.throwIfAborted();
+  };
+  async function stop(reason) {
+    closed = true; error ||= failure(reason);
+    signal?.removeEventListener("abort", onAbort);
+    await opening?.catch(() => {});
+    await archive?.cancel().catch(() => {});
+  }
+  const onAbort = () => { void stop(abortError()); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  async function verifyDirectories() {
+    for (const entry of item.plan.entries) {
+      if (!entry.info.isDirectory()) continue;
+      const after = await lstat(entry.file, { bigint: true }); check();
+      if (after.isSymbolicLink()) throw fail("VAULT_SYMLINK");
+      if (!after.isDirectory() || !same(entry.info, after)) throw fail();
+    }
+  }
+  return {
+    id: randomUUID(), kind: "directory", name: item.name, type: "application/zip", size,
+    lastModified: selectionLastModified(item.plan.entries[0].info),
+    async read(offset, length) {
+      check();
+      if (reading || !Number.isSafeInteger(offset) || offset !== position || !Number.isSafeInteger(length) ||
+          length < 1 || length > MAX_READ_BYTES || offset + length > size) throw fail("VAULT_ARCHIVE_FAILED");
+      reading = true;
+      let result;
+      try {
+        opening ||= (async () => {
+          await verifyDirectories();
+          const source = await createVaultArchive(item.plan, { signal });
+          if (closed || signal?.aborted) { await source.cancel(); check(); }
+          if (source.size !== size) { await source.cancel(); throw fail(); }
+          archive = source;
+          return source;
+        })();
+        const source = await opening; check();
+        result = await source.read(offset, length); check();
+        if (position + length === size) await verifyDirectories();
+        position += length;
+        if (position === size) signal?.removeEventListener("abort", onAbort);
+        return result;
+      } catch (caught) {
+        result?.fill(0); await stop(caught); throw error;
+      } finally { reading = false; }
+    },
+    async cancel() { await stop(abortError()); return true; },
+  };
+}
+async function createVaultSelection(plan, { signal } = {}) {
+  if (!plan || !Array.isArray(plan.items) || !plan.items.length || plan.items.length > MAX_SELECTION) throw fail("VAULT_ARCHIVE_FAILED");
+  const sources = [];
+  let totalBytes = 0;
+  try {
+    for (const item of plan.items) {
+      signal?.throwIfAborted();
+      selectionName(item.name);
+      if (item.kind === "file" && (!item.entry?.info?.isFile() || !Number.isSafeInteger(item.size) || item.size < 0 || item.size > MAX_ARCHIVE_BYTES)) throw fail("VAULT_ARCHIVE_FAILED");
+      const source = item.kind === "file" ? createRawSelectionSource(item, { signal })
+        : item.kind === "directory" && item.plan?.entries?.[0]?.info?.isDirectory() ? createDirectorySelectionSource(item, { signal }) : null;
+      if (!source) throw fail("VAULT_ARCHIVE_FAILED");
+      sources.push(source); totalBytes += source.size;
+      if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_ARCHIVE_BYTES) throw fail("VAULT_LIMIT");
+    }
+    return sources;
+  } catch (caught) {
+    await Promise.allSettled(sources.map(source => source.cancel()));
+    throw failure(caught);
+  }
+}
+module.exports = { parseVaultArguments, planArchive, createVaultArchive, planSelection, createVaultSelection,
+  MAX_READ_BYTES, MAX_ARCHIVE_BYTES, MAX_SELECTION };

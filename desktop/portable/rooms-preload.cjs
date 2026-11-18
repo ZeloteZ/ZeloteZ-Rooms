@@ -27,9 +27,14 @@ function vaultPrepareDownload(input) {
     .finally(() => { vaultSaving = false; });
 }
 function vaultReadArchive(id, offset, length) {
-  if (vaultReading || !vaultUuid(id) || !vaultOffset(offset) || !Number.isSafeInteger(length) || length < 1 || length > 4 * 1024 * 1024 || offset + length > 1024 ** 4) return vaultInvalid();
+  if (vaultReading || !vaultUuid(id) || !vaultOffset(offset) || !Number.isSafeInteger(length) || length < 0 || length > 4 * 1024 * 1024 || offset + length > 1024 ** 4) return vaultInvalid();
   vaultReading = true;
   return vaultInvoke("rooms:vault-archive-read", id, offset, length).finally(() => { vaultReading = false; });
+}
+function vaultReadSelection(id, offset, length) {
+  if (vaultReading || !vaultUuid(id) || !vaultOffset(offset) || !Number.isSafeInteger(length) || length < 0 || length > 4 * 1024 * 1024 || offset + length > 1024 ** 4) return vaultInvalid();
+  vaultReading = true;
+  return vaultInvoke("rooms:vault-selection-read", id, offset, length).finally(() => { vaultReading = false; });
 }
 function vaultWriteDownload(id, offset, input) {
   if (vaultWriting || vaultFinishing || !vaultUuid(id) || !vaultOffset(offset) || (!ArrayBuffer.isView(input) && !(input instanceof ArrayBuffer))) return vaultInvalid();
@@ -63,6 +68,10 @@ if (process.isMainFrame && ["win32", "linux"].includes(process.platform)) contex
   readArchive: vaultReadArchive,
   cancelArchive: id => id === undefined || id === null || vaultUuid(id)
     ? vaultInvoke("rooms:vault-archive-cancel", id) : vaultInvalid(),
+  prepareSelection: () => vaultInvoke("rooms:vault-selection-prepare"),
+  readSelection: vaultReadSelection,
+  cancelSelection: id => id === undefined || id === null || vaultUuid(id)
+    ? vaultInvoke("rooms:vault-selection-cancel", id) : vaultInvalid(),
   prepareDownload: vaultPrepareDownload,
   writeDownload: vaultWriteDownload,
   completeDownload: vaultCompleteDownload,

@@ -377,8 +377,11 @@ export function renderVault(context) {
       const done = typeof value === "number" ? value : value.done ?? value.loaded ?? 0;
       const total = typeof value === "number" ? 1 : value.total ?? 1;
       progress.max = Math.max(1, total); progress.value = Math.min(done, total);
+      const percent = Math.min(100, Math.round(done / Math.max(1, total) * 100));
       tell(note, typeof value === "object" && value.phase === "saving" ? t("Saving verified file…", "Geprüfte Datei wird gespeichert …")
-        : t("{percent}% complete", "{percent}% abgeschlossen", { percent: Math.min(100, Math.round(done / Math.max(1, total) * 100)) }));
+        : typeof value === "object" && value.fileName ? t("{index}/{count} · {name} · {percent}% complete", "{index}/{count} · {name} · {percent}% abgeschlossen",
+          { index: value.fileIndex, count: value.fileCount, name: value.fileName, percent })
+          : t("{percent}% complete", "{percent}% abgeschlossen", { percent }));
     };
     return Promise.resolve().then(() => task({ signal: combined, onProgress: update })).then(() => {
       if (current()) notify(title + " · " + t("Completed", "Abgeschlossen"));
@@ -512,20 +515,20 @@ export function renderVault(context) {
     const pendingNote = status();
     const install = button(t("Install context menu", "Kontextmenü installieren"), () => updateIntegration(true));
     const remove = button(t("Remove context menu", "Kontextmenü entfernen"), () => updateIntegration(false), { class: "ghost" });
-    const create = button(t("Encrypt selected files as ZIP", "Auswahl als ZIP verschlüsseln"), archiveSelection, { class: "primary", hidden: true });
+    const create = button(t("Encrypt and upload selected items", "Auswahl verschlüsseln und hochladen"), uploadSelection, { class: "primary", hidden: true });
     let pendingAvailable = false;
     let autoStarted = false;
-    let archiveRunning = false;
-    function maybeStartArchive() {
-      if (!current() || !snapshot.enabled || !pendingAvailable || autoStarted || archiveRunning) return;
+    let selectionRunning = false;
+    function maybeStartSelection() {
+      if (!current() || !snapshot.enabled || !pendingAvailable || autoStarted || selectionRunning) return;
       autoStarted = true;
-      queueMicrotask(() => { if (current() && snapshot.enabled && pendingAvailable) void archiveSelection(); });
+      queueMicrotask(() => { if (current() && snapshot.enabled && pendingAvailable) void uploadSelection(); });
     }
-    refreshNative = () => { create.disabled = snapshot.enabled !== true || archiveRunning; maybeStartArchive(); };
+    refreshNative = () => { create.disabled = snapshot.enabled !== true || selectionRunning; maybeStartSelection(); };
     const panel = el("section", { class: "panel stack vault-desktop-panel" },
       el("h2", {}, t("File manager integration", "Dateimanager-Integration")),
-      el("p", { class: "muted" }, t("Add “Share securely via Vault” to your file manager. Selected files and folders are compressed into a ZIP and encrypted on this device before upload.",
-        "Ergänze „Share securely via Vault“ im Dateimanager. Ausgewählte Dateien und Ordner werden auf diesem Gerät als ZIP zusammengefasst und vor dem Upload verschlüsselt.")),
+      el("p", { class: "muted" }, t("Add “Share securely via Vault” to your file manager. Files keep their original names; each folder becomes a separate ZIP. Every item is encrypted on this device before upload.",
+        "Ergänze „Share securely via Vault“ im Dateimanager. Dateien behalten ihren Originalnamen; jeder Ordner wird zu einem eigenen ZIP. Jedes Element wird vor dem Upload auf diesem Gerät verschlüsselt.")),
       el("p", { class: "subtle" }, t("Completely restart your file manager after installing, updating or removing its context-menu integration.",
         "Starte deinen Dateimanager nach dem Installieren, Aktualisieren oder Entfernen der Kontextmenü-Integration vollständig neu.")),
       info, el("div", { class: "inline" }, install, remove), pendingNote, create);
@@ -560,29 +563,41 @@ export function renderVault(context) {
         if (!current()) return;
         pendingAvailable = pending?.available === true;
         create.hidden = !pending?.available;
-        create.disabled = snapshot.enabled !== true || archiveRunning;
+        create.disabled = snapshot.enabled !== true || selectionRunning;
         tell(pendingNote, pending?.available ? t("Selected items: {count}", "Ausgewählte Elemente: {count}", { count: pending.count }) : "");
-        maybeStartArchive();
+        maybeStartSelection();
       } catch (error) { if (current()) tell(pendingNote, error.message, "error"); }
     }
-    async function archiveSelection() {
-      if (archiveRunning || !snapshot.enabled || !current()) return;
-      archiveRunning = true;
+    async function uploadSelection() {
+      if (selectionRunning || !snapshot.enabled || !current()) return;
+      selectionRunning = true;
       create.disabled = true;
-      let uploaded;
-      await transfer(t("Preparing encrypted ZIP", "Verschlüsseltes ZIP wird vorbereitet"), async options => {
-        uploaded = await uploadNativeVaultSelection(desktop, client, { ...options, parentId });
+      const uploaded = [];
+      let complete = false, failure;
+      await transfer(t("Uploading selected items securely", "Auswahl wird sicher hochgeladen"), async options => {
+        try {
+          await uploadNativeVaultSelection(desktop, client, { ...options, parentId, onUploaded: entry => uploaded.push(entry) });
+          complete = true;
+        } catch (error) { failure = error; throw error; }
       });
-      archiveRunning = false;
+      selectionRunning = false;
       await pendingSelection();
-      if (uploaded && current()) {
-        if (document.querySelector("#dialog")?.open) notify(t(
-          "Your encrypted ZIP is ready. Open its file menu to share it.", "Dein verschlüsseltes ZIP ist bereit. Öffne zum Teilen sein Dateimenü."));
-        else await shareEntry(uploaded);
+      if (uploaded.length && current()) {
+        if (complete && uploaded.length === 1 && !document.querySelector("#dialog")?.open) await shareEntry(uploaded[0]);
+        else {
+          const message = complete ? t("Uploaded {count} items. Use their file menus to share them.",
+            "{count} Elemente hochgeladen. Über ihre Dateimenüs kannst du sie teilen.", { count: uploaded.length })
+            : t("Already uploaded: {count} items. Use their file menus to share them.",
+              "Bereits hochgeladen: {count} Elemente. Über ihre Dateimenüs kannst du sie teilen.", { count: uploaded.length });
+          notify(complete ? message : (failure?.name === "AbortError" ? t("Cancelled", "Abgebrochen") : failure?.message) + " · " + message);
+        }
       }
     }
     const unsubscribe = desktop.onPending?.(() => { autoStarted = false; void pendingSelection(); });
-    signal.addEventListener("abort", () => { unsubscribe?.(); void desktop.cancelArchive().catch(() => {}); }, { once: true });
+    signal.addEventListener("abort", () => {
+      unsubscribe?.();
+      void desktop[typeof desktop.cancelSelection === "function" ? "cancelSelection" : "cancelArchive"]().catch(() => {});
+    }, { once: true });
     void statusIntegration(); void pendingSelection();
     return panel;
   }

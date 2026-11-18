@@ -26,7 +26,7 @@ async function fixture(t, options = {}) {
     call: (name, ...args) => handlers.get("rooms:vault-" + name)(event, ...args) };
 }
 
-test("a failed ZIP selection cannot poison the next separate context-menu action", async t => {
+test("a failed native selection cannot poison the next separate context-menu action", async t => {
   const f = await fixture(t);
   f.select([path.join(f.directory, "Missing.txt")]); await pause(280);
   await assert.rejects(f.call("archive-prepare")); assert.equal(f.dialogs.length, 0);
@@ -55,7 +55,7 @@ test("one immediate multi-launch burst still combines selections", async t => {
   const f = await fixture(t); const next = path.join(f.directory, "Next.txt"); await writeFile(next, "next");
   f.select([f.good]); f.select([next]); await pause(280);
   assert.deepEqual(await f.call("pending"), { available: true, count: 2 });
-  const prepared = await f.call("archive-prepare"); assert.ok(prepared.size > 0);
+  const prepared = await f.call("selection-prepare"); assert.equal(prepared.files.length, 2);
 });
 
 test("native errors expose only recognized categories, never private paths or raw causes", async t => {

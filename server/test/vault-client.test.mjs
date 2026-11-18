@@ -350,40 +350,168 @@ test('save-file suggestions neutralize Windows reserved names and characters wit
   assert.equal(f.file.name, 'private-plan-计划.txt')
 })
 
-test('declining native ZIP confirmation keeps the original selection available', async () => {
+test('declining native selection confirmation keeps the original selection available', async () => {
   const cancelled = []
-  const bridge = { prepareArchive: async () => null, cancelArchive: async id => cancelled.push(id) }
+  const bridge = { prepareSelection: async () => null, cancelSelection: async id => cancelled.push(id),
+    readSelection() { throw new Error('must not read') } }
   await assert.rejects(client.uploadNativeVaultSelection(bridge, { upload() { throw new Error('must not upload') } }), { name: 'AbortError' })
   assert.deepEqual(cancelled, [])
 })
 
-test('explicit transfer cancellation stops native planning before an archive ID exists', async () => {
+test('explicit transfer cancellation stops native planning before a selection ID exists', async () => {
   const controller = new AbortController(), cancelled = []
   let finishPrepare
-  const bridge = { prepareArchive: () => new Promise(resolve => { finishPrepare = resolve }),
-    cancelArchive: async id => { cancelled.push(id); finishPrepare(null) } }
+  const bridge = { prepareSelection: () => new Promise(resolve => { finishPrepare = resolve }),
+    cancelSelection: async id => { cancelled.push(id); finishPrepare(null) }, readSelection() { throw new Error('must not read') } }
   const pending = client.uploadNativeVaultSelection(bridge, { upload() { throw new Error('must not upload') } }, { signal: controller.signal })
   controller.abort()
   await assert.rejects(pending, { name: 'AbortError' })
   assert.deepEqual(cancelled, [undefined])
 })
 
-test('native ZIP adapter reads only the approved handle sequentially and cleans it after upload', async () => {
+test('native file adapter preserves the original name and reads only bounded approved ranges', async () => {
   const cancelled = [], reads = []
-  const archive = { id: 'approved-id', name: 'Selection.zip', type: 'application/zip', size: 5 }
-  const bridge = { prepareArchive: async (...args) => { assert.deepEqual(args, []); return archive },
-    readArchive: async (id, offset, length) => { reads.push([id, offset, length]);
-      return offset === 0 ? new Uint8Array([99, 9, 8, 99]).subarray(1, 3) : new Uint8Array([7, 6, 5]) },
-    cancelArchive: async id => cancelled.push(id) }
+  const first = new Uint8Array([99, 9, 8, 99]), second = new Uint8Array([7, 6, 5])
+  const selected = { id: randomUUID(), name: 'Clip.mp4', type: 'video/mp4', size: 5, lastModified: 1700000000000 }
+  const selection = { id: randomUUID(), files: [selected] }
+  const bridge = { prepareSelection: async (...args) => { assert.deepEqual(args, []); return selection },
+    readSelection: async (id, offset, length) => { reads.push([id, offset, length]);
+      return offset === 0 ? first.subarray(1, 3) : second },
+    cancelSelection: async id => cancelled.push(id) }
   const service = { async upload(file, parentId) {
-    assert.equal(file.name, archive.name); assert.equal(file.size, 5); assert.equal(file.type, 'application/zip'); assert.equal(parentId, 'destination')
+    assert.equal(file.name, 'Clip.mp4'); assert.equal(file.size, 5); assert.equal(file.type, 'video/mp4'); assert.equal(parentId, 'destination')
+    assert.equal(file.lastModified, selected.lastModified)
     assert.deepEqual(new Uint8Array(await file.slice(0, 2).arrayBuffer()), new Uint8Array([9, 8]))
     assert.deepEqual(new Uint8Array(await file.slice(2, 5).arrayBuffer()), new Uint8Array([7, 6, 5]))
     return { id: 'uploaded-entry' }
   } }
-  assert.deepEqual(await client.uploadNativeVaultSelection(bridge, service, { parentId: 'destination' }), { id: 'uploaded-entry' })
-  assert.deepEqual(reads, [['approved-id', 0, 2], ['approved-id', 2, 3]])
-  assert.deepEqual(cancelled, ['approved-id'])
+  assert.deepEqual(await client.uploadNativeVaultSelection(bridge, service, { parentId: 'destination' }), [{ id: 'uploaded-entry' }])
+  assert.deepEqual(reads, [[selected.id, 0, 2], [selected.id, 2, 3]])
+  assert.deepEqual(cancelled, [selection.id])
+  assert.deepEqual(first, new Uint8Array([99, 0, 0, 99]))
+  assert.deepEqual(second, new Uint8Array(3))
+})
+
+test('old desktop versions require an update without silently archiving files', async () => {
+  const bridge = { prepareArchive() { throw new Error('must not use the old ZIP fallback') } }
+  await assert.rejects(client.uploadNativeVaultSelection(bridge, { upload() { throw new Error('must not upload') } }), /Update the desktop app/u)
+})
+
+test('mixed native selections become separate E2EE entries after one confirmation, including empty files', async t => {
+  const f = await fixture(t), service = client.createVaultClient({ user: f.user })
+  t.after(() => service.close())
+  const inputs = [
+    { id: randomUUID(), name: 'Original 计划.txt', type: 'text/plain', data: encode('Original private text'), lastModified: 1700000000000 },
+    { id: randomUUID(), name: 'Holiday.zip', type: 'application/zip', data: new Uint8Array([80, 75, 3, 4, 8, 7]) },
+    { id: randomUUID(), name: 'empty.bin', type: 'application/octet-stream', data: new Uint8Array() },
+  ]
+  const selection = { id: randomUUID(), files: inputs.map(({ data, ...item }) => ({ ...item, size: data.length })) }
+  const reads = [], cancelled = [], snapshots = [], encrypted = new Map(), notifications = [], progress = []
+  let prepared = 0, activeId
+  const bridge = {
+    async prepareSelection(...args) { prepared++; assert.deepEqual(args, []); return selection },
+    async readSelection(id, offset, length) {
+      reads.push([id, offset, length])
+      const input = inputs.find(item => item.id === id)
+      assert.ok(input); assert.ok(length <= vault.CHUNK_SIZE)
+      return input.data.slice(offset, offset + length)
+    },
+    async cancelSelection(id) { cancelled.push(id) },
+  }
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/vault/entries') {
+      const body = JSON.parse(options.body)
+      assert.equal(activeId, undefined, 'uploads must finish sequentially')
+      activeId = body.id; snapshots.push(body)
+      for (const input of inputs) assert.ok(!options.body.includes(input.name), 'names must be encrypted before upload')
+      return json({ entry: { ...body, state: 'uploading' } })
+    }
+    if (url === '/api/vault/entries/' + activeId + '/chunks/0') {
+      const bytes = new Uint8Array(options.body)
+      const source = inputs[snapshots.length - 1].data
+      assert.equal(bytes.length, source.length + 28)
+      assert.notDeepEqual(bytes, source)
+      encrypted.set(activeId, bytes)
+      return json({})
+    }
+    if (url === '/api/vault/entries/' + activeId + '/complete') { activeId = undefined; return json({}) }
+    throw new Error('Unexpected endpoint: ' + url)
+  }
+  const uploaded = await client.uploadNativeVaultSelection(bridge, service, { onUploaded: entry => notifications.push(entry), onProgress: value => progress.push(value) })
+  assert.equal(prepared, 1)
+  assert.deepEqual(uploaded.map(entry => [entry.name, entry.type]), inputs.map(item => [item.name, item.type]))
+  assert.deepEqual(notifications, uploaded)
+  assert.equal(new Set(snapshots.map(entry => entry.descriptor.contentId)).size, inputs.length)
+  assert.deepEqual(reads, inputs.map(item => [item.id, 0, item.data.length]))
+  assert.deepEqual(cancelled, [selection.id])
+  assert.equal(progress.at(-1).done, progress.at(-1).total)
+  assert.deepEqual([...new Set(progress.map(value => value.fileName))], inputs.map(item => item.name))
+  for (const [index, entry] of uploaded.entries()) {
+    const opened = await vault.openEntry(f.user, entry)
+    assert.deepEqual(await vault.decryptChunk(opened.secret, entry.descriptor, 0, encrypted.get(entry.id)), inputs[index].data)
+    vault.destroySecret(opened.secret)
+  }
+})
+
+test('later native upload failures retain completed entries and stop the remaining selection', async () => {
+  const selection = { id: randomUUID(), files: ['one.txt', 'two.txt', 'three.txt'].map(name => ({ id: randomUUID(), name, size: 1, type: 'text/plain' })) }
+  const cancelled = [], uploaded = [], started = []
+  const bridge = { prepareSelection: async () => selection, readSelection: async () => new Uint8Array([7]),
+    cancelSelection: async id => cancelled.push(id) }
+  const service = { async upload(file) {
+    started.push(file.name)
+    if (file.name === 'two.txt') throw new Error('quota exceeded')
+    return { id: randomUUID(), name: file.name }
+  } }
+  await assert.rejects(client.uploadNativeVaultSelection(bridge, service, { onUploaded: entry => uploaded.push(entry) }), /quota exceeded/u)
+  assert.deepEqual(started, ['one.txt', 'two.txt'])
+  assert.deepEqual(uploaded.map(entry => entry.name), ['one.txt'])
+  assert.deepEqual(cancelled, [selection.id])
+})
+
+test('native transfer cancellation retains a completed item without starting the next one', async () => {
+  const controller = new AbortController(), cancelled = [], uploaded = [], started = []
+  const selection = { id: randomUUID(), files: ['one.txt', 'two.txt'].map(name => ({ id: randomUUID(), name, size: 1, type: 'text/plain' })) }
+  const bridge = { prepareSelection: async () => selection, readSelection: async () => new Uint8Array([7]), cancelSelection: async id => cancelled.push(id) }
+  const service = { async upload(file) { started.push(file.name); return { id: randomUUID(), name: file.name } } }
+  await assert.rejects(client.uploadNativeVaultSelection(bridge, service, { signal: controller.signal,
+    onUploaded(entry) { uploaded.push(entry); controller.abort() } }), { name: 'AbortError' })
+  assert.deepEqual(started, ['one.txt'])
+  assert.deepEqual(uploaded.map(entry => entry.name), ['one.txt'])
+  assert.ok(cancelled.length >= 1)
+  assert.ok(cancelled.every(id => id === selection.id))
+})
+
+test('cancelling a pending native read wipes late plaintext before it can reach the upload encryptor', async () => {
+  const controller = new AbortController(), bytes = new Uint8Array([17, 18, 19])
+  const selection = { id: randomUUID(), files: [{ id: randomUUID(), name: 'private.txt', type: 'text/plain', size: 3 }] }
+  let releaseRead, announceRead
+  const reading = new Promise(resolve => { announceRead = resolve })
+  const bridge = { prepareSelection: async () => selection, readSelection() {
+    announceRead(); return new Promise(resolve => { releaseRead = resolve })
+  }, cancelSelection: async () => {} }
+  const service = { async upload(file) { await file.slice(0, 3).arrayBuffer(); throw new Error('must not receive plaintext') } }
+  const pending = client.uploadNativeVaultSelection(bridge, service, { signal: controller.signal })
+  await reading; controller.abort(); releaseRead(bytes)
+  await assert.rejects(pending, { name: 'AbortError' })
+  assert.deepEqual(bytes, new Uint8Array(3))
+})
+
+test('malformed native descriptors and oversized or truncated reads fail before uploading unapproved bytes', async () => {
+  const valid = { id: randomUUID(), name: 'safe.txt', type: 'text/plain', size: 1 }
+  for (const files of [[valid, valid], [{ ...valid, name: '../unsafe.txt' }], [{ ...valid, size: vault.MAX_FILE_SIZE + 1 }], [{ ...valid, type: 'text/plain\n' }]]) {
+    const selection = { id: randomUUID(), files }, cancelled = []
+    const bridge = { prepareSelection: async () => selection, readSelection() { throw new Error('must not read') }, cancelSelection: async id => cancelled.push(id) }
+    await assert.rejects(client.uploadNativeVaultSelection(bridge, { upload() { throw new Error('must not upload') } }))
+    assert.deepEqual(cancelled, [selection.id])
+  }
+  for (const [start, end, response] of [[-1, 1, new Uint8Array()], [0, 2, new Uint8Array(2)], [0, 1, new Uint8Array()], [0, 1, new Uint8Array(2)], [0, 1, 'not bytes']]) {
+    const selection = { id: randomUUID(), files: [valid] }, cancelled = [], reads = []
+    const bridge = { prepareSelection: async () => selection, readSelection: async (...args) => { reads.push(args); return response }, cancelSelection: async id => cancelled.push(id) }
+    await assert.rejects(client.uploadNativeVaultSelection(bridge, { async upload(file) { await file.slice(start, end).arrayBuffer() } }), /local selection/u)
+    assert.equal(reads.length, start < 0 || end > valid.size ? 0 : 1)
+    assert.deepEqual(cancelled, [selection.id])
+  }
 })
 
 test('default-disabled vault routes return a disabled view without loading file metadata', async t => {

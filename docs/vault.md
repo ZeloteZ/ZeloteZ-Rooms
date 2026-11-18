@@ -89,7 +89,9 @@ If an earlier Rooms version installed a managed entry under **Scripts**, choose 
 
 After installing, updating, or removing the integration, **completely restart the Linux file manager**. Opening another window alone may not load or remove its context-menu extension.
 
-Select a local file or folder and invoke the entry. Rooms opens Vault, shows the destination instance and selection for confirmation, creates a ZIP locally, and encrypts it in chunks before uploading. No unencrypted temporary ZIP is written to disk. The originals remain unchanged. After uploading, choose a recipient or create a link in the sharing dialog. If another dialog is still open, a notification directs you to the uploaded ZIP’s file menu instead.
+Select one or more local files or folders and invoke the entry. Rooms opens Vault and asks you to confirm the destination instance and the complete selection once. Each file is uploaded directly under its original name. Each folder becomes its own **foldername.zip**; a mixed selection therefore creates separate Vault entries for every file and folder. All items are encrypted in chunks on your device before upload. Folder ZIPs are streamed without writing an unencrypted temporary ZIP to disk. The originals remain unchanged.
+
+After a single upload, the sharing dialog lets you choose a recipient or create a link. If another dialog is still open, or several items were uploaded, a notification directs you to their individual file menus instead. Each item can be shared separately. Cancelling or a later error stops the remaining uploads; items already uploaded successfully stay in Vault. Older desktop versions must be updated to use this selection upload.
 
 Folders include their regular contents, including hidden files. Symbolic links and special files are rejected; changed files, unsafe archive paths, and selections exceeding the configured limits abort the operation. Keep selected files unchanged until completion.
 

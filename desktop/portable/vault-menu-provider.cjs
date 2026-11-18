@@ -46,7 +46,7 @@ class ZeloteZVault${namespace}Provider(GObject.GObject, ${namespace}.MenuProvide
         if not paths or not os.path.isfile(_APPIMAGE) or not os.access(_APPIMAGE, os.X_OK):
             return ()
         item = ${namespace}.MenuItem(name="ZeloteZVault::share", label=_LABEL,
-            tip="Share an encrypted ZIP using ZeloteZ Vault", icon="folder-locked")
+            tip="Share files securely using ZeloteZ Vault", icon="folder-locked")
         item.connect("activate", self._share, paths)
         return (item,)
 

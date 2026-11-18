@@ -49,7 +49,7 @@ function owned(value, manager) {
 const pythonManager = manager => manager === "nautilus" || manager === "caja";
 const legacyOwned = value => value.split(/\r?\n/u).includes("# " + marker);
 function thunarBlock(command) {
-  return `${begin}\n<action>\n<icon>folder-locked</icon>\n<name>${label}</name>\n<unique-id>zelotez-vault-v1</unique-id>\n<command>${xml(command)}</command>\n<description>Share an encrypted ZIP using ZeloteZ Vault</description>\n<patterns>*</patterns>\n<directories/>\n<audio-files/>\n<image-files/>\n<other-files/>\n<text-files/>\n<video-files/>\n</action>\n${end}`;
+  return `${begin}\n<action>\n<icon>folder-locked</icon>\n<name>${label}</name>\n<unique-id>zelotez-vault-v1</unique-id>\n<command>${xml(command)}</command>\n<description>Share files securely using ZeloteZ Vault</description>\n<patterns>*</patterns>\n<directories/>\n<audio-files/>\n<image-files/>\n<other-files/>\n<text-files/>\n<video-files/>\n</action>\n${end}`;
 }
 function editThunar(previous, command) {
   let value = previous ?? '<?xml version="1.0" encoding="UTF-8"?>\n<actions>\n</actions>\n';
@@ -83,7 +83,7 @@ function legacyLinuxFiles(env) {
 function linuxEntry(manager, image) {
   if (pythonManager(manager)) return pythonMenuEntry(manager, image);
   const command = `/usr/bin/env -- ${desktopQuote(image)} --vault-share -- %F`;
-  if (manager === "nemo") return `[Nemo Action]\nName=${label}\nComment=Share an encrypted ZIP using ZeloteZ Vault\nExec=${command}\nSelection=notnone\nExtensions=any;\nQuote=double\nUriScheme=file\n${marker}\n`;
+  if (manager === "nemo") return `[Nemo Action]\nName=${label}\nComment=Share files securely using ZeloteZ Vault\nExec=${command}\nSelection=notnone\nExtensions=any;\nQuote=double\nUriScheme=file\n${marker}\n`;
   return `[Desktop Entry]\nType=Service\nMimeType=all/all;inode/directory;\nActions=ZeloteZVault;\nX-KDE-Priority=TopLevel\n${marker}\n\n[Desktop Action ZeloteZVault]\nName=${label}\nIcon=folder-locked\nExec=${command}\n`;
 }
 const thunarCommand = image => `/usr/bin/env -- ${commandQuote(image).replaceAll("%", "%%")} --vault-share -- %F`;

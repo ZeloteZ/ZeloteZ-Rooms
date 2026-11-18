@@ -1,6 +1,6 @@
 import { t } from "./i18n.js";
 import { accountHeaders, api, checkAccountResponse } from "./ui.js";
-import { CHUNK_SIZE, createFile, createFolder, openEntry, renameEntry, encryptChunk, decryptChunk, destroySecret,
+import { CHUNK_SIZE, MAX_FILE_SIZE, validateName, createFile, createFolder, openEntry, renameEntry, encryptChunk, decryptChunk, destroySecret,
   sealMemberShare, openMemberShare, createShare, openShare, sealShareLink, openShareLink, validateDescriptor } from "./vault-crypto.js";
 
 export const BLOB_DOWNLOAD_LIMIT = 128 * 1024 * 1024;
@@ -212,29 +212,73 @@ function pause(milliseconds, signal) {
   });
 }
 
-export async function uploadNativeVaultSelection(bridge, service, { parentId = null, signal, onProgress } = {}) {
+export async function uploadNativeVaultSelection(bridge, service, { parentId = null, signal, onProgress, onUploaded } = {}) {
   cancelled(signal);
-  let archive;
-  const abort = () => { void bridge.cancelArchive(archive?.id).catch(() => {}); };
+  if (!["prepareSelection", "readSelection", "cancelSelection"].every(method => typeof bridge?.[method] === "function")) {
+    throw new Error(t("Update the desktop app to share files and folders separately via Vault.",
+      "Aktualisiere die Desktop-App, um Dateien und Ordner einzeln über Vault zu teilen."));
+  }
+  let selection;
+  const invalid = () => new Error(t("The local selection is unavailable. Select the files again.",
+    "Die lokale Auswahl ist nicht verfügbar. Wähle die Dateien erneut aus."));
+  const abort = () => { void bridge.cancelSelection(selection?.id).catch(() => {}); };
   signal?.addEventListener("abort", abort, { once: true });
   try {
-    archive = await bridge.prepareArchive();
-    if (!archive) throw new DOMException("Cancelled", "AbortError");
+    selection = await bridge.prepareSelection();
+    if (!selection) throw new DOMException("Cancelled", "AbortError");
     cancelled(signal);
-    const file = { name: archive.name, type: archive.type, size: archive.size, lastModified: 0,
-      slice(start, end) { return { async arrayBuffer() {
-        cancelled(signal);
-        const bytes = await bridge.readArchive(archive.id, start, end - start);
-        cancelled(signal);
-        return bytes instanceof ArrayBuffer ? bytes : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-      } }; } };
-    return await service.upload(file, parentId, { signal, onProgress });
+    if (!UUID.test(selection.id ?? "") || !Array.isArray(selection.files) || !selection.files.length || selection.files.length > 256) throw invalid();
+    const seen = new Set();
+    const files = selection.files.map(item => {
+      if (!item || !UUID.test(item.id ?? "") || seen.has(item.id) || !Number.isSafeInteger(item.size) || item.size < 0 || item.size > MAX_FILE_SIZE ||
+          typeof item.type !== "string" || item.type.length > 128 || !/^[\x20-\x7e]*$/u.test(item.type) ||
+          (item.lastModified !== undefined && (!Number.isSafeInteger(item.lastModified) || item.lastModified < 0))) throw invalid();
+      seen.add(item.id);
+      return Object.freeze({ id: item.id, name: validateName(item.name), type: item.type, size: item.size, lastModified: item.lastModified ?? 0 });
+    });
+    const total = files.reduce((sum, file) => sum + Math.max(1, file.size), 0);
+    const uploaded = [];
+    let completedBytes = 0;
+    for (const [index, item] of files.entries()) {
+      cancelled(signal);
+      const progress = done => onProgress?.({ done: completedBytes + Math.min(item.size, Math.max(0, done)), total,
+        fileName: item.name, fileIndex: index + 1, fileCount: files.length });
+      progress(0);
+      const file = { name: item.name, type: item.type, size: item.size, lastModified: item.lastModified,
+        slice(start, end) { return { async arrayBuffer() {
+          cancelled(signal);
+          if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > item.size || end - start > CHUNK_SIZE) throw invalid();
+          const bytes = await bridge.readSelection(item.id, start, end - start);
+          let transferred = false;
+          try {
+            cancelled(signal);
+            if (!(bytes instanceof ArrayBuffer) && !ArrayBuffer.isView(bytes)) throw invalid();
+            if (bytes.byteLength !== end - start) throw invalid();
+            if (bytes instanceof ArrayBuffer) { transferred = true; return bytes; }
+            return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+          } finally {
+            // The upload encryptor wipes its returned buffer; discard extra IPC
+            // copies immediately, including rejected or cancelled reads.
+            if (!transferred) {
+              if (bytes instanceof ArrayBuffer) new Uint8Array(bytes).fill(0);
+              else if (ArrayBuffer.isView(bytes)) new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength).fill(0);
+            }
+          }
+        } }; } };
+      const entry = await service.upload(file, parentId, { signal, onProgress: value => progress(value.done ?? value.loaded ?? 0) });
+      uploaded.push(entry);
+      onUploaded?.(entry);
+      completedBytes += Math.max(1, item.size);
+      onProgress?.({ done: completedBytes, total, fileName: item.name, fileIndex: index + 1, fileCount: files.length });
+    }
+    cancelled(signal);
+    return uploaded;
   } catch (error) { cancelled(signal); throw error; }
   finally {
     signal?.removeEventListener("abort", abort);
     // A declined native confirmation keeps the selection available for retry.
     // Explicit transfer cancellation above discards it even before an ID exists.
-    if (archive?.id) await bridge.cancelArchive(archive.id).catch(() => {});
+    if (selection?.id) await bridge.cancelSelection(selection.id).catch(() => {});
   }
 }
 
