@@ -2,7 +2,7 @@ export const VAULT_EXPLORER_ROOT = "root";
 export const VAULT_EXPLORER_SHARED = "shared";
 const UNKNOWN_SENDER = "unknown-sender";
 const MAX_DEPTH = 32;
-const MAX_COLUMNS = 3;
+const MAX_COLUMNS = 2;
 const empty = Object.freeze([]);
 const identifier = value => typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
 const label = (value, fallback = "") => typeof value === "string" && value.trim() ? value : fallback;

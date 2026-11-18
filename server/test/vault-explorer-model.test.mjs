@@ -81,23 +81,23 @@ test('listing sorts folders first and numeric file names naturally without modif
   assert.deepEqual(entries.map(n => n.id), ['10', '2', 'z'])
 })
 
-test('full breadcrumbs retain deep paths while three columns preserve root, first child and current folder', () => {
+test('full breadcrumbs retain deep paths while two columns show only root and the current folder', () => {
   const m = model([own('a'), own('b', 'a'), own('c', 'b'), own('d', 'c'), own('e', 'd')])
   const nav = navigateVaultExplorer(m, [], 'own:e')
   assert.deepEqual(nav, [ROOT, 'own:a', 'own:b', 'own:c', 'own:d', 'own:e'])
   const view = vaultExplorerView(m, nav)
   assert.deepEqual(view.breadcrumbs.map(n => n.ref), nav)
-  assert.deepEqual(view.columns.map(n => n.ref), [ROOT, 'own:a', 'own:e'])
-  assert.deepEqual(view.columns.map(n => n.selectedRef), ['own:a', 'own:b', null])
+  assert.deepEqual(view.columns.map(n => n.ref), [ROOT, 'own:e'])
+  assert.deepEqual(view.columns.map(n => n.selectedRef), ['own:a', null])
   assert.equal(view.selected.ref, 'own:e')
-  assert.equal(view.columns[1].node, m.node('own:a'))
+  assert.equal(view.columns[1].node, m.node('own:e'))
   assert.ok(Object.isFrozen(view.path) && Object.isFrozen(view.columns))
 })
 
 test('responsive column limits preserve the canonical path and actual next-child selection', () => {
   const m = model([own('a'), own('b', 'a'), own('c', 'b'), own('d', 'c')])
   const nav = navigateVaultExplorer(m, [], 'own:d')
-  const expected = new Map([[1, ['own:d']], [2, [ROOT, 'own:d']], [3, [ROOT, 'own:a', 'own:d']]])
+  const expected = new Map([[1, ['own:d']], [2, [ROOT, 'own:d']]])
   for (const [maxColumns, refs] of expected) {
     const view = vaultExplorerView(m, nav, { maxColumns })
     assert.deepEqual(view.path, nav)
@@ -112,18 +112,18 @@ test('responsive column limits preserve the canonical path and actual next-child
   }
 })
 
-test('invalid responsive limits fall back to three columns without coercion or extra panels', () => {
+test('invalid responsive limits fall back to two columns without coercion or extra panels', () => {
   const m = model([own('a'), own('b', 'a'), own('c', 'b')])
   const nav = navigateVaultExplorer(m, [], 'own:c')
-  for (const maxColumns of [undefined, null, 0, -1, 4, 999, 1.5, NaN, Infinity, '1', true, {}, 1n]) {
-    assert.deepEqual(vaultExplorerView(m, nav, { maxColumns }).columns.map(n => n.ref), [ROOT, 'own:a', 'own:c'])
+  for (const maxColumns of [undefined, null, 0, -1, 3, 4, 999, 1.5, NaN, Infinity, '1', true, {}, 1n]) {
+    assert.deepEqual(vaultExplorerView(m, nav, { maxColumns }).columns.map(n => n.ref), [ROOT, 'own:c'])
   }
 })
 
-test('repeated deep navigation never grows more columns or loses full breadcrumbs at limits one to three', () => {
+test('repeated deep navigation never grows more columns or loses full breadcrumbs at limits one and two', () => {
   const entries = Array.from({ length: 32 }, (_, i) => own('d' + i, i ? 'd' + (i - 1) : null))
   const m = model(entries)
-  for (const maxColumns of [1, 2, 3]) {
+  for (const maxColumns of [1, 2]) {
     let nav = [ROOT]
     for (const i of [...entries.keys(), ...[...entries.keys()].reverse()]) {
       nav = navigateVaultExplorer(m, nav, 'own:d' + i)
@@ -133,7 +133,6 @@ test('repeated deep navigation never grows more columns or loses full breadcrumb
       assert.equal(view.columns.length, Math.min(maxColumns, i + 2))
       assert.equal(view.columns.at(-1).ref, 'own:d' + i)
       if (maxColumns >= 2) assert.equal(view.columns[0].ref, ROOT)
-      if (maxColumns === 3 && i >= 1) assert.equal(view.columns[1].ref, 'own:d0')
       for (const column of view.columns) assert.equal(column.node, m.node(column.ref))
     }
     assert.deepEqual(vaultExplorerView(m, [ROOT], { maxColumns }).columns.map(n => n.ref), [ROOT])
@@ -143,7 +142,7 @@ test('repeated deep navigation never grows more columns or loses full breadcrumb
 test('Shared navigation reduces responsively without treating omitted Shared or sender folders as root', () => {
   const m = model([], [received('a', 'file')])
   const nav = navigateVaultExplorer(m, [], 'sender:sender-a')
-  const expected = new Map([[1, ['sender:sender-a']], [2, [ROOT, 'sender:sender-a']], [3, nav]])
+  const expected = new Map([[1, ['sender:sender-a']], [2, [ROOT, 'sender:sender-a']]])
   for (const [maxColumns, refs] of expected) {
     const view = vaultExplorerView(m, nav, { maxColumns })
     assert.deepEqual(view.path, [ROOT, SHARED, 'sender:sender-a'])
@@ -167,7 +166,7 @@ test('virtual Shared navigation is part of the same canonical root path', () => 
   const nav = navigateVaultExplorer(m, ['own:stale'], 'sender:sender-a')
   assert.deepEqual(nav, [ROOT, SHARED, 'sender:sender-a'])
   assert.deepEqual(m.path('share:a').map(n => n.ref), [...nav, 'share:a'])
-  assert.deepEqual(vaultExplorerView(m, nav).columns.map(n => n.ref), nav)
+  assert.deepEqual(vaultExplorerView(m, nav).columns.map(n => n.ref), [ROOT, 'sender:sender-a'])
 })
 
 test('refresh follows the actual path of an existing moved folder, retaining stable references', () => {

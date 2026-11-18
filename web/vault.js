@@ -79,8 +79,8 @@ export function renderVault(context) {
   const banner = el("div", { class: "room-header-content vault-header" },
     el("a", { class: "room-home-link", href: "#/rooms" }, t("Home", "Home")),
     el("div", { class: "room-hero vault-hero" },
-      el("h1", { id: "vault-heading", class: "sr-only", tabindex: -1 }, t("Files", "Dateien")), breadcrumbs,
-      el("div", { class: "vault-header-actions" }, quota, settingsButton)));
+      el("h1", { id: "vault-heading", class: "sr-only", tabindex: -1 }, t("Files", "Dateien")), quota,
+      el("div", { class: "vault-header-actions" }, settingsButton)));
   const transfers = el("div", { class: "vault-transfers", "aria-label": t("File transfers", "Dateiübertragungen"), hidden: true });
   const search = el("input", { type: "search", placeholder: t("Find in this folder", "In diesem Ordner suchen"),
     "aria-label": t("Find in this folder", "In diesem Ordner suchen"), autocomplete: "off", maxlength: 255 });
@@ -88,14 +88,19 @@ export function renderVault(context) {
   sorting.setAttribute("aria-label", t("Sort files", "Dateien sortieren"));
   const picker = el("input", { type: "file", multiple: true, hidden: true, "aria-label": t("Choose files", "Dateien auswählen") });
   let pickerDestination = null;
-  const upload = button(t("Upload files", "Dateien hochladen"), () => pickFiles(activeFolderRef()), { class: "primary", disabled: true });
-  const newFolder = button(t("New folder", "Neuer Ordner"), () => editName(), { disabled: true });
+  const uploadLabel = t("Upload files", "Dateien hochladen"), folderLabel = t("New folder", "Neuer Ordner");
+  const upload = button("", () => pickFiles(activeFolderRef()), { class: "primary", disabled: true, title: uploadLabel, "aria-label": uploadLabel });
+  upload.append(el("span", { class: "vault-action-symbol", "aria-hidden": "true" }, "↑"), el("span", { class: "vault-action-label" }, uploadLabel));
+  const newFolder = button("", () => editName(), { disabled: true, title: folderLabel, "aria-label": folderLabel });
+  newFolder.append(el("span", { class: "vault-action-symbol", "aria-hidden": "true" }, entryIcon({ container: true }),
+    el("span", { class: "vault-action-plus" }, "+")), el("span", { class: "vault-action-label" }, folderLabel));
   const refreshLabel = t("Refresh", "Aktualisieren");
   const refreshButton = button("↻", () => refresh(), { class: "ghost icon-button", disabled: true, title: refreshLabel, "aria-label": refreshLabel });
   const folderStatus = el("span", { class: "vault-folder-status subtle", role: "status" });
   const toolbar = el("div", { class: "vault-toolbar", hidden: true },
-    el("div", { class: "inline vault-toolbar-actions" }, upload, newFolder, refreshButton, picker),
-    el("div", { class: "vault-toolbar-filters" }, search, sorting), folderStatus);
+    breadcrumbs, el("div", { class: "vault-toolbar-controls" },
+      el("div", { class: "inline vault-toolbar-actions" }, upload, newFolder, picker),
+      el("div", { class: "vault-toolbar-filters" }, search, sorting), refreshButton, folderStatus));
   const columns = el("div", { class: "vault-columns", "aria-label": t("Folders", "Ordner") });
   const previewEmpty = el("div", { class: "vault-preview-empty" },
     el("span", { class: "vault-preview-symbol", "aria-hidden": "true" }, "▤"),
@@ -119,7 +124,7 @@ export function renderVault(context) {
   let model = buildModel(snapshot);
   let navigation = ["root"];
   let view = vaultExplorerView(model, navigation);
-  let columnLimit = 3;
+  let columnLimit = 2;
   let parentId = null, generation = 0, uploading = false;
   let previewRef = null, previewSession = null, previewScope = null, previewLoading = false, previewFingerprint = "", previewRequest = 0;
   let discardPrompt = null;
@@ -806,9 +811,9 @@ export function renderVault(context) {
   const toast = document.querySelector("#toast");
   function visibleColumnLimit() {
     const width = explorer.clientWidth;
-    if (!width) return 3;
+    if (!width) return 2;
     const share = Number(getComputedStyle(columns).getPropertyValue("--vault-columns-share")) || .64;
-    return Math.max(1, Math.min(3, Math.floor((width * share - 1) / 180)));
+    return Math.max(1, Math.min(2, Math.floor((width * share - 1) / 180)));
   }
   function fitViewport() {
     if (!current()) return;
