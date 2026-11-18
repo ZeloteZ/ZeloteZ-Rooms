@@ -17,6 +17,7 @@ import { createLivePlayer } from "./live.js";
 import { createVideoDock } from "./video-dock.js";
 import { createScreenShareController } from "./screen-share.js";
 import { createNativeBroadcast } from "./native-broadcast.js";
+import { setVideoStatsEnabled } from "./video-stats.js";
 import { createVoicePanel, releaseVoiceForLogout } from "./voice.js";
 import { createTutorials } from "./tutorial.js";
 import { language, languages, setLanguage, t } from "./i18n.js";
@@ -191,6 +192,7 @@ profileEditor.addEventListener("click", () => {
   editProfile(account, profile => {
     if (user !== account) return;
     Object.assign(user, profile);
+    setVideoStatsEnabled(user.showVideoStats);
     paintOwnProfile();
     profileUpdates.dispatchEvent(new Event("change"));
   }, languageChooser(), () => tutorials?.reset(), changePassword, openAccountSecurity);
@@ -356,6 +358,7 @@ async function changePassword() {
 
 async function showWorkspace(nextUser, unlocked = true) {
   user = nextUser;
+  setVideoStatsEnabled(user.showVideoStats);
   vaultLocked = !unlocked;
   setExpectedAccount(user.id);
   workspaceSession?.abort();
@@ -404,6 +407,7 @@ function enterAuth() {
   view = null;
   activeTopic = null;
   user = null;
+  setVideoStatsEnabled(false);
   vaultLocked = false;
   setExpectedAccount(null);
   globalThis.ClubCrypto?.lock();

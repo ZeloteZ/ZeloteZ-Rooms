@@ -18,7 +18,7 @@ const imageSizes = {
 const defaults = {
   accentColor: null, surfaceColor: null, chatBackgroundMode: 'cover', chatBackgroundOpacity: 28,
 }
-const profileFields = ['nameColor', 'autoLoadAttachments', 'autoLoadAttachmentMaxBytes', 'notifyLive']
+const profileFields = ['nameColor', 'autoLoadAttachments', 'autoLoadAttachmentMaxBytes', 'notifyLive', 'showVideoStats']
 const missing = () => new RequestError(404, 'Dieses Bild oder Thema ist nicht verfügbar.')
 const forbidden = () => new RequestError(403, 'Du darfst dieses Design nicht ändern.')
 
@@ -76,6 +76,10 @@ export function createAppearance(db) {
       user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       notify_live INTEGER NOT NULL CHECK (notify_live IN (0, 1))
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS profile_playback_preferences (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      show_video_stats INTEGER NOT NULL CHECK (show_video_stats IN (0, 1))
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS topic_appearance (
       topic_id TEXT PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE, accent_color TEXT, surface_color TEXT,
       background_mode TEXT NOT NULL CHECK (background_mode IN ('cover', 'tile')),
@@ -97,6 +101,7 @@ export function createAppearance(db) {
   const lookUpProfile = db.prepare('SELECT name_color FROM profile_appearance WHERE user_id = ?')
   const lookUpChatPreferences = db.prepare('SELECT auto_load, max_bytes FROM profile_chat_preferences WHERE user_id = ?')
   const lookUpNotificationPreferences = db.prepare('SELECT notify_live FROM profile_notification_preferences WHERE user_id = ?')
+  const lookUpPlaybackPreferences = db.prepare('SELECT show_video_stats FROM profile_playback_preferences WHERE user_id = ?')
   const avatarFor = db.prepare("SELECT id FROM appearance_images WHERE user_id = ? AND slot = 'avatar'")
   const themeFor = db.prepare('SELECT * FROM topic_appearance WHERE topic_id = ?')
   const imagesFor = db.prepare('SELECT id, slot FROM appearance_images WHERE topic_id = ?')
@@ -115,7 +120,8 @@ export function createAppearance(db) {
   }
 
   function selfProfile(userId) {
-    return { ...profile(userId), ...chatPreferences(userId), notifyLive: notifyLive(userId) }
+    return { ...profile(userId), ...chatPreferences(userId), notifyLive: notifyLive(userId),
+      showVideoStats: lookUpPlaybackPreferences.get(userId)?.show_video_stats === 1 }
   }
 
   function notifyLive(userId) {
@@ -167,6 +173,12 @@ export function createAppearance(db) {
         db.prepare(`INSERT INTO profile_chat_preferences(user_id, auto_load, max_bytes) VALUES (?, ?, ?)
           ON CONFLICT(user_id) DO UPDATE SET auto_load = excluded.auto_load, max_bytes = excluded.max_bytes`)
           .run(userId, Number(autoLoadAttachments), max)
+      }
+      if (Object.hasOwn(input, 'showVideoStats')) {
+        if (typeof input.showVideoStats !== 'boolean') throw invalid()
+        db.prepare(`INSERT INTO profile_playback_preferences(user_id, show_video_stats) VALUES (?, ?)
+          ON CONFLICT(user_id) DO UPDATE SET show_video_stats = excluded.show_video_stats`)
+          .run(userId, Number(input.showVideoStats))
       }
     })
   }

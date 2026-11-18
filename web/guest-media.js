@@ -1,4 +1,5 @@
 import { createYoutubePlayer } from "./youtube-player.js";
+import { createPlaybackStats } from "./playback-stats.js";
 
 export const guestRoomId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 export const guestPassword = /^[A-Za-z0-9_-]{43}$/u;
@@ -63,6 +64,7 @@ export function openGuestMedia(source, callbacks, ownerDocument = document) {
   video.muted = true;
   const listener = new AbortController();
   const { signal } = listener;
+  const stats = createPlaybackStats(video);
   video.addEventListener("loadedmetadata", callbacks.onReady, { signal });
   video.addEventListener("playing", callbacks.onPlaying, { signal });
   video.addEventListener("ended", callbacks.onEnded, { signal });
@@ -77,6 +79,7 @@ export function openGuestMedia(source, callbacks, ownerDocument = document) {
       if (signal.aborted) return;
       if (!Hls.isSupported()) throw new Error("HLS playback is unavailable");
       hls = new Hls({ preferManagedMediaSource: true, maxBufferLength: 18, backBufferLength: 24 });
+      stats.setHls(hls, Hls);
       hls.on(Hls.Events.ERROR, (_, data) => { if (!signal.aborted && data.fatal) callbacks.onError(); });
       hls.attachMedia(video);
       hls.loadSource(url);
@@ -84,6 +87,7 @@ export function openGuestMedia(source, callbacks, ownerDocument = document) {
       if (signal.aborted) return;
       hls?.destroy();
       hls = undefined;
+      stats.reset();
       if (native) video.src = url;
       else callbacks.onError();
     });
@@ -91,6 +95,7 @@ export function openGuestMedia(source, callbacks, ownerDocument = document) {
 
   return {
     element: video,
+    stats,
     play() {
       video.play().catch(error => {
         if (signal.aborted || error.name === "AbortError") return;
@@ -109,6 +114,7 @@ export function openGuestMedia(source, callbacks, ownerDocument = document) {
     isPaused: () => video.paused,
     destroy() {
       listener.abort();
+      stats.destroy();
       hls?.destroy();
       video.pause();
       video.removeAttribute("src");

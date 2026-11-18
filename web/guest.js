@@ -1,6 +1,10 @@
 import { language, languages as supportedLanguages, setLanguage, t } from "./i18n.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 import { showSiteVersion } from "./site-version.js";
+import { setVideoStatsEnabled } from "./video-stats.js";
+import { api } from "./ui.js";
+
+void api("auth/session").then(session => setVideoStatsEnabled(session.user?.showVideoStats)).catch(() => {});
 
 const publicId = /^\/guest\/([a-f0-9-]+)\/?$/u.exec(location.pathname)?.[1];
 const mount = document.querySelector("#guest-view");

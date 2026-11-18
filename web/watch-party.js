@@ -4,6 +4,8 @@ import { createYoutubePlayer } from "./youtube-player.js";
 import { createWatchControls } from "./watch-controls.js";
 import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
 import { watchQueue } from "./watch-queue.js";
+import { createPlaybackStats } from "./playback-stats.js";
+import { mountVideoStats } from "./video-stats.js";
 
 const chunkSize = 4 * 1024 * 1024;
 const maxFileSize = 64 * chunkSize;
@@ -33,6 +35,7 @@ function localVideoType(file) {
 
 function localPlayer(url, { onReady, onError, onEnded, onBlocked }, ownerDocument) {
   const element = ownerDocument.createElement("video");
+  const stats = createPlaybackStats(element);
   element.playsInline = true;
   element.preload = "auto";
   element.setAttribute("aria-label", t("Shared video", "Geteiltes Video"));
@@ -41,14 +44,14 @@ function localPlayer(url, { onReady, onError, onEnded, onBlocked }, ownerDocumen
   element.addEventListener("error", onError);
   element.src = new URL(url, location.origin).href;
   return {
-    element,
+    element, stats,
     play: () => element.play().catch(error => { if (error.name === "NotAllowedError") onBlocked(); }),
     pause: () => element.pause(),
     seek: seconds => { element.currentTime = seconds; },
     setVolume(volume, muted) { element.volume = volume; element.muted = muted; },
     getTime: () => element.currentTime,
     getDuration: () => element.duration,
-    destroy: () => { element.pause(); element.removeAttribute("src"); element.load(); },
+    destroy: () => { stats.destroy(); element.pause(); element.removeAttribute("src"); element.load(); },
   };
 }
 
@@ -323,6 +326,12 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     };
     surface = party.source === "youtube" ? createYoutubePlayer(party.videoId, handlers, ownerDocument)
       : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers, ownerDocument);
+    if (surface.stats) {
+      const receptionStats = mountVideoStats(surface.stats, signal);
+      player.querySelector(".watch-party-footer").append(receptionStats.element);
+      const destroy = surface.destroy;
+      surface.destroy = () => { receptionStats.destroy(); destroy(); };
+    }
     media.replaceChildren(surface.element);
     controls.setFullscreenSurface(surface.element);
     clockTimer = setInterval(tick, 250);

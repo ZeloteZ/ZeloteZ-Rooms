@@ -1,5 +1,6 @@
 import { language, t } from "./i18n.js";
 import { guestPassword, guestRoomId, guestSource, openGuestMedia } from "./guest-media.js";
+import { mountVideoStats } from "./video-stats.js";
 import { renderQuickChat } from "./quick-chat.js";
 import { watchQueue } from "./watch-queue.js";
 import { createWatchControls } from "./watch-controls.js";
@@ -275,6 +276,7 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
     const old = playing;
     playing = undefined;
     old?.audience?.stop();
+    old?.receptionStats?.destroy();
     old?.surface.destroy();
     if (!keepFullscreen) controls.setFullscreenSurface(null);
     clearInterval(clock);
@@ -423,6 +425,10 @@ function createGuestViewer({ publicId, signal, member = false, accountId, onAcco
         void request(path, "PATCH", { title }, true).catch(() => {});
       },
     }, ownerDocument);
+    if (current.surface.stats) {
+      current.receptionStats = mountVideoStats(current.surface.stats, signal);
+      find(".watch-party-footer").append(current.receptionStats.element);
+    }
     playing = current;
     if (current.surface.element.tagName === "VIDEO") current.surface.element.setAttribute("aria-label", title.textContent);
     stage.insertBefore(current.surface.element, preview?.element ?? null);

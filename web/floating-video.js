@@ -2,7 +2,7 @@ const inset = 8;
 const minimum = { width: 294, height: 322 };
 const initial = { width: 430, height: 356 };
 const edges = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
-const sheets = ["styles.css", "watch-party.css", "guest.css", "floating-video.css"];
+const sheets = ["styles.css", "watch-party.css", "guest.css", "floating-video.css", "video-stats.css"];
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 
 function bounds(content) {

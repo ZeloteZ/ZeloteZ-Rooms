@@ -7,6 +7,8 @@ import { createChannelCapture } from "./channel-capture.js";
 import { createWatchParty } from "./watch-party.js";
 import { canPlayDirectly, startWhep } from "./whep.js";
 import { mountViewSidebar } from "./view-sidebar.js";
+import { createPlaybackStats } from "./playback-stats.js";
+import { mountVideoStats } from "./video-stats.js";
 
 const viewerHeartbeat = 8000;
 const startupTimeout = 24000;
@@ -33,6 +35,8 @@ function streamer(stream) {
 export function createLivePlayer(context, dock) {
   const { signal, user } = context;
   const video = el("video", { playsinline: true, autoplay: true, preload: "auto", "aria-hidden": "true" });
+  const videoStats = createPlaybackStats(video);
+  const receptionStats = mountVideoStats(videoStats, signal);
   video.muted = true;
   const title = el("h3", {});
   const detail = el("p");
@@ -65,7 +69,7 @@ export function createLivePlayer(context, dock) {
   const close = button("×", () => stop(t("Playback stopped.", "Wiedergabe beendet.")), { "aria-label": t("Stop playback", "Wiedergabe beenden"), title: t("Stop playback", "Wiedergabe beenden"), class: "icon-button", hidden: true });
   const node = el("section", { class: "panel live-player stack", hidden: true, "aria-label": t("Stream player", "Stream-Player") },
     el("div", { class: "section-heading player-heading" }, heading, el("div", { class: "inline" }, playbackMode, sound, returnLink, close)),
-    el("div", { class: "stage" }, video, overlay));
+    el("div", { class: "stage" }, video, overlay), receptionStats.element);
   const dockLabel = el("span", {}, t("Stream", "Stream"));
   const summary = el("summary", { class: "button" }, dockLabel);
   const popover = el("div", { class: "stream-popover" }, node);
@@ -214,6 +218,7 @@ export function createLivePlayer(context, dock) {
     video.removeAttribute("src");
     video.removeAttribute("disableremoteplayback");
     video.load();
+    receptionStats.reset();
   }
 
   function stop(note = "") {
@@ -294,7 +299,7 @@ export function createLivePlayer(context, dock) {
           playVideo();
         }, () => {
           if (playback === attempt) retry();
-        });
+        }, { onPeer: peer => { if (playback === attempt) videoStats.setPeer(peer); } });
       } catch {
         retry();
       }
@@ -323,6 +328,7 @@ export function createLivePlayer(context, dock) {
     }
     try {
       hls = new Hls({ preferManagedMediaSource: true, maxBufferLength: 18, backBufferLength: 24, maxLiveSyncPlaybackRate: 1.1 });
+      videoStats.setHls(hls, Hls);
       const active = hls;
       active.on(Hls.Events.ERROR, (_, data) => {
         if (active === hls && data.fatal) retry(data.type !== Hls.ErrorTypes?.NETWORK_ERROR);
@@ -433,6 +439,7 @@ export function createLivePlayer(context, dock) {
     if (playback?.started) monitorProgress();
   }, { signal });
   signal.addEventListener("abort", () => stop(), { once: true });
+  signal.addEventListener("abort", () => videoStats.destroy(), { once: true });
 
   return {
     choose, stop,

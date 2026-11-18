@@ -1,0 +1,15 @@
+.video-reception-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-inline-size: 0;
+  color: var(--muted);
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+}
+.video-reception-stats > span { white-space: nowrap; }
+.live-channel-player > .live-player:has(> .video-reception-stats:not([hidden])) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}

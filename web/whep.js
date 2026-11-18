@@ -44,7 +44,7 @@ export function canPlayDirectly(stream) {
     && typeof RTCPeerConnection === "function" && typeof MediaStream === "function");
 }
 
-export function startWhep(stream, onMedia, onFailure) {
+export function startWhep(stream, onMedia, onFailure, { onPeer } = {}) {
   const peer = new RTCPeerConnection({ bundlePolicy: "max-bundle" });
   const source = new MediaStream();
   const controller = new AbortController();
@@ -65,6 +65,7 @@ export function startWhep(stream, onMedia, onFailure) {
     controller.abort();
     clearTimeout(heartbeat);
     clearTimeout(disconnectTimer);
+    onPeer?.(null);
     peer.close();
     release();
   }
@@ -123,5 +124,6 @@ export function startWhep(stream, onMedia, onFailure) {
   }
 
   open().catch(fail);
+  onPeer?.(peer);
   return close;
 }

@@ -226,13 +226,15 @@ function attachmentPreference(profile) {
 
 export function editProfile(user, onChange, languageControl, onResetTutorials, onPassword, onSecurity) {
   const signal = dialogLifetime();
-  const person = { nameColor: null, autoLoadAttachments: true, autoLoadAttachmentMaxBytes: null, notifyLive: false, ...user };
+  const person = { nameColor: null, autoLoadAttachments: true, autoLoadAttachmentMaxBytes: null,
+    notifyLive: false, showVideoStats: false, ...user };
   const mark = personMark(person);
   const name = personName(person, { class: "appearance-profile-name" });
   const color = optColor(t("Name color", "Namensfarbe"), "#abb8ff", person.nameColor, preview);
   const icon = imageEditor("avatar", t("Profile picture", "Profilbild"), person.avatarUrl, signal, preview);
   const attachments = attachmentPreference(person);
   const liveNotifications = el("input", { type: "checkbox", checked: person.notifyLive });
+  const videoStats = el("input", { type: "checkbox", checked: person.showVideoStats });
   function preview() {
     const next = { ...person, id: undefined, nameColor: color.value(), avatarUrl: icon.savedPath() };
     paintPersonMark(mark, next, icon.previewPath());
@@ -242,6 +244,8 @@ export function editProfile(user, onChange, languageControl, onResetTutorials, o
     icon.node, color.node, attachments.node,
     el("label", { class: "inline" }, liveNotifications,
       t("Notify me when someone goes live in a room I’ve joined", "Benachrichtige mich über Live-Starts in Räumen, denen ich beigetreten bin")),
+    el("label", { class: "inline" }, videoStats,
+      t("Show video reception statistics", "Video-Empfangsdaten anzeigen")),
     languageControl);
   const tutorialFeedback = status();
   showDialog(t("Your profile", "Dein Profil"), form([
@@ -266,7 +270,8 @@ export function editProfile(user, onChange, languageControl, onResetTutorials, o
         }
       }, { class: "ghost", "data-tutorial": "reset" }), tutorialFeedback),
   ], t("Save profile", "Profil speichern"), async () => {
-    const values = { nameColor: color.value(), ...attachments.value(), notifyLive: liveNotifications.checked };
+    const values = { nameColor: color.value(), ...attachments.value(), notifyLive: liveNotifications.checked,
+      showVideoStats: videoStats.checked };
     const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== person[key]));
     fields.disabled = true;
     try {
