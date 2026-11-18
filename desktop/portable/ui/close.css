@@ -16,7 +16,9 @@ body { background: var(--card); }
   gap: 12px;
 }
 
-.close-logo { border-radius: 11px; }
+.close-top picture { display: block; flex: none; }
+
+.close-logo { display: block; border-radius: 11px; background: #090a10; }
 
 .close-dismiss {
   position: relative;

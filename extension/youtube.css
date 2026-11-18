@@ -1,4 +1,8 @@
 .zelotez-create-room {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   flex: 0 1 auto;
   min-inline-size: 0;
   max-inline-size: 15rem;
@@ -15,6 +19,8 @@
   text-align: center;
   cursor: pointer;
 }
+.zelotez-create-room-icon { flex: 0 0 20px; width: 20px; height: 20px; object-fit: contain; }
+.zelotez-create-room-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
 .zelotez-create-room:hover { background: var(--yt-spec-button-chip-background-hover, #41424f); }
 .zelotez-create-room:focus-visible { outline: 2px solid #8596ff; outline-offset: -2px; }
 .zelotez-create-room:disabled { cursor: progress; opacity: .65; }

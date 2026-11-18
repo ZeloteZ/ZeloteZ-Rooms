@@ -7,6 +7,10 @@
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <title>ZeloteZ Rooms</title>
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" type="image/svg+xml" href="/rooms-icon.svg" sizes="any" media="(prefers-reduced-motion: reduce)">
+  <link rel="icon" type="image/svg+xml" href="/rooms-icon-animated.svg" sizes="any" media="(prefers-reduced-motion: no-preference)">
+  <link rel="apple-touch-icon" href="/rooms-icon.png">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/watch-party.css">
   <link rel="stylesheet" href="/guest.css">
@@ -18,7 +22,11 @@
   <header class="site-header">
     <div class="page-width bar">
       <div class="wordmark">
-        <span class="brand-icon" aria-hidden="true"></span><span>ZeloteZ <span class="wordmark-detail">Rooms</span></span>
+        <picture class="brand-icon" aria-hidden="true">
+          <source type="image/svg+xml" srcset="/rooms-icon.svg" media="(prefers-reduced-motion: reduce)">
+          <source type="image/svg+xml" srcset="/rooms-icon-animated.svg">
+          <img src="/rooms-icon.png" width="34" height="34" alt="">
+        </picture><span>ZeloteZ <span class="wordmark-detail">Rooms</span></span>
       </div>
       <label id="guest-language-label" class="sr-only" for="guest-language">Language</label>
       <select id="guest-language">

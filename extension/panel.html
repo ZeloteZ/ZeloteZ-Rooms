@@ -5,13 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>ZeloteZ Rooms</title>
+  <link rel="icon" href="icon.png" type="image/png">
   <link rel="stylesheet" href="panel.css">
   <script src="panel.js" type="module"></script>
 </head>
 <body>
   <main>
     <header>
-      <span class="brand" aria-hidden="true">Z</span>
+      <picture class="brand" aria-hidden="true">
+        <source srcset="rooms-icon-animated.svg" type="image/svg+xml" media="(prefers-reduced-motion: no-preference)">
+        <source srcset="rooms-icon.svg" type="image/svg+xml">
+        <img src="icon.png" width="40" height="40" alt="">
+      </picture>
       <h1 data-text="settingsTitle"></h1>
     </header>
     <form id="settings" hidden>

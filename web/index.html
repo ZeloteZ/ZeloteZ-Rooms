@@ -6,6 +6,10 @@
   <meta name="theme-color" content="#0b0b0e">
   <meta name="referrer" content="no-referrer">
   <title>ZeloteZ Rooms</title>
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" type="image/svg+xml" href="/rooms-icon.svg" sizes="any" media="(prefers-reduced-motion: reduce)">
+  <link rel="icon" type="image/svg+xml" href="/rooms-icon-animated.svg" sizes="any" media="(prefers-reduced-motion: no-preference)">
+  <link rel="apple-touch-icon" href="/rooms-icon.png">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/activity.css">
   <link rel="stylesheet" href="/identity.css">
@@ -38,7 +42,11 @@
   <header class="site-header">
     <div class="page-width bar">
       <a class="wordmark" href="#/rooms" aria-label="ZeloteZ Rooms – Home">
-        <span class="brand-icon" aria-hidden="true"></span><span>ZeloteZ <span class="wordmark-detail">Rooms</span></span>
+        <picture class="brand-icon" aria-hidden="true">
+          <source type="image/svg+xml" srcset="/rooms-icon.svg" media="(prefers-reduced-motion: reduce)">
+          <source type="image/svg+xml" srcset="/rooms-icon-animated.svg">
+          <img src="/rooms-icon.png" width="34" height="34" alt="">
+        </picture><span>ZeloteZ <span class="wordmark-detail">Rooms</span></span>
       </a>
       <nav id="navigation" class="navigation" aria-label="Main navigation" hidden>
         <a href="#/rooms" data-nav="rooms">Rooms</a>

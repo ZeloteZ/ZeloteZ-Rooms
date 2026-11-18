@@ -31,6 +31,9 @@ body {
   white-space: nowrap;
 }
 
+.brand picture { display: block; flex: none; }
+.brand img { display: block; border-radius: 24%; background: #090a10; }
+
 #desktop-settings {
   box-sizing: border-box;
   width: 31px;

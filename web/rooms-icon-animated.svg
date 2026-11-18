@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="160 148 932 932">
+  <style>
+    .flow { opacity: 0; }
+    @media (prefers-reduced-motion: no-preference) {
+      .roof-light { animation: roof-light 9s ease-in-out infinite; }
+      .right-light { animation: right-light 9s ease-in-out infinite; }
+      .z-light { animation: z-light 9s ease-in-out infinite; }
+    }
+    @keyframes roof-light {
+      0%, 100% { transform: translate(0, 0); opacity: 0; }
+      18% { transform: translate(20px, -180px); opacity: .74; }
+      38% { transform: translate(210px, -390px); opacity: .84; }
+      58% { transform: translate(440px, -395px); opacity: .58; }
+      78% { transform: translate(670px, -255px); opacity: 0; }
+    }
+    @keyframes right-light {
+      0%, 100% { transform: translate(0, 0); opacity: 0; }
+      26% { transform: translate(60px, 10px); opacity: .7; }
+      54% { transform: translate(190px, 225px); opacity: .87; }
+      77% { transform: translate(215px, 490px); opacity: .52; }
+      90% { transform: translate(215px, 660px); opacity: 0; }
+    }
+    @keyframes z-light {
+      0%, 100% { transform: translate(0, 0); opacity: 0; }
+      20% { transform: translate(120px, 0); opacity: .7; }
+      48% { transform: translate(263px, -155px); opacity: .9; }
+      71% { transform: translate(385px, -291px); opacity: .67; }
+      88% { transform: translate(510px, -350px); opacity: 0; }
+    }
+  </style>
+  <defs>
+    <path id="roof" d="M208 1004V515C208 445 248 387 311 354L542 241C596 213 662 211 715 237L962 379C1014 409 1044 456 1044 515V1004Q1044 1009 1039 1008L962 978Q958 977 958 973V515C958 484 943 458 916 441L675 310C641 296 607 297 573 312L352 418C315 436 294 473 294 517V974Q294 977 291 978L214 1008Q208 1010 208 1004Z"/>
+    <path id="z" d="M472 456H889Q895 456 892 463C875 496 838 534 801 573L582 810H910Q917 810 914 816C902 834 874 867 852 890C837 906 820 913 800 913H342Q333 913 338 904C347 887 362 869 384 845L653 562H364Q357 562 362 554L421 481C434 464 451 456 472 456Z"/>
+    <linearGradient id="roof-base" gradientUnits="userSpaceOnUse" x1="290" y1="265" x2="1040" y2="445">
+      <stop offset=".24" stop-color="#00f6fc"/>
+      <stop offset=".48" stop-color="#01e3fc"/>
+      <stop offset=".68" stop-color="#009df4"/>
+      <stop offset=".82" stop-color="#3550f8"/>
+      <stop offset="1" stop-color="#ac40f9"/>
+    </linearGradient>
+    <radialGradient id="left-blue" cx="50%" cy="50%" r="50%">
+      <stop stop-color="#029af5"/>
+      <stop offset="1" stop-color="#029af5" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="right-violet">
+      <stop stop-color="#6515f2"/>
+      <stop offset="1" stop-color="#6515f2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="magenta">
+      <stop stop-color="#f432fc"/>
+      <stop offset="1" stop-color="#f432fc" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="z-base" gradientUnits="userSpaceOnUse" x1="395" y1="585" x2="903" y2="808">
+      <stop stop-color="#38fafc"/>
+      <stop offset=".36" stop-color="#00e3fc"/>
+      <stop offset=".64" stop-color="#049df5"/>
+      <stop offset="1" stop-color="#0858fa"/>
+    </linearGradient>
+    <linearGradient id="z-bottom-color" gradientUnits="userSpaceOnUse" x1="359" y1="870" x2="874" y2="870">
+      <stop stop-color="#00edfa"/>
+      <stop offset=".31" stop-color="#134cff"/>
+      <stop offset=".61" stop-color="#9a22fc"/>
+      <stop offset="1" stop-color="#f55bfc"/>
+    </linearGradient>
+    <linearGradient id="z-bottom-mask" gradientUnits="userSpaceOnUse" x1="0" y1="680" x2="0" y2="866">
+      <stop stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#fff"/>
+    </linearGradient>
+    <radialGradient id="cyan-light">
+      <stop stop-color="#a5ffff"/>
+      <stop offset=".36" stop-color="#38ffff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#00f6ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet-light">
+      <stop stop-color="#46b0ff"/>
+      <stop offset=".42" stop-color="#4862ff" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#a852fe" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="roof-clip"><use href="#roof"/></clipPath>
+    <clipPath id="z-clip"><use href="#z"/></clipPath>
+    <mask id="z-bottom-fade" maskUnits="userSpaceOnUse" x="330" y="675" width="592" height="240">
+      <rect x="330" y="675" width="592" height="240" fill="url(#z-bottom-mask)"/>
+    </mask>
+  </defs>
+  <use href="#roof" fill="url(#roof-base)"/>
+  <g clip-path="url(#roof-clip)">
+    <ellipse cx="257" cy="855" rx="170" ry="138" fill="url(#left-blue)"/>
+    <ellipse cx="1009" cy="735" rx="150" ry="260" fill="url(#right-violet)"/>
+    <ellipse cx="1035" cy="999" rx="215" ry="245" fill="url(#magenta)"/>
+    <ellipse class="flow roof-light" cx="236" cy="786" rx="190" ry="170" fill="url(#cyan-light)"/>
+    <ellipse class="flow right-light" cx="790" cy="320" rx="214" ry="160" fill="url(#violet-light)"/>
+  </g>
+  <use href="#z" fill="url(#z-base)"/>
+  <use href="#z" fill="url(#z-bottom-color)" mask="url(#z-bottom-fade)"/>
+  <g clip-path="url(#z-clip)">
+    <ellipse cx="584" cy="690" rx="168" ry="114" fill="url(#cyan-light)" opacity=".53"/>
+    <ellipse class="flow z-light" cx="373" cy="890" rx="177" ry="125" fill="url(#cyan-light)"/>
+  </g>
+</svg>

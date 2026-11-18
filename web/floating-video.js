@@ -131,6 +131,13 @@ export async function openVideoWindow({ width, height }) {
     const target = popup.document;
     target.documentElement.lang = document.documentElement.lang;
     target.body.classList.add("video-window");
+    if (!target.head.querySelector('link[rel="icon"]')) {
+      for (const original of document.head.querySelectorAll('link[rel="icon"]')) {
+        const icon = original.cloneNode(false);
+        icon.href = original.href;
+        target.head.append(icon);
+      }
+    }
     const loaded = Promise.all(sheets.map(name => new Promise((resolve, reject) => {
       const link = target.createElement("link");
       link.rel = "stylesheet";

@@ -134,7 +134,15 @@ class CaptureWindow(Adw.ApplicationWindow):
         layout = Adw.ToolbarView()
         self.set_content(layout)
         header = Adw.HeaderBar()
-        header.set_title_widget(label(title, "wordmark"))
+        wordmark = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+        icon_path = Path(__file__).parent.parent / "app.asar.unpacked" / "ui" / "icon.png"
+        if not icon_path.is_file():
+            icon_path = Path(__file__).with_name("portable") / "ui" / "icon.png"
+        icon = Gtk.Image.new_from_file(str(icon_path))
+        icon.set_pixel_size(24)
+        wordmark.append(icon)
+        wordmark.append(label(title, "wordmark"))
+        header.set_title_widget(wordmark)
         self.badge = label(t("Offline"), "state")
         header.pack_start(self.badge)
         layout.add_top_bar(header)
