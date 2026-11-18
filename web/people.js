@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { renderVaultAdminPanel } from "./vault.js";
 import { api, button, closeDialog, copyField, el, field, form, identifier, localizedTime, notify, openDirect, personRow, select, showDialog, status, tell } from "./ui.js";
 
 const relationships = {
@@ -371,21 +372,27 @@ export async function renderAdmin({ signal, onSecurity }) {
         invitationPanel),
       el("section", { class: "panel people-panel invite-list" }, el("h2", {}, t("Created invites", "Erstellte Einladungen")), invites));
   const title = el("h1", {}, t("Invites", "Einladungen"));
-  const inviteButton = button(t("Invites", "Einladungen"), () => switchView(false), { "aria-pressed": "true" });
-  const accountButton = button(t("Accounts", "Konten"), () => switchView(true), { "aria-pressed": "false" });
-  function switchView(showAccounts) {
-    title.textContent = showAccounts ? accountButton.textContent : inviteButton.textContent;
-    invitationView.hidden = showAccounts;
+  const vaultPanel = renderVaultAdminPanel({ signal, approval });
+  vaultPanel.hidden = true;
+  const inviteButton = button(t("Invites", "Einladungen"), () => switchView("invites"), { "aria-pressed": "true" });
+  const accountButton = button(t("Accounts", "Konten"), () => switchView("accounts"), { "aria-pressed": "false" });
+  const vaultButton = button("ZeloteZ Vault", () => switchView("vault"), { "aria-pressed": "false" });
+  function switchView(selected) {
+    const showAccounts = selected === "accounts";
+    title.textContent = selected === "vault" ? "ZeloteZ Vault" : showAccounts ? accountButton.textContent : inviteButton.textContent;
+    invitationView.hidden = selected !== "invites";
     accounts.node.hidden = !showAccounts;
-    inviteButton.setAttribute("aria-pressed", String(!showAccounts));
+    vaultPanel.hidden = selected !== "vault";
+    inviteButton.setAttribute("aria-pressed", String(selected === "invites"));
     accountButton.setAttribute("aria-pressed", String(showAccounts));
+    vaultButton.setAttribute("aria-pressed", String(selected === "vault"));
     if (showAccounts) accounts.initialize();
   }
   const page = el("div", { class: "secondary-page invitations-page" },
     el("div", { class: "stack" },
-      el("div", { class: "page-heading" }, title, el("div", { class: "inline", role: "group", "aria-label": t("Site administration", "Website-Verwaltung") }, inviteButton, accountButton)),
+      el("div", { class: "page-heading" }, title, el("div", { class: "inline", role: "group", "aria-label": t("Site administration", "Website-Verwaltung") }, inviteButton, accountButton, vaultButton)),
       approval.node),
-    invitationView, accounts.node);
+    invitationView, accounts.node, vaultPanel);
   approval.attach(page);
   return page;
 }

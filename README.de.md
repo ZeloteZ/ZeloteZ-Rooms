@@ -8,11 +8,12 @@ Ein selbst gehosteter Treffpunkt für deinen Freundeskreis: schreiben, sprechen,
 
 ## Das bietet Rooms
 
+- Optionales ZeloteZ Vault mit privatem verschlüsseltem Speicher und verschlüsselten Dateifreigaben.
 - Räume mit Text- und Livekanälen, Mitgliederzugriff und Moderation.
 - Ende-zu-Ende-verschlüsselte Chatinhalte, Direktnachrichten und Chat-Anhänge.
 - Sprachchat und Bildschirmfreigabe, in der Desktop-App mit Ausschnitt- und Audiooptionen.
 - Synchronisierte Watchpartys mit YouTube oder lokalen Videodateien und gemeinsamer Warteschlange.
-- Temporäre Räume mit optionalen Gastlinks und eine YouTube-Browsererweiterung.
+- Temporäre Räume mit optionalen Gastlinks und eine Browser Extension.
 - Oberfläche und Dokumentation auf Deutsch, Englisch und vereinfachtem Chinesisch.
 
 Chatverschlüsselung, Medienübertragung und hochgeladene Videos haben unterschiedliche Datenschutzeigenschaften. Die Einzelheiten erklärt [Sicherheit und Datenschutz](docs/de/security.md).
@@ -23,7 +24,8 @@ Chatverschlüsselung, Medienübertragung und hochgeladene Videos haben unterschi
 | --- | --- |
 | Einer bestehenden Instanz beitreten | [Erste Schritte](docs/de/getting-started.md) |
 | Die Funktionen kennenlernen | [Benutzerhandbuch](docs/de/user-guide.md) · [Streams und Watchpartys](docs/de/streaming.md) |
-| Einen Client installieren | [Desktop-App](docs/de/desktop.md) · [YouTube-Erweiterung](docs/de/browser-extension.md) |
+| Einen Client installieren | [Desktop-App](docs/de/desktop.md) · [Browser Extension](docs/de/browser-extension.md) |
+| Verschlüsselter Dateispeicher | [ZeloteZ Vault](docs/de/vault.md) |
 | Eine Instanz hosten | [Selbst hosten](docs/de/self-hosting.md) · [Konfiguration](docs/de/configuration.md) |
 | Sie verwalten und warten | [Verwaltung](docs/de/administration.md) · [Betrieb](docs/de/operations.md) |
 | Ein Problem lösen | [Fehlerbehebung](docs/de/troubleshooting.md) |

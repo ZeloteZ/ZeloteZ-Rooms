@@ -10,11 +10,10 @@
   icon.width = icon.height = 20;
   icon.setAttribute("aria-hidden", "true");
   icon.addEventListener("error", () => icon.remove(), { once: true });
-  const label = document.createElement("span");
-  label.className = "zelotez-create-room-label";
-  label.textContent = api.i18n.getMessage("createRoom");
-  action.append(icon, label);
-  action.title = label.textContent;
+  const label = api.i18n.getMessage("createRoom");
+  action.append(icon);
+  action.title = label;
+  action.setAttribute("aria-label", label);
   let observing = false;
   let queued = false;
   let launching = false;

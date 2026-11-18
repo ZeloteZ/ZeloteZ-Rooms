@@ -695,5 +695,5 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
     return false
   }
 
-  return { handle, session, requireSession, sessionKey, isSessionActive }
+  return { handle, session, requireSession, requireAdmin, sessionKey, isSessionActive }
 }

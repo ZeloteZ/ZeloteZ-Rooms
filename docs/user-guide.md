@@ -83,3 +83,7 @@ Images used for profiles and room design are processed by the server and are not
 When you join a room, your browser can receive encrypted copies of older message keys from an authorized, signed-in browser with its chats unlocked. If those browsers are offline, history may remain unreadable until one returns. Keep your own password and keys available; inviting another person or recovering an account is not a way to reconstruct a lost private key.
 
 For exact trust boundaries and retention differences between persistent chats, temporary chat, and media, read [security and privacy](security.md).
+
+## ZeloteZ Vault
+
+Operators can enable private encrypted storage and file sharing under **Administration → ZeloteZ Vault**. The default storage limit is **2 GiB per account**. See the [Vault guide](vault.md) for management, sharing, file-manager integration, privacy, and recovery.

@@ -83,3 +83,7 @@ Diese Bilder werden auf dem Server verarbeitet und sind nicht wie Chat-Anhänge 
 Nach dem Beitritt kann dein Browser verschlüsselte Kopien älterer Nachrichtenschlüssel von einem berechtigten, angemeldeten Browser mit entsperrten Chats erhalten. Sind solche Browser offline, bleibt älterer Verlauf gegebenenfalls bis zur Rückkehr unlesbar. Bewahre Passwort und Schlüssel auf: Weder eine Einladung noch eine Kontowiederherstellung rekonstruiert einen verlorenen privaten Schlüssel.
 
 Die genauen Vertrauensgrenzen und Unterschiede zwischen dauerhaftem Chat, temporärem Chat und Medien erklärt [Sicherheit und Datenschutz](security.md).
+
+## ZeloteZ Vault
+
+Betreiber können privaten verschlüsselten Speicher und Dateifreigaben unter **Verwaltung → ZeloteZ Vault** aktivieren. Standard sind **2 GiB pro Konto**. Die [Vault-Anleitung](vault.md) beschreibt Verwaltung, Freigaben, Dateimanager-Integration, Datenschutz und Wiederherstellung.

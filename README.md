@@ -8,11 +8,12 @@ An invite-only place for friends to chat, talk, share screens, and watch videos 
 
 ## What Rooms offers
 
+- Optional ZeloteZ Vault with private encrypted storage and encrypted file sharing.
 - Rooms with text and live channels, member access controls, and moderation.
 - End-to-end encrypted chat content, direct messages, and chat attachments.
 - Voice chat and screen sharing, with region and audio options in the desktop app.
 - Synchronized YouTube and local-video watch parties with a shared queue.
-- Temporary rooms with optional guest links, plus a YouTube browser extension.
+- Temporary rooms with optional guest links, plus a Browser Extension.
 - English, German, and Simplified Chinese interfaces and documentation.
 
 Chat encryption, media transport, and uploaded videos have different privacy properties. Read [security and privacy](docs/security.md) for the details.
@@ -23,7 +24,8 @@ Chat encryption, media transport, and uploaded videos have different privacy pro
 | --- | --- |
 | Join an existing instance | [Getting started](docs/getting-started.md) |
 | Learn the features | [User guide](docs/user-guide.md) · [Streams and watch parties](docs/streaming.md) |
-| Install a client | [Desktop app](docs/desktop.md) · [YouTube extension](docs/browser-extension.md) |
+| Install a client | [Desktop app](docs/desktop.md) · [Browser Extension](docs/browser-extension.md) |
+| Encrypted file storage | [ZeloteZ Vault](docs/vault.md) |
 | Host an instance | [Self-hosting](docs/self-hosting.md) · [Configuration](docs/configuration.md) |
 | Manage and maintain it | [Administration](docs/administration.md) · [Operations](docs/operations.md) |
 | Resolve a problem | [Troubleshooting](docs/troubleshooting.md) |

@@ -25,7 +25,7 @@ RUN set -eu; \
     mv "$@" "assets/$version/"; \
     sed -i -E \
       -e "s#(src|href)=\"/([A-Za-z][A-Za-z0-9_.-]*\.(css|js))\"#\1=\"/assets/$version/\2\"#g" \
-      -e "s#src=\"/vendor/hls\.min\.js\"#src=\"/assets/$version/hls.min.js\"#g" index.html guest.html
+      -e "s#src=\"/vendor/hls\.min\.js\"#src=\"/assets/$version/hls.min.js\"#g" index.html guest.html vault.html
 
 FROM bluenviron/mediamtx:1.21.4-ffmpeg@sha256:1fa0abbefb6f181bf0da075c65a75505ee43bb9996e4a4b5fd30a4ab7dea01e6 AS media
 

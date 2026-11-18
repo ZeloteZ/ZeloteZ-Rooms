@@ -12,7 +12,8 @@ Choose the guide for what you want to do. These pages describe the source revisi
 | [User guide](user-guide.md) | Rooms, channels, friends, encrypted messages, files, moderation, notifications, and appearance. |
 | [Streams and watch parties](streaming.md) | Share a screen or video, use voice, invite guests, choose playback, and interpret statistics. |
 | [Desktop app](desktop.md) | Windows and Linux installation, screen/audio capture, settings, updates. |
-| [YouTube extension](browser-extension.md) | Install the extension, configure access, and open a watch party in the browser or desktop app. |
+| [Browser Extension](browser-extension.md) | Install the extension, configure access, and open a watch party in the browser or desktop app. |
+| [ZeloteZ Vault](vault.md) | Private encrypted files, folders, sharing, storage limits, and optional file-manager integration. |
 
 You need an invitation from the operator of a Rooms instance to create a member account. Installing the client does not create an account or host a server.
 

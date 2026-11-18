@@ -1,5 +1,6 @@
 import { api, el, localizedTime, personMark, personName, status, tell, topicHref } from "./ui.js";
 import { t } from "./i18n.js";
+import { renderVaultLauncher } from "./vault.js";
 import { wasVoiceReleased } from "./voice.js";
 
 function activityLink(item, snippet) {
@@ -76,7 +77,8 @@ async function activityCard(item) {
   }
 }
 
-export function renderHomeActivity({ signal }) {
+export function renderHomeActivity(context) {
+  const { signal } = context;
   const activity = el("ul", { class: "home-activity-list", hidden: true });
   const streams = el("ul", { class: "home-activity-list", hidden: true });
   const activityNote = status(t("Loading activity…", "Aktivität wird geladen …"));
@@ -128,5 +130,7 @@ export function renderHomeActivity({ signal }) {
   refresh();
   return el("div", { class: "home-activity-grid" },
     el("section", { class: "panel home-activity-panel" }, el("h2", {}, t("Recent activity", "Letzte Aktivität")), activityNote, activity),
-    el("section", { class: "panel home-activity-panel" }, el("h2", {}, t("Live now", "Gerade live")), streamNote, streams));
+    el("div", { class: "vault-home-column" },
+      el("section", { class: "panel home-activity-panel" }, el("h2", {}, t("Live now", "Gerade live")), streamNote, streams),
+      renderVaultLauncher(context)));
 }

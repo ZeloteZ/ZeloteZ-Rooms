@@ -29,6 +29,7 @@ async function startup(noSandbox) {
     require(name) {
       if (name === "electron") return { app, dialog, ipcMain: { handle() {} } };
       if (name === "./desktop-notifications.cjs") return { desktopNotifications: () => ({}) };
+      if (name === "./vault-ipc.cjs") return { installVaultIpc: () => ({ instanceData: () => ({}) }) };
       if (name === "./share-link.cjs") return require("../share-link.cjs");
       if (name.startsWith("./")) return {};
       return require(name);

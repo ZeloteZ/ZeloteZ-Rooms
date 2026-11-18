@@ -79,7 +79,7 @@ The helper checks for required GStreamer elements, including `pipewiresrc`, `gtk
 
 ## Browser-extension links
 
-Start the installed app once and connect it to exactly the same Rooms origin as the [YouTube extension](browser-extension.md). On Linux, start the executable AppImage from its permanent location to create/update the menu entry and link handler. Start it again after moving it or updating to a new file.
+Start the installed app once and connect it to exactly the same Rooms origin as the [Browser Extension](browser-extension.md). On Linux, start the executable AppImage from its permanent location to create/update the menu entry and link handler. Start it again after moving it or updating to a new file.
 
 On desktops supporting XDG link handlers, Rooms registers `zelotez-rooms:` if no default exists and consolidates recognized old AppImage launchers. If another handler is already selected, choose Rooms in your system's link settings or use the extension's **Continue in browser** option.
 

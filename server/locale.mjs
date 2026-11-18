@@ -1,3 +1,5 @@
+import { vaultErrorMessages } from './vault-locales.mjs'
+
 const localeKey = Symbol('response locale')
 const sourceLocale = 'de'
 const defaultLocale = 'en'
@@ -379,6 +381,7 @@ export function responseLocale(response) {
 }
 
 function catalogMessage(message, language) {
+  if (Object.hasOwn(vaultErrorMessages[language] ?? {}, message)) return vaultErrorMessages[language][message]
   if (!Object.hasOwn(catalogs, language)) return undefined
   const catalog = catalogs[language]
   if (Object.hasOwn(catalog.messages, message)) return catalog.messages[message]

@@ -1,4 +1,4 @@
-# ZeloteZ Rooms for YouTube
+# ZeloteZ Rooms Browser Extension
 
 The complete extension guide is part of the project documentation:
 
@@ -8,7 +8,7 @@ The complete extension guide is part of the project documentation:
 
 Follow the guide for Chrome, Brave, Edge, and temporary Firefox installation, instance permissions, guest-access defaults, and opening watch parties in the browser or desktop app.
 
-[Download the extension ZIP](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip) · [Desktop installation](../docs/desktop.md)
+[Download the extension ZIP](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-Browser-Extension.zip) · [Desktop installation](../docs/desktop.md)
 
 
 ## License

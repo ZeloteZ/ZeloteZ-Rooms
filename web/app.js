@@ -6,6 +6,8 @@ import { showAccountSecurity } from "./account-security.js";
 import { setupIsAvailable, setupKeyForm, setupProgress } from "./setup.js";
 import { renderHowItWorks } from "./how-it-works.js";
 import { renderDownloads } from "./downloads.js";
+import { renderVault } from "./vault.js";
+import { clearVaultKeys } from "./vault-crypto.js";
 import { isDesktopApp, showSiteVersion } from "./site-version.js";
 import { renderGuestViewer } from "./guest-viewer.js";
 import { forgetMemberQuickChatDevices } from "./quick-chat-crypto.js";
@@ -68,9 +70,13 @@ let pendingInvite = pendingRecovery === null ? takeLinkToken("invite") : null;
 let setupAvailable = false;
 let setupInvite = false;
 
+window.roomsVault?.onPending?.(() => {
+  if (user && location.hash !== "#/vault") location.hash = "#/vault";
+});
+
 const routes = { topics: "rooms", themen: "rooms", freunde: "friends", einladungen: "invites", "so-funktionierts": "help" };
 const navLabels = {
-  rooms: t("Rooms", "Räume"), friends: t("Friends", "Freunde"), invites: t("Invites", "Einladungen"),
+  rooms: t("Rooms", "Räume"), friends: t("Friends", "Freunde"), invites: t("Administration", "Verwaltung"),
   direct: t("Messages", "Nachrichten"),
   help: t("How it works", "So funktioniert’s"),
 };
@@ -293,7 +299,7 @@ async function changePassword() {
   codeField.hidden = true;
   const body = form([
     field(t("Current password", "Aktuelles Passwort"), current),
-    previous && field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
+    previous && field(t("Previous encryption password", "Bisheriges Verschlüsselungspasswort"), previous),
     newPasswordField(t("New password", "Neues Passwort"), next),
     account.admin ? codeField : memberFactor.node,
   ], title, async () => {
@@ -387,10 +393,12 @@ async function showWorkspace(nextUser, unlocked = true) {
   workspace.hidden = false;
   await render(true);
   if (!signal.aborted) startPresence(nextUser.id, signal);
+  if (!signal.aborted && await window.roomsVault?.pendingArchive?.().catch(() => null)) location.hash = "#/vault";
 }
 
 function enterAuth() {
   clearQuickLinks();
+  if (user) void window.roomsVault?.cancelArchive?.().catch(() => {});
   if (user) void forgetMemberQuickChatDevices(user.id);
   if (user) window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "session-ended" });
   if (user) window.roomsNativeCapture?.close().catch(() => {});
@@ -411,6 +419,7 @@ function enterAuth() {
   vaultLocked = false;
   setExpectedAccount(null);
   globalThis.ClubCrypto?.lock();
+  clearVaultKeys();
   closeDialog();
   bootstrap.hidden = true;
   workspace.hidden = true;
@@ -534,7 +543,7 @@ function sameChatIdentity(account, current) {
 function showUnlock(account) {
   enterAuth();
   const password = passwordInput();
-  const title = t("Unlock chats", "Chats entsperren");
+  const title = t("Unlock encrypted data", "Verschlüsselte Daten entsperren");
   const unlockForm = form(field(t("Password", "Passwort"), password), title, async (_, screen) => {
     const encryption = globalThis.ClubCrypto;
     if (!encryption) throw new Error(t("Encryption could not be loaded. Reload the page.", "Die Verschlüsselung konnte nicht geladen werden. Lade die Seite neu."));
@@ -542,7 +551,7 @@ function showUnlock(account) {
     const passphrase = password.value;
     password.value = "";
     if (!await encryption.unlock(account, passphrase, undefined, currentForm)) {
-      if (currentForm()) throw new Error(t("This password could not unlock your chats.", "Dieses Passwort konnte deine Chats nicht entsperren."));
+      if (currentForm()) throw new Error(t("This password could not unlock your encrypted data.", "Dieses Passwort konnte deine verschlüsselten Daten nicht entsperren."));
       return;
     }
     try {
@@ -559,8 +568,8 @@ function showUnlock(account) {
     }
   });
   showAuthPage(title, el("p", { class: "status" },
-    t("You are signed in as @{name}. Enter your password to unlock chats in this tab.",
-      "Du bist als @{name} angemeldet. Gib dein Passwort ein, um Chats in diesem Tab zu entsperren.", { name: account.username })),
+    t("You are signed in as @{name}. Enter your password to unlock chats and Vault files in this tab.",
+      "Du bist als @{name} angemeldet. Gib dein Passwort ein, um Chats und Vault-Dateien in diesem Tab zu entsperren.", { name: account.username })),
   unlockForm, button(t("Sign in with another account", "Mit anderem Konto anmelden"), () => showAuth(), { class: "ghost" }));
 }
 
@@ -581,11 +590,11 @@ async function showRecovery(token) {
       if (keepLocked.checked) previous.value = "";
     });
     panel.append(el("p", {}, "@" + account.username), form([
-      el("p", {}, t("Use the previous chat password to keep your existing chats accessible.",
-        "Gib das bisherige Chatpasswort ein, damit die vorhandenen Chats zugänglich bleiben.")),
-      field(t("Previous chat password", "Bisheriges Chatpasswort"), previous),
-      el("label", { class: "inline" }, keepLocked, t("I lost the chat password. Keep the chats locked.",
-        "Ich habe das Chatpasswort verloren. Die Chats sollen gesperrt bleiben.")),
+      el("p", {}, t("Use the previous encryption password to keep your existing chats and Vault files accessible.",
+        "Gib das bisherige Verschlüsselungspasswort ein, damit vorhandene Chats und Vault-Dateien zugänglich bleiben.")),
+      field(t("Previous encryption password", "Bisheriges Verschlüsselungspasswort"), previous),
+      el("label", { class: "inline" }, keepLocked, t("I lost the encryption password. Keep existing chats and Vault files locked.",
+        "Ich habe das Verschlüsselungspasswort verloren. Vorhandene Chats und Vault-Dateien sollen gesperrt bleiben.")),
       newPasswordField(t("New password", "Neues Passwort"), password),
     ], title, async () => {
       ClubCrypto.assertNewPassword(password.value);
@@ -672,6 +681,7 @@ async function render(force = false) {
     else if (route.page === "invites" && user.admin) page = await renderAdmin({ ...context, onSecurity: openAccountSecurity });
     else if (route.page === "help") page = renderHowItWorks();
     else if (route.page === "downloads") page = renderDownloads(context);
+    else if (route.page === "vault") page = renderVault(context);
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       const quick = quickViewerHeading();
       banner = quick.header;
@@ -688,9 +698,9 @@ async function render(force = false) {
     else page = await renderTopics(context);
     if (current()) {
       workspace.replaceChildren(...(vaultLocked ? [el("div", { class: "panel stack", role: "status" },
-        el("p", {}, t("Your chats are locked. If you find your previous chat password, update it to unlock them.",
-          "Deine Chats sind gesperrt. Wenn du das bisherige Chatpasswort wiederfindest, kannst du sie damit entsperren.")),
-        button(t("Unlock chats", "Chats entsperren"), changePassword))] : []), page);
+        el("p", {}, t("Your chats and Vault files are locked. If you find your previous encryption password, update it to unlock them.",
+          "Deine Chats und Vault-Dateien sind gesperrt. Wenn du das bisherige Verschlüsselungspasswort wiederfindest, kannst du sie damit entsperren.")),
+        button(t("Unlock encrypted data", "Verschlüsselte Daten entsperren"), changePassword))] : []), page);
       setRoomHeader(banner, recoverFocus);
       player.refreshPlacement();
       videoDock.refreshPlacement();

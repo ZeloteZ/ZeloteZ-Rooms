@@ -1,12 +1,12 @@
-# YouTube-Browsererweiterung
+# ZeloteZ Rooms Browser Extension
 
 [Dokumentation](README.md) · [English](../browser-extension.md) · [简体中文](../zh-CN/browser-extension.md)
 
-Die optionale Erweiterung ergänzt **ZeloteZ-Raum erstellen** neben **Teilen** auf YouTube-Videoseiten. Sie startet eine temporäre YouTube-Watchparty auf deiner Rooms-Instanz. Sie lädt kein YouTube-Video herunter und umgeht keine Einbettungsbeschränkungen.
+Die optionale Erweiterung ergänzt einen **Button mit dem Rooms-Logo in Graustufen** neben **Teilen** auf YouTube-Videoseiten. Sie startet eine temporäre YouTube-Watchparty auf deiner Rooms-Instanz. Sie lädt kein YouTube-Video herunter und umgeht keine Einbettungsbeschränkungen.
 
 ## Browser und Installation
 
-Das Manifest setzt Chromium-Browser **ab Version 121** und Firefox **ab Version 140** voraus. Lade [ZeloteZ-Rooms-YouTube.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip) aus dem öffentlichen GitHub-Release.
+Das Manifest setzt Chromium-Browser **ab Version 121** und Firefox **ab Version 140** voraus. Lade [ZeloteZ-Rooms-Browser-Extension.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-Browser-Extension.zip) aus dem öffentlichen GitHub-Release.
 
 | Browser | Lokale Installation |
 | --- | --- |
@@ -30,7 +30,7 @@ Verbinde dich mit einer vertrauenswürdigen Instanz und melde dich regulär in R
 ## Video teilen
 
 1. Öffne eine YouTube-Videoseite.
-2. Klicke **ZeloteZ-Raum erstellen** neben **Teilen**.
+2. Klicke auf das **Rooms-Logo in Graustufen** neben **Teilen**. Der Tooltip lautet **ZeloteZ-Raum erstellen**.
 3. Prüfe **Gäste mit dem Link erlauben** und **Unter Gerade live für Mitglieder anzeigen**.
 4. Wähle **Im Browser öffnen** oder **ZeloteZ Rooms Desktop**.
 

@@ -1,12 +1,12 @@
-# YouTube 浏览器扩展
+# ZeloteZ Rooms 浏览器扩展
 
 [文档目录](README.md) · [English](../browser-extension.md) · [Deutsch](../de/browser-extension.md)
 
-可选扩展在 YouTube 视频页“分享”旁添加“创建 ZeloteZ 房间”，在你选定的 Rooms 实例上发起临时 YouTube 观影派对。它不会下载 YouTube 视频，也不绕过嵌入限制。
+可选扩展在 YouTube 视频页“分享”旁添加仅含灰度 Rooms 标志的按钮，在你选定的 Rooms 实例上发起临时 YouTube 观影派对。它不会下载 YouTube 视频，也不绕过嵌入限制。
 
 ## 浏览器与安装
 
-清单要求 Chromium 浏览器 **121 或更新版本**，以及 Firefox **140 或更新版本**。从公开的 GitHub 发布下载 [ZeloteZ-Rooms-YouTube.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip)。
+清单要求 Chromium 浏览器 **121 或更新版本**，以及 Firefox **140 或更新版本**。从公开的 GitHub 发布下载 [ZeloteZ-Rooms-Browser-Extension.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-Browser-Extension.zip)。
 
 | 浏览器 | 本地安装 |
 | --- | --- |
@@ -30,7 +30,7 @@ Firefox 本地安装是临时的，重启浏览器后需重新加载。永久安
 ## 分享视频
 
 1. 打开 YouTube 视频页。
-2. 点击“分享”旁的“创建 ZeloteZ 房间”。
+2. 点击“分享”旁的灰度 Rooms 标志。按钮提示为“创建 ZeloteZ 房间”。
 3. 检查“允许持链接的访客加入”和“向成员显示在正在直播列表”。
 4. 选择“在浏览器中打开”或“ZeloteZ Rooms Desktop”。
 

@@ -68,3 +68,7 @@ Führe die CLI nicht gegen ein leeres oder fremdes Volume aus; sie muss die Date
 Raumersteller und Raum-Admins können Text-/Live-Kanäle verwalten und Nachrichten moderieren. Nur der Raumersteller ändert Raumeinstellungen und Mitgliedschaften, befördert Mitglieder zu Raum-Admins oder stuft sie zurück, erteilt oder widerruft Designrechte und löscht den Raum. Designzugriff ist eine gesonderte Freigabe und folgt nicht automatisch aus der Adminrolle. Mitglieder können eigene Nachrichten löschen. Das Entfernen eines Mitglieds oder Löschen eines Raums ändert den App-Zugriff, entfernt aber keine bereits heruntergeladenen oder entschlüsselten Empfängerkopien. Kontosperre und Einladungswiderruf unterscheiden sich vom Löschen eines Raums oder Chatverlaufs.
 
 Halte vor Wartung mit Änderungen an Konto- oder Raumzustand ein wiederherstellbares [Backup](operations.md) vor. Bearbeite die SQLite-Datenbank niemals direkt bei laufender API.
+
+## ZeloteZ Vault
+
+Betreiber können privaten verschlüsselten Speicher und Dateifreigaben unter **Verwaltung → ZeloteZ Vault** aktivieren. Standard sind **2 GiB pro Konto**. Die [Vault-Anleitung](vault.md) beschreibt Verwaltung, Freigaben, Dateimanager-Integration, Datenschutz und Wiederherstellung.

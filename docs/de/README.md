@@ -12,7 +12,8 @@ Wähle die Anleitung für dein Vorhaben. Diese Seiten beschreiben den Quellstand
 | [Benutzerhandbuch](user-guide.md) | Räume, Kanäle, Freunde, verschlüsselte Nachrichten, Dateien, Moderation, Benachrichtigungen und Gestaltung. |
 | [Streams und Watchpartys](streaming.md) | Bildschirm oder Video teilen, Sprachchat nutzen, Gäste einladen, Wiedergabe wählen und Statistiken verstehen. |
 | [Desktop-App](desktop.md) | Installation unter Windows und Linux, Bildschirm- und Audioaufnahme, Einstellungen und Updates. |
-| [YouTube-Erweiterung](browser-extension.md) | Erweiterung installieren, Zugriff einstellen und Watchpartys im Browser oder in der Desktop-App öffnen. |
+| [Browser Extension](browser-extension.md) | Erweiterung installieren, Zugriff einstellen und Watchpartys im Browser oder in der Desktop-App öffnen. |
+| [ZeloteZ Vault](vault.md) | Private verschlüsselte Dateien, Ordner, Freigaben, Speicherlimits und optionale Dateimanager-Integration. |
 
 Zum Erstellen eines Mitgliedskontos brauchst du eine Einladung vom Betreiber einer Rooms-Instanz. Durch die Installation des Clients entsteht weder ein Konto noch ein eigener Server.
 

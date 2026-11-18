@@ -19,6 +19,7 @@ import { createStreamChat } from './stream-chat.mjs'
 import { createTutorials } from './tutorials.mjs'
 import { createVoice } from './voice.mjs'
 import { createWatchParties } from './watch-parties.mjs'
+import { createVault } from './vault.mjs'
 import { configuredSetupKey, createSetup } from './setup.mjs'
 
 const origin = new URL(process.env.PUBLIC_ORIGIN ?? 'http://127.0.0.1:8080')
@@ -43,6 +44,7 @@ const desktopHandoff = createDesktopHandoff()
 const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile,
   revokeBroadcasts: userId => streams.revokeUser(userId) })
 const { requireSession } = auth
+const vault = createVault(db, { dataDir, requireSession, requireAdmin: auth.requireAdmin })
 const setup = createSetup(db, { publicOrigin: origin.origin, setupKey: configuredSetupKey(db),
   ipFor: request => requestAddress(request, trustProxyIp),
   bootstrap: () => bootstrapOwnerInvite(db, origin.origin, { browserSetup: true }) })
@@ -123,6 +125,7 @@ const publicApi = service(async (request, response) => {
   if (path.startsWith('/api/')) {
     if (!['GET', 'HEAD'].includes(request.method)) assertOrigin(request, origin.origin)
     if (await setup.handle(request, response, path)) return
+    if (await vault.handlePublic(request, response, url)) return
     if (path.startsWith('/api/guest/')) {
       if (await quickRooms.handleGuest(request, response, path)) return
       return json(response, 404, { error: 'Nicht gefunden.' })
@@ -135,6 +138,7 @@ const publicApi = service(async (request, response) => {
       return json(response, 200, { ...live, activities: community.homeActivity(user.id),
         talkRooms: voice.homeActivity(user.id), watchParties: watchParties.homeActivity(user.id), quickRooms: temporary })
     }
+    if (await vault.handle(request, response, url)) return
     if (await quickRooms.handle(request, response, path)) return
     if (await appearance.handle(request, response, path, requireSession)) return
     if (await tutorials.handle(request, response, path)) return
@@ -174,11 +178,12 @@ function shutdown() {
   quickRooms.close()
   voice.close()
   watchParties.close()
+  const vaultClosed = vault.close()
   let servers = 2
   const closed = () => {
     if (--servers === 0) {
       desktopHandoff.close()
-      db.close()
+      void vaultClosed.then(() => db.close(), () => db.close())
     }
   }
   publicApi.close(closed)

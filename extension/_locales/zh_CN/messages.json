@@ -1,5 +1,5 @@
 {
-  "extensionName": { "message": "适用于 YouTube 的 ZeloteZ Rooms" },
+  "extensionName": { "message": "ZeloteZ Rooms 浏览器扩展" },
   "extensionDescription": { "message": "在你的 ZeloteZ Rooms 实例中打开所选的 YouTube 视频。" },
   "settingsTitle": { "message": "ZeloteZ Rooms 设置" },
   "createRoom": { "message": "创建 ZeloteZ 房间" },

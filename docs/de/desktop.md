@@ -79,7 +79,7 @@ Geprüfte GStreamer-Elemente sind unter anderem `pipewiresrc`, `gtk4paintablesin
 
 ## Links aus der Browsererweiterung
 
-Starte die installierte App einmal und verbinde sie mit exakt derselben Rooms-Adresse wie die [YouTube-Erweiterung](browser-extension.md). Unter Linux muss das ausführbare AppImage am dauerhaften Ort gestartet werden, damit Menüeintrag und Linkhandler eingerichtet werden. Wiederhole das nach Verschieben oder Update auf eine neue Datei.
+Starte die installierte App einmal und verbinde sie mit exakt derselben Rooms-Adresse wie die [Browser Extension](browser-extension.md). Unter Linux muss das ausführbare AppImage am dauerhaften Ort gestartet werden, damit Menüeintrag und Linkhandler eingerichtet werden. Wiederhole das nach Verschieben oder Update auf eine neue Datei.
 
 Auf Desktops mit XDG-Linkhandlern registriert Rooms `zelotez-rooms:`, wenn noch kein Standard gesetzt ist, und bereinigt erkannte alte AppImage-Starter. Ist bereits ein anderer Handler gewählt, ändere die Systemzuordnung oder nutze **Im Browser fortfahren** in der Erweiterung.
 

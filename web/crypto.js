@@ -178,7 +178,7 @@ window.ClubCrypto = (() => {
       if (!current()) return false;
       pin(user.id, pub);
       const encodedVault = base64(vault);
-      active = { id: user.id, key, vault: encodedVault };
+      active = { id: user.id, key, publicKey: pub, vault: encodedVault };
       try { sessionStorage.setItem(cacheName, JSON.stringify({ id: user.id, vault: encodedVault })); } catch { /* Optional cache. */ }
       return true;
     } catch {
@@ -221,6 +221,56 @@ window.ClubCrypto = (() => {
     }));
     rawKey.fill(0);
     return { envelope: { v: 1, ephemeral, nonce: base64(iv), body: base64(body), keys: Object.fromEntries(boxes) }, key };
+  }
+
+  function vaultContext(scope, ownerId) {
+    if (typeof scope !== "string") return false;
+    const match = /^zelotez-vault\/1\/(owner|member|public-link)\/([a-f0-9-]{36})(?:\/([a-f0-9-]{36}))?$/u.exec(scope);
+    return Boolean(match && match[2] === ownerId && ((match[1] === "owner") === !match[3]));
+  }
+
+  async function sealVaultMessage(scope, messageId, content, recipients) {
+    const identity = active;
+    if (!identity || !vaultContext(scope, identity.id) || !recipients.some(({ id }) => id === identity.id)) {
+      throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
+    }
+    const current = () => {
+      if (active !== identity) throw new Error(errorText("Unlock your session again.", "Entsperre deine Sitzung erneut.", "请重新解锁会话。"));
+    };
+    const rawKey = crypto.getRandomValues(new Uint8Array(32));
+    try {
+      const encryptionKey = await aesKey(rawKey);
+      const iv = nonce();
+      const body = await subtle.encrypt(aead(iv, aad("message", scope, messageId)), encryptionKey,
+        encoder.encode(JSON.stringify(content)));
+      const boxes = await Promise.all(recipients.map(async recipient => {
+        const pub = publicPoint(recipient.id === identity.id ? identity.publicKey : recipient.publicKey);
+        pin(recipient.id, pub);
+        const link = aad("recipient", scope, messageId, recipient.id);
+        const wrap = await recipientKey(identity.key, pub, link);
+        const iv = nonce();
+        const blob = await subtle.encrypt(aead(iv, link), wrap, rawKey);
+        current();
+        return [recipient.id, { nonce: base64(iv), blob: base64(blob) }];
+      }));
+      current();
+      return { envelope: { v: 1, ephemeral: identity.publicKey, nonce: base64(iv), body: base64(body),
+        keys: Object.fromEntries(boxes) } };
+    } finally {
+      rawKey.fill(0);
+    }
+  }
+
+  async function openVaultMessage(scope, messageId, envelope, owner) {
+    const invalidVault = () => new Error(errorText("Vault content could not be authenticated.",
+      "Der Vault-Inhalt konnte nicht verifiziert werden.", "无法验证 Vault 内容。"));
+    if (!active || !owner?.id || !vaultContext(scope, owner.id) || !owner.publicKey || !envelope?.ephemeral ||
+        Object.hasOwn(envelope, "historyGrant") || !envelope.keys || !Object.hasOwn(envelope.keys, active.id)) throw invalidVault();
+    const pub = publicPoint(owner.publicKey);
+    const sender = publicPoint(envelope?.ephemeral ?? {});
+    if (sender.x !== pub.x || sender.y !== pub.y) throw invalidVault();
+    pin(owner.id, pub);
+    return openMessage(scope, messageId, envelope);
   }
 
   async function wrapHistoryKey(channelId, entry, recipient, routeChannelId) {
@@ -339,5 +389,5 @@ window.ClubCrypto = (() => {
   }
 
   return { assertNewPassword, prepareRegistration, rewrapIdentity, credential, unlock, lock, deviceUnlockKey, sealMessage, wrapHistoryKey, openMessage, encryptFile, decryptFile,
-    sealReaction, openReaction, deletionScope, onHistoryKeyFailure };
+    sealReaction, openReaction, deletionScope, onHistoryKeyFailure, sealVaultMessage, openVaultMessage };
 })();

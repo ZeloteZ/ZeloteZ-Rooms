@@ -1,0 +1,28 @@
+export const vaultErrorMessages = Object.freeze({
+  en: Object.freeze({
+    'Zu viele Vault-Anfragen. Versuche es in einer Minute erneut.': 'Too many Vault requests. Try again in a minute.',
+    'Dieser Vault-Eintrag ist nicht verfügbar.': 'This Vault item is unavailable.',
+    'Ungültige Vault-Anfrage.': 'Invalid Vault request.',
+    'Dein Vault-Speicherlimit ist erreicht.': 'Your Vault storage limit has been reached.',
+    'Warte, bis andere Vault-Übertragungen abgeschlossen sind.': 'Wait for other Vault transfers to finish.',
+    'Der Vault-Speicher des Servers ist voll. Bitte versuche es später erneut.': 'The server Vault storage is full. Please try again later.',
+    'Nur verschlüsselte Dateien sind erlaubt.': 'Only encrypted files are accepted.',
+    'Dieser Vault-Dateiteil wurde bereits verwendet.': 'This Vault file part has already been used.',
+    'Dieser Vault-Eintrag wurde bereits verwendet.': 'This Vault item has already been used.',
+    'Die Vault-Datei ist noch nicht vollständig hochgeladen.': 'The Vault file upload is not complete yet.',
+    'Diese Vault-Freigabe wurde bereits verwendet.': 'This Vault share has already been used.',
+  }),
+  'zh-CN': Object.freeze({
+    'Zu viele Vault-Anfragen. Versuche es in einer Minute erneut.': 'Vault 请求过多，请稍后再试。',
+    'Dieser Vault-Eintrag ist nicht verfügbar.': '此 Vault 项目不可用。',
+    'Ungültige Vault-Anfrage.': 'Vault 请求无效。',
+    'Dein Vault-Speicherlimit ist erreicht.': '已达到 Vault 存储限额。',
+    'Warte, bis andere Vault-Übertragungen abgeschlossen sind.': '请等待其他 Vault 传输完成。',
+    'Der Vault-Speicher des Servers ist voll. Bitte versuche es später erneut.': '服务器的 Vault 存储空间已满，请稍后重试。',
+    'Nur verschlüsselte Dateien sind erlaubt.': '仅接受加密文件。',
+    'Dieser Vault-Dateiteil wurde bereits verwendet.': '此 Vault 文件分块已被使用。',
+    'Dieser Vault-Eintrag wurde bereits verwendet.': '此 Vault 项目已被使用。',
+    'Die Vault-Datei ist noch nicht vollständig hochgeladen.': 'Vault 文件尚未上传完成。',
+    'Diese Vault-Freigabe wurde bereits verwendet.': '此 Vault 共享标识已被使用。',
+  }),
+});

@@ -1,8 +1,10 @@
 import account from "./i18n-zh-account.js";
+import vault from "./i18n-zh-vault.js";
 
 // English source text is the shared message key. Keep named placeholders unchanged.
 export default Object.freeze({
   ...account,
+  ...vault,
   "Client": "客户端",
   "Downloads": "下载",
   "Get more with the ZeloteZ Rooms client:": "ZeloteZ Rooms 客户端为你带来更多功能：",

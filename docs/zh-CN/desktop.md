@@ -79,7 +79,7 @@ KDE Plasma 请将 GNOME 门户后端换为 `xdg-desktop-portal-kde`。其他发�
 
 ## 浏览器扩展链接
 
-先启动已安装客户端一次，并连接到与 [YouTube 扩展](browser-extension.md)完全相同的 Rooms origin。Linux 下需从长期存放位置启动可执行 AppImage，以建立或更新菜单项和链接处理程序。移动文件或更新为新文件后，请重新启动一次。
+先启动已安装客户端一次，并连接到与 [浏览器扩展](browser-extension.md)完全相同的 Rooms origin。Linux 下需从长期存放位置启动可执行 AppImage，以建立或更新菜单项和链接处理程序。移动文件或更新为新文件后，请重新启动一次。
 
 支持 XDG 链接处理的桌面上，如果没有默认处理程序，Rooms 会注册 `zelotez-rooms:`，并合并识别到的旧 AppImage 启动项。如果已选择其他程序，请在系统链接设置中选择 Rooms，或使用扩展中的“在浏览器中继续”。
 

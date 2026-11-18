@@ -22,7 +22,7 @@ RUN set -eu; cd /srv/www; \
     mv "$@" "assets/$version/"; \
     sed -i -E \
       -e "s#(src|href)=\"/([A-Za-z][A-Za-z0-9_.-]*\.(css|js))\"#\1=\"/assets/$version/\2\"#g" \
-      -e "s#src=\"/vendor/hls\.min\.js\"#src=\"/assets/$version/hls.min.js\"#g" index.html guest.html
+      -e "s#src=\"/vendor/hls\.min\.js\"#src=\"/assets/$version/hls.min.js\"#g" index.html guest.html vault.html
 USER 101:101
 EXPOSE 8080
 ENTRYPOINT ["nginx", "-g", "daemon off;"]

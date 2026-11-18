@@ -68,3 +68,7 @@ Do not run the recovery CLI against an empty or unrelated volume: the commands m
 Room creators and admins can manage text/live channels and moderate messages. Only the room's creator changes room settings and membership, promotes or demotes room admins, grants or revokes design permissions, and deletes the room. Design access is a separate grant, not an automatic consequence of being an admin. Members can delete their own messages. Removing a member or deleting a room changes application access; it cannot erase copies a recipient already downloaded or decrypted. Account suspension and invitation revocation are different from deleting a room or chat history.
 
 Before maintenance that changes account or room state, keep a restorable [backup](operations.md). Never edit the SQLite database in place while the API is running.
+
+## ZeloteZ Vault
+
+Operators can enable private encrypted storage and file sharing under **Administration → ZeloteZ Vault**. The default storage limit is **2 GiB per account**. See the [Vault guide](vault.md) for management, sharing, file-manager integration, privacy, and recovery.

@@ -1,12 +1,12 @@
-# YouTube browser extension
+# ZeloteZ Rooms Browser Extension
 
 [Documentation](README.md) · [Deutsch](de/browser-extension.md) · [简体中文](zh-CN/browser-extension.md)
 
-The optional extension adds **Create ZeloteZ Room** beside **Share** on YouTube watch pages. It creates a temporary YouTube watch party on your chosen Rooms instance. It does not download a YouTube video or bypass YouTube's embedding restrictions.
+The optional extension adds a **grayscale Rooms logo button** beside **Share** on YouTube watch pages. It creates a temporary YouTube watch party on your chosen Rooms instance. It does not download a YouTube video or bypass YouTube's embedding restrictions.
 
 ## Browser support and installation
 
-The manifest targets Chromium browsers from **version 121** and Firefox from **version 140**. Download [ZeloteZ-Rooms-YouTube.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-YouTube.zip) from the public GitHub release.
+The manifest targets Chromium browsers from **version 121** and Firefox from **version 140**. Download [ZeloteZ-Rooms-Browser-Extension.zip](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest/download/ZeloteZ-Rooms-Browser-Extension.zip) from the public GitHub release.
 
 | Browser | Install locally |
 | --- | --- |
@@ -30,7 +30,7 @@ Connect to an instance you trust and sign in normally in Rooms.
 ## Share a video
 
 1. Open a YouTube watch page.
-2. Click **Create ZeloteZ Room** beside **Share**.
+2. Click the **grayscale Rooms logo** beside **Share**. The tooltip reads **Create ZeloteZ Room**.
 3. Review **Allow guests with the link** and **Show in Live Now for members**.
 4. Choose **Open in browser** or the desktop handoff.
 5. Sign in or unlock chats in Rooms if requested, then confirm the video there.

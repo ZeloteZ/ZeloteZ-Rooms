@@ -17,6 +17,7 @@ const { createRememberedLogin } = require("./remembered-login.cjs");
 const { checkIntervals, findUpdate, latestReleasePage, releasePage } = require("./release-updates.cjs");
 const { parseShareLink, scheme: shareScheme, shareLinkFromArguments } = require("./share-link.cjs");
 const { trayHostAvailable, trayUsable } = require("./tray.cjs");
+const { installVaultIpc } = require("./vault-ipc.cjs");
 
 const localPage = path.join(__dirname, "ui", "index.html");
 const localUrl = pathToFileURL(localPage).href;
@@ -55,6 +56,11 @@ let captureProgram;
 let windowsCaptureProgram;
 let pendingShare = shareLinkFromArguments(process.argv, serverOrigin);
 const text = (en, de, zh) => language === "zh-CN" ? zh : language === "de" ? de : en;
+const vaultDesktop = installVaultIpc({
+  ipcMain, dialog, allowed: isRoomsSender, text, packaged: () => app.isPackaged,
+  current: () => ({ origin: currentOrigin, contents: roomsContents, window: roomsWindow,
+    active: Boolean(roomsDocumentIsActive?.()) }),
+});
 const preferenceOptions = { language: ["system", "en", "de", "zh-CN"], appearance: ["dark", "system", "light"],
   notifications: [true, false], keepRunning: [true, false], updateChecks: [true, false], updateInterval: checkIntervals };
 const verificationErrors = new Set(["invalid", "unreachable", "not_rooms", "incompatible"]);
@@ -728,6 +734,10 @@ function prepareRoomsWindow(origin) {
     windowVisibility(window.isVisible() && !window.isMinimized());
     if (roomsWindow === window) scheduleUpdateCheck();
   });
+  contents.on("did-start-navigation", event => {
+    if (event.isMainFrame && !event.isSameDocument && roomsContents === contents) void vaultDesktop.reset();
+  });
+  contents.on("render-process-gone", () => { if (roomsContents === contents) void vaultDesktop.reset(); });
   let htmlFullScreen = false;
   const layout = () => {
     const [width, height] = window.getContentSize();
@@ -808,6 +818,7 @@ function prepareRoomsWindow(origin) {
     videoWindow.reset();
     if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: closing });
     if (roomsWindow === window) {
+      void vaultDesktop.reset({ keepPending: true });
       roomsWindow = null;
       roomsContents = null;
       roomsDocumentIsActive = null;
@@ -856,10 +867,13 @@ async function connect(origin, { signal, local } = {}) {
     if (!prepared.verified()) return { error: "load" };
     notifications.clear();
     cancelUpdateCheck();
+    await vaultDesktop.reset({ keepPending: true });
+    if (!prepared.verified()) return { error: "load" };
     roomsWindow = window;
     roomsContents = prepared.contents;
     roomsDocumentIsActive = prepared.isActive;
     currentOrigin = origin;
+    vaultDesktop.announce();
     local?.window.close();
     window.show();
     roomsContents.focus();
@@ -919,12 +933,16 @@ if (process.platform === "linux" && app.commandLine.hasSwitch("no-sandbox")) {
       app.exit(1);
     }
   });
-} else if (!app.requestSingleInstanceLock()) {
+} else if (!app.requestSingleInstanceLock(vaultDesktop.instanceData())) {
   app.quit();
 } else {
   app.on("window-all-closed", () => { if (!connecting) app.quit(); });
-  app.on("before-quit", () => { quitting = true; cancelUpdateCheck(); notifications.clear(); updateTray(); });
-  app.on("second-instance", (_event, args) => {
+  app.on("before-quit", () => { quitting = true; void vaultDesktop.reset(); cancelUpdateCheck(); notifications.clear(); updateTray(); });
+  app.on("second-instance", (_event, args, _workingDirectory, additionalData) => {
+    if (vaultDesktop.receiveInstanceData(additionalData)) {
+      restoreWindow(roomsWindow ?? settingsWindow);
+      return;
+    }
     const share = shareLinkFromArguments(args, serverOrigin);
     if (share) void receiveShare(share);
     else restoreWindow(settingsWindow ?? roomsWindow);
