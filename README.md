@@ -21,33 +21,32 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 
 ## Self-hosting
 
-For a new server, [start the Rooms image and complete the browser wizard](deploy/README.md#first-start). It bundles the web and streaming services. The same guide covers [updates](deploy/README.md#updates) and [moving an existing deployment](deploy/README.md#move-an-existing-three-container-deployment).
-
-### Existing three-container deployment
-
-1. **Configure the instance.** Copy [`.env.example`](.env.example) to `.env`. Set `PUBLIC_ORIGIN` to your HTTPS origin and `STREAM_INGEST_BASE` to your RTMPS endpoint. Use addresses without paths. Set `VOICE_ICE_HOST` to a hostname or IP address your clients can reach.
-2. **Set up HTTPS and RTMPS.** Point your HTTPS reverse proxy at the loopback port configured by `WEB_PORT`. Have the proxy overwrite `X-Real-IP` with the trusted client address. Put `fullchain.pem` and `privkey.pem` in `RTMPS_CERT_DIR`, using a separate TLS key for the ingest endpoint.
-3. **Open the ports your group needs.** HTTPS terminates at your reverse proxy. The media defaults are TCP 1936 for native RTMPS ingest and UDP 8189 with a TCP fallback on the same port for WebRTC.
-4. **Start the instance and create the owner account.** Run these commands from the repository root, then open the bootstrap link.
-
-5. **Set up the owner’s authenticator.** After creating the account, scan the QR code in Rooms and confirm it with an authenticator code.
+Use the same Rooms image for a public instance. Configure its canonical HTTPS address and media ports before creating the owner account, following the [public-instance guide](deploy/README.md#public-instance). It covers the reverse proxy, reachable media addresses, optional RTMPS certificates, and resource limits. Keep using the same Compose project and volumes for [updates](deploy/README.md#updates).
 
 Members can enable two-factor sign-in under **Profile → Two-factor sign-in**. Scan the QR code and enter a six-digit code from the app. Save the displayed recovery codes separately from the device. Each can replace an authenticator code once when signing in. Use the profile to change devices, generate new recovery codes or turn off optional two-factor sign-in.
 
-Two-factor sign-in is required for the owner. The owner can set up and replace an authenticator in the profile. Sensitive actions under **Invites** and changes to the owner password require recent authenticator confirmation. If you lost access to the authenticator or need to set one up after an upgrade, run this in the server terminal.
+Two-factor sign-in is required for the owner. The owner can set up and replace an authenticator in the profile. Sensitive actions under **Invites** and changes to the owner password require recent authenticator confirmation. If you lose access to the authenticator, run this from the same Compose project and environment:
+
+```sh
+docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms node bootstrap.mjs --setup-owner-mfa
+```
 
 Scan the terminal QR code with your authenticator app. You can also enter the printed key as a time-based code with six digits and a 30-second period. This command replaces the old authenticator and ends existing owner sessions. Sign in again and generate recovery codes in the profile.
 
 The site owner manages invitations and can suspend accounts or end their sessions under **Invites → Accounts**. Each account can broadcast one stream at a time, with up to eight simultaneous broadcasts per instance.
 
-To change your password, open your profile and choose **Change password**. Rooms keeps your chat key and ends your other sessions. To recover the owner account from the server console, run `docker compose exec -T server node bootstrap.mjs --recover-owner`. This revokes owner sessions and unused invitations and pauses the old sign-in. Open the one-time link in the terminal within 20 minutes. Use the previous chat password to keep the chat key accessible. If you lost that password, you can regain the account with its chats locked and unlock them later if you find it. Run the recovery command again if the link expires.
+To change your password, open your profile and choose **Change password**. Rooms keeps your chat key and ends your other sessions. To recover the owner account from the server console, use:
 
-The default stack sets resource limits and rotates container logs. See the [Compose file](compose.yaml) for the values.
+```sh
+docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms node bootstrap.mjs --recover-owner
+```
+
+This revokes owner sessions and unused invitations and pauses the old sign-in. Open the one-time link in the terminal within 20 minutes. Use the previous chat password to keep the chat key accessible. If you lost that password, you can regain the account with its chats locked and unlock them later if you find it. Run the recovery command again if the link expires.
 
 If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the watch-party upload route `/api/channels/<id>/watch/<id>/upload`.
 
 > [!IMPORTANT]
-> Keep a separate, restorable backup of the `community` Docker volume and your instance configuration. The volume holds accounts, memberships, and encrypted data. An ordinary `docker compose down` preserves it.
+> Keep a separate, restorable backup of the application and media volumes (`rooms-data` and `rooms-watch-media` by default) and your instance configuration. The application volume holds accounts, memberships, and encrypted data. An ordinary `docker compose down` preserves the volumes.
 
 ## Desktop app
 

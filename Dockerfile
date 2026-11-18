@@ -35,11 +35,11 @@ RUN apk add --no-cache ffmpeg libstdc++ tini \
     && install -d -m 0700 -o rooms -g rooms /data /watch-data \
     && install -d -m 0755 /srv/desktop-downloads /tls
 COPY --from=build /usr/local/bin/node /usr/local/bin/node
-COPY --from=build /usr/local/LICENSE /usr/share/licenses/rooms/node.LICENSE
 COPY --from=build /backend/ /app/
 COPY --from=build /srv/www/ /srv/www/
 COPY --from=media /mediamtx /usr/local/bin/mediamtx
-COPY --from=media /LICENSE /usr/share/licenses/rooms/mediamtx.LICENSE
+# Node 24.22.3 and MediaMTX 1.21.4 notices from the pinned base releases.
+COPY deploy/node.LICENSE deploy/mediamtx.LICENSE /usr/share/licenses/rooms/
 COPY deploy/mediamtx.yml /etc/rooms/mediamtx.yml
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/rooms-entrypoint.mjs /app/rooms-entrypoint.mjs

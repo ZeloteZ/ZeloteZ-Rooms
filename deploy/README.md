@@ -43,14 +43,3 @@ docker compose --project-directory . -f deploy/compose.image.yaml up -d --wait
 ```
 
 The container keeps the existing accounts and rooms by remounting the same volumes. Pin `ROOMS_IMAGE` to `ghcr.io/zelotez/zelotez-rooms:sha-<commit>` or an image digest to choose a specific build. Keep a pre-update backup for rollback if database migrations have run.
-
-## Move an existing three-container deployment
-
-Use the [migration planner](migrate-image.py) on a host where the previous Compose project is deployed. It reads the active settings and mounts and makes a private image-Compose configuration based on those exact volumes and bind paths. Follow the generated backup and cutover steps. Keep the public origin and ports the same to retain browser and desktop access. The new container and the legacy server must use the data volume at different times.
-
-```sh
-python3 deploy/migrate-image.py --project-directory /path/to/current/rooms \
-  --output /path/to/rooms-image-plan
-```
-
-If the old installation used `docker compose -p`, pass the same name with `--project-name`. Open `MIGRATION.txt` in the generated directory.

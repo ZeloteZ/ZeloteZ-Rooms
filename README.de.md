@@ -36,44 +36,32 @@ Der temporäre Livechat verschlüsselt Nachrichten auch für eingeladene Gäste.
 
 ## Selbst hosten
 
-Das Rooms-Image bündelt Weboberfläche und Streaming-Dienste. Starte es vom Projektordner aus und hole den Einrichtungsschlüssel aus der Serverkonsole.
-
-```sh
-docker compose --project-directory . -f deploy/compose.image.yaml up -d --wait
-docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms node bootstrap.mjs --setup-key
-```
-
-Öffne [http://127.0.0.1:8080](http://127.0.0.1:8080). Der Assistent fragt nach dem Schlüssel, führt dich zum Betreiberkonto und zeigt den QR-Code für die Zwei-Faktor-Anmeldung. Für eine öffentliche Installation konfigurierst du die HTTPS-Adresse und Medienports vor dem Start. [Erststart](deploy/README.md#first-start) · [Öffentliche Instanz](deploy/README.md#public-instance) · [Updates](deploy/README.md#updates) · [Migration](deploy/README.md#move-an-existing-three-container-deployment)
-
-### Bestehende Installation mit drei Containern
-
-Kopiere für die Erstinstallation [`.env.example`](.env.example) nach `.env` und passe die Werte an deine Umgebung an.
-
-| Einstellung | Wofür sie gebraucht wird |
-| --- | --- |
-| `PUBLIC_ORIGIN` | Öffentliche HTTPS-Adresse der Website ohne Pfad |
-| `STREAM_INGEST_BASE` | RTMPS-Adresse für native Desktop-Übertragungen ohne Pfad |
-| `VOICE_ICE_HOST` | Hostname oder IP-Adresse, über die Clients den WebRTC-Dienst erreichen |
-| `RTMPS_CERT_DIR` | Verzeichnis mit dem RTMPS-Zertifikat `fullchain.pem` und seinem Schlüssel `privkey.pem` |
-
-Der Web-Port ist an Loopback gebunden. Setze davor einen HTTPS-Reverse-Proxy, der `X-Real-IP` mit der vertrauenswürdigen Client-IP überschreibt. Verwende für den RTMPS-Eingang einen eigenen TLS-Schlüssel. Gib für RTMPS standardmäßig TCP 1936 frei. WebRTC nutzt standardmäßig UDP 8189 und TCP 8189 als Ausweichweg. Die Compose-Konfiguration enthält Ressourcenlimits und Logrotation.
-
-Wenn dein Reverse-Proxy Anfragen nach Größe begrenzt, erlaube 4 MiB je Teilstück für die Watchparty-Upload-Route `/api/channels/<id>/watch/<id>/upload`.
-
-Starte die Dienste und erstelle den Einmal-Link für das Betreiberkonto.
+Verwende dasselbe Rooms-Image für eine öffentliche Instanz. Konfiguriere vor der Kontoerstellung die öffentliche HTTPS-Adresse und die Medienports anhand der [Anleitung für öffentliche Instanzen](deploy/README.md#public-instance). Dort werden Reverse-Proxy, erreichbare Medienadressen, optionale RTMPS-Zertifikate und Ressourcenlimits beschrieben. Verwende bei [Updates](deploy/README.md#updates) weiterhin dasselbe Compose-Projekt und dieselben Volumes.
 
 Mitglieder können unter **Profil → Zwei-Faktor-Anmeldung** freiwillig einen Authenticator hinzufügen. Scanne den QR-Code und bestätige ihn mit einem sechsstelligen Code. Bewahre die einmalig angezeigten Wiederherstellungscodes getrennt vom Gerät auf. Sie können bei der Anmeldung jeweils einmal den Authenticator-Code ersetzen. Im Profil kannst du das Gerät wechseln, neue Wiederherstellungscodes erzeugen oder die freiwillige Zwei-Faktor-Anmeldung deaktivieren.
 
-Für den Betreiber ist die Zwei-Faktor-Anmeldung Pflicht. Die erste Einrichtung und der Gerätewechsel sind per QR-Code im Profil möglich. Änderungen unter **Einladungen** und am Betreiberpasswort brauchen eine aktuelle Bestätigung per Authenticator. Wenn du den Zugriff auf den Authenticator verloren hast oder nach einem Upgrade noch keinen eingerichtet hast, öffne ein privates Serverterminal.
+Für den Betreiber ist die Zwei-Faktor-Anmeldung Pflicht. Die erste Einrichtung und der Gerätewechsel sind per QR-Code im Profil möglich. Änderungen unter **Einladungen** und am Betreiberpasswort brauchen eine aktuelle Bestätigung per Authenticator. Wenn du den Zugriff auf den Authenticator verloren hast, führe im selben Compose-Projekt mit derselben Umgebung aus:
+
+```sh
+docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms node bootstrap.mjs --setup-owner-mfa
+```
 
 Scanne den QR-Code aus dem Terminal mit deiner Authenticator-App. Bei Bedarf kannst du den Schlüssel manuell als zeitbasierten Code mit sechs Stellen und 30 Sekunden Intervall hinzufügen. Der Befehl beendet bestehende Betreibersitzungen und ersetzt den bisherigen Authenticator. Melde dich erneut an und erstelle im Profil neue Wiederherstellungscodes.
 
-Im Profil kannst du unter **Passwort ändern** dein Passwort wechseln. Rooms erhält deinen Chatschlüssel und beendet die anderen Sitzungen. Um das Betreiberkonto über die Konsole wiederherzustellen, führe `docker compose exec -T server node bootstrap.mjs --recover-owner` aus. Der Befehl beendet die Betreibersitzungen, widerruft ungenutzte Einladungen und sperrt die Anmeldung mit dem alten Passwort. Öffne den Einmal-Link aus dem Terminal innerhalb von 20 Minuten. Mit dem bisherigen Chatpasswort bleiben deine Chats zugänglich. Wenn du es verloren hast, kannst du das Konto mit gesperrten Chats wiederherstellen und sie später mit dem bisherigen Chatpasswort entsperren. Führe den Befehl erneut aus, falls der Link abläuft.
+Im Profil kannst du unter **Passwort ändern** dein Passwort wechseln. Rooms erhält deinen Chatschlüssel und beendet die anderen Sitzungen. Um das Betreiberkonto über die Konsole wiederherzustellen, verwende:
+
+```sh
+docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms node bootstrap.mjs --recover-owner
+```
+
+Der Befehl beendet die Betreibersitzungen, widerruft ungenutzte Einladungen und sperrt die Anmeldung mit dem alten Passwort. Öffne den Einmal-Link aus dem Terminal innerhalb von 20 Minuten. Mit dem bisherigen Chatpasswort bleiben deine Chats zugänglich. Wenn du es verloren hast, kannst du das Konto mit gesperrten Chats wiederherstellen und sie später mit dem bisherigen Chatpasswort entsperren. Führe den Befehl erneut aus, falls der Link abläuft.
 
 Pro Konto kann ein Stream laufen, pro Instanz bis zu acht gleichzeitig.
 
+Wenn dein Reverse-Proxy Anfragen nach Größe begrenzt, erlaube 4 MiB je Teilstück für die Watchparty-Upload-Route `/api/channels/<id>/watch/<id>/upload`.
+
 > [!IMPORTANT]
-> Halte ein separates, wiederherstellbares Backup des Docker-Volumes `community` und deiner Instanz-Konfiguration vor. Das Volume enthält Konten, Mitgliedschaften und verschlüsselte Inhalte. Ein normales `docker compose down` erhält es.
+> Halte ein separates, wiederherstellbares Backup der Anwendungs- und Medienvolumes (standardmäßig `rooms-data` und `rooms-watch-media`) und deiner Instanz-Konfiguration vor. Das Anwendungsvolume enthält Konten, Mitgliedschaften und verschlüsselte Inhalte. Ein normales `docker compose down` erhält die Volumes.
 
 ## Desktop-App
 

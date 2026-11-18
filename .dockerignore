@@ -7,6 +7,8 @@
 !deploy/player.package.json
 !deploy/player.package-lock.json
 !deploy/mediamtx.yml
+!deploy/mediamtx.LICENSE
+!deploy/node.LICENSE
 !deploy/rooms-entrypoint.mjs
 !server/
 server/**
