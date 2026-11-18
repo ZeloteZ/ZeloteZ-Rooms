@@ -364,6 +364,14 @@ export function createVault(db, { dataDir, requireSession, requireAdmin, clock =
     if (!file || file.kind !== 'file' || file.state !== 'ready') throw missing()
     return { share, file }
   }
+  const watchShareRow = db.prepare(`SELECT 1 FROM vault_shares s JOIN vault_entries e ON e.id = s.entry_id AND e.owner_id = s.owner_id
+    WHERE s.id = ? AND s.owner_id = ? AND s.recipient_id IS NULL AND s.token_hash IS NOT NULL AND s.expires_at > ?
+    AND e.kind = 'file' AND e.state = 'ready'
+    AND NOT EXISTS(SELECT 1 FROM disabled_accounts d WHERE d.user_id = s.owner_id)`)
+  function watchShare(ownerId, shareId) {
+    return !closed && typeof ownerId === 'string' && uuid.test(ownerId) && typeof shareId === 'string' && uuid.test(shareId) &&
+      config().enabled && Boolean(watchShareRow.get(shareId, ownerId, clock()))
+  }
   async function handlePublic(request, response, url) {
     const { pathname: path } = typeof url === 'string' ? new URL(url, 'http://vault') : url
     if (!path.startsWith('/api/vault/public/')) return false
@@ -583,7 +591,7 @@ export function createVault(db, { dataDir, requireSession, requireAdmin, clock =
     }
     throw missing()
   }
-  return { config, usage, ready,
+  return { config, usage, ready, watchShare,
     handle: async (...args) => { try { return await handle(...args) } catch (error) { throw storageError(error) } },
     handlePublic: async (...args) => { try { return await handlePublic(...args) } catch (error) { throw storageError(error) } },
     cleanup, close() { closed = true; clearInterval(timer); return cleanupRunning ?? Promise.resolve() } }

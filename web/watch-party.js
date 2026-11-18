@@ -6,6 +6,7 @@ import { createWatchViewerLease, reportWatchViewer } from "./watch-viewers.js";
 import { watchQueue } from "./watch-queue.js";
 import { createPlaybackStats } from "./playback-stats.js";
 import { mountVideoStats } from "./video-stats.js";
+import { createVaultRoomPlayer } from "./vault-room-player.js";
 
 const chunkSize = 4 * 1024 * 1024;
 const maxFileSize = 64 * chunkSize;
@@ -178,8 +179,9 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     card.hidden = !isReady;
     card.setAttribute("aria-pressed", String(Boolean(selectedId)));
     if (isReady) {
-      cardName.textContent = party.title || (party.source === "youtube" ? t("YouTube video", "YouTube-Video") : t("Local video", "Lokales Video"));
-      cardSource.textContent = party.source === "youtube" ? "YouTube" : t("Room video", "Raumvideo");
+      cardName.textContent = (party.source === "vault" && surface?.vaultId === party.id && surface.privateTitle()) || party.title
+        || (party.source === "youtube" ? t("YouTube video", "YouTube-Video") : t("Local video", "Lokales Video"));
+      cardSource.textContent = party.source === "youtube" ? "YouTube" : party.source === "vault" ? "ZeloteZ Vault" : t("Room video", "Raumvideo");
       title.textContent = cardName.textContent;
     }
     stop.hidden = end.hidden = !canEnd();
@@ -264,7 +266,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     tell(statusNode, t("Loading video…", "Video wird geladen …"));
     const current = () => selectedId === party.id && !signal.aborted;
     const ownerDocument = media.ownerDocument;
-    if (party.source === "youtube") {
+    if (party.source === "youtube" || party.source === "vault") {
       const viewers = "/api/" + endpoint + "/" + identifier(party.id) + "/viewers";
       audience = transferredAudience ?? createWatchViewerLease({
         signal, ownerDocument, report: options => reportWatchViewer(viewers, options, { accountId: user.id }),
@@ -281,11 +283,13 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
         sync(true);
         render();
       },
-      onError() {
+      onError(error) {
         if (!current()) return;
         ready = false;
         audience?.setVisible(false);
-        const description = party.source === "youtube"
+        const description = party.source === "vault"
+          ? error?.message || t("The Vault media is unavailable or its access was revoked.", "Das Vault-Medium ist nicht verfügbar oder der Zugriff wurde widerrufen.")
+          : party.source === "youtube"
           ? t("YouTube couldn’t play this embedded video.", "YouTube konnte dieses eingebettete Video nicht abspielen.")
           : t("This device couldn’t play the video format.", "Dieses Gerät konnte das Videoformat nicht abspielen.");
         tell(statusNode, description, "error");
@@ -325,7 +329,8 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
       },
     };
     surface = party.source === "youtube" ? createYoutubePlayer(party.videoId, handlers, ownerDocument)
-      : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers, ownerDocument);
+      : party.source === "vault" ? createVaultRoomPlayer(party, channel.id, handlers, ownerDocument, signal)
+        : localPlayer("/api/" + endpoint + "/" + identifier(party.id) + "/media", handlers, ownerDocument);
     if (surface.stats) {
       const receptionStats = mountVideoStats(surface.stats, signal);
       player.querySelector(".watch-party-footer").append(receptionStats.element);
@@ -584,7 +589,7 @@ function createParty({ signal, user, watchId, room, quickRoomHeader }, channel, 
     },
     reconnectAfterMove() {
       if (!selectedId || !surface) return;
-      if (sample.party.source === "youtube") {
+      if (sample.party.source === "youtube" || sample.party.source === "vault") {
         ready = false;
         const transferredAudience = audience;
         audience = undefined;

@@ -75,6 +75,43 @@ test('public open omits credentials/referrers and never transmits the decryption
   opened.close()
 })
 
+test('public room previews decrypt verified bytes locally with no credentials or key transmission and abort on close', async t => {
+  const f = await fixture(t), id = randomUUID()
+  const shared = await vault.createShare(f.entry, f.created.opened, id)
+  const share = { id, entryId: f.entry.id, ownerId: f.user.id, descriptor: f.entry.descriptor, envelope: shared.envelope }
+  const ciphertext = await vault.encryptChunk(f.created.secret, f.entry.descriptor, 0, f.data)
+  let reads = 0
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.credentials, 'omit')
+    assert.equal(options.referrerPolicy, 'no-referrer')
+    assert.ok(!JSON.stringify(options).includes(shared.keyFragment))
+    if (url === '/api/vault/public/open') return json({ share })
+    assert.equal(url, '/api/vault/public/' + id + '/chunks/0')
+    assert.equal(options.headers.Authorization, 'Bearer ' + shared.token)
+    reads++
+    return new Response(ciphertext)
+  }
+  const opened = await client.openPublicVault({ id, token: shared.token, keyFragment: shared.keyFragment })
+  const blob = await opened.readBlob()
+  assert.deepEqual(new Uint8Array(await blob.arrayBuffer()), f.data)
+  assert.equal(reads, 1)
+  opened.close()
+  await assert.rejects(opened.readBlob(), { name: 'AbortError' })
+  assert.equal(reads, 1)
+})
+
+test('public preview bounds reject large reads before fetching any encrypted chunk', async t => {
+  const f = await fixture(t), id = randomUUID()
+  const shared = await vault.createShare(f.entry, f.created.opened, id)
+  const share = { id, entryId: f.entry.id, ownerId: f.user.id, descriptor: f.entry.descriptor, envelope: shared.envelope }
+  let requests = 0
+  globalThis.fetch = async url => { assert.equal(url, '/api/vault/public/open'); requests++; return json({ share }) }
+  const opened = await client.openPublicVault({ id, token: shared.token, keyFragment: shared.keyFragment })
+  await assert.rejects(opened.readBlob({ maxBytes: f.data.byteLength - 1 }), /too large/u)
+  assert.equal(requests, 1)
+  opened.close()
+})
+
 test('bounded encrypted readers reject excess, truncated and oversized declared responses', async t => {
   const prior = globalThis.fetch
   t.after(() => { globalThis.fetch = prior })
@@ -469,4 +506,206 @@ test('native save names bound final UTF-8 bytes including device prefixes and re
   assert.ok(/^(?:😀)+$/u.test(unicode), 'truncation preserves whole Unicode code points')
   await supplementary.abort()
   assert.equal(original, 'CON.' + '界'.repeat(83) + 'aa')
+})
+
+test('local editor reads only complete authenticated blobs without download objects or save dialogs', async t => {
+  const f = await fixture(t, new Uint8Array(vault.CHUNK_SIZE + 13).fill(73))
+  const encrypted = [
+    await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data.subarray(0, vault.CHUNK_SIZE)),
+    await vault.encryptChunk(f.created.secret, f.created.descriptor, 1, f.data.subarray(vault.CHUNK_SIZE)),
+  ]
+  const service = client.createVaultClient({ user: f.user })
+  t.after(() => service.close())
+  const previousCreate = URL.createObjectURL, previousPicker = globalThis.showSaveFilePicker
+  URL.createObjectURL = () => { throw new Error('must not create a decrypted download URL') }
+  globalThis.showSaveFilePicker = () => { throw new Error('must not prompt for a download') }
+  t.after(() => { URL.createObjectURL = previousCreate; if (previousPicker === undefined) delete globalThis.showSaveFilePicker; else globalThis.showSaveFilePicker = previousPicker })
+  const entry = { ...f.entry, type: 'text/html' }, paths = [], progress = []
+  globalThis.fetch = async (path, options) => {
+    paths.push(path)
+    assert.equal(options.credentials, 'same-origin')
+    assert.equal(options.cache, 'no-store')
+    assert.equal(options.referrerPolicy, 'no-referrer')
+    assert.equal(options.redirect, 'error')
+    if (paths.length === 1) entry.id = randomUUID()
+    return new Response(encrypted[paths.length - 1])
+  }
+  const blob = await service.readBlob(entry, { onProgress: value => progress.push(value.done) })
+  assert.equal(blob.type, 'text/plain', 'metadata type must be authenticated, not taken from a changed UI row')
+  assert.equal(blob.size, f.data.byteLength)
+  assert.deepEqual(Buffer.from(await blob.arrayBuffer()), Buffer.from(f.data))
+  assert.deepEqual(paths, [0, 1].map(index => `/api/vault/entries/${f.entry.id}/chunks/${index}`))
+  assert.deepEqual(progress, [vault.CHUNK_SIZE, f.data.byteLength])
+})
+
+test('local editor enforces hard and caller memory limits before any file request', async t => {
+  const f = await fixture(t)
+  const large = await vault.createFile(f.user, randomUUID(), { name: 'large.mp4', type: 'video/mp4', size: client.BLOB_DOWNLOAD_LIMIT + 1, lastModified: 0 })
+  const entry = { id: large.descriptor.id, kind: 'file', state: 'ready', descriptor: large.descriptor, envelope: large.envelope }
+  const service = client.createVaultClient({ user: f.user })
+  t.after(() => service.close())
+  let calls = 0
+  globalThis.fetch = async () => { calls++; throw new Error('must not fetch a file above the preview limit') }
+  await assert.rejects(service.readBlob(entry), /too large/)
+  await assert.rejects(service.readBlob(f.entry, { maxBytes: 2 }), /too large/)
+  for (const maxBytes of [-1, Infinity, 1.5, client.BLOB_DOWNLOAD_LIMIT + 1]) {
+    await assert.rejects(service.readBlob(f.entry, { maxBytes }), /memory limit/)
+  }
+  await assert.rejects(service.readBlob({ ...f.entry, descriptor: { ...f.entry.descriptor, chunks: 999 } }))
+  await assert.rejects(service.readBlob({ ...f.entry, state: 'uploading' }), /unavailable/)
+  assert.equal(calls, 0)
+})
+
+test('local editor authenticates empty files and refuses tampered or cancelled partial plaintext', async t => {
+  const f = await fixture(t, new Uint8Array(vault.CHUNK_SIZE + 3).fill(19))
+  const first = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data.subarray(0, vault.CHUNK_SIZE))
+  const second = await vault.encryptChunk(f.created.secret, f.created.descriptor, 1, f.data.subarray(vault.CHUNK_SIZE))
+  const service = client.createVaultClient({ user: f.user })
+  t.after(() => service.close())
+  const changed = new Uint8Array(second); changed[20] ^= 1
+  let reads = 0
+  globalThis.fetch = async () => new Response(++reads === 1 ? first : changed)
+  await assert.rejects(service.readBlob(f.entry), /authenticated/)
+  assert.equal(reads, 2)
+  const controller = new AbortController(); reads = 0
+  globalThis.fetch = async () => { reads++; return new Response(first) }
+  await assert.rejects(service.readBlob(f.entry, { signal: controller.signal, onProgress() { controller.abort() } }), { name: 'AbortError' })
+  assert.equal(reads, 1)
+  const empty = await vault.createFile(f.user, randomUUID(), new File([], 'empty.txt', { type: 'text/plain' }))
+  const emptyEntry = { id: empty.descriptor.id, kind: 'file', state: 'ready', envelope: empty.envelope, descriptor: empty.descriptor }
+  const ciphertext = await vault.encryptChunk(empty.secret, empty.descriptor, 0, new Uint8Array())
+  reads = 0
+  globalThis.fetch = async () => { reads++; return new Response(ciphertext) }
+  assert.equal((await service.readBlob(emptyEntry, { maxBytes: 0 })).size, 0)
+  assert.equal(reads, 1, 'even an empty file must pass the server access check and authentication')
+})
+
+test('closing the client during an editor read never returns decrypted content', async t => {
+  const f = await fixture(t)
+  const encrypted = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data)
+  const service = client.createVaultClient({ user: f.user })
+  globalThis.fetch = async () => { service.close(); return new Response(encrypted) }
+  await assert.rejects(service.readBlob(f.entry), { name: 'AbortError' })
+  await assert.rejects(service.readBlob(f.entry), { name: 'AbortError' })
+  await assert.rejects(service.saveEditedCopy(f.entry, new Blob(['edited'])), { name: 'AbortError' })
+})
+
+test('aborting the Vault lifetime immediately wipes cached raw file-key material', async t => {
+  const f = await fixture(t)
+  const encrypted = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data)
+  const originalImport = crypto.subtle.importKey
+  const rawKeys = []
+  crypto.subtle.importKey = function(format, raw, algorithm, ...options) {
+    if (format === 'raw' && algorithm === 'AES-GCM' && raw instanceof Uint8Array) rawKeys.push(raw)
+    return originalImport.call(this, format, raw, algorithm, ...options)
+  }
+  t.after(() => { crypto.subtle.importKey = originalImport })
+  const controller = new AbortController()
+  const service = client.createVaultClient({ user: f.user, signal: controller.signal })
+  t.after(() => service.close())
+  globalThis.fetch = async () => new Response(encrypted)
+  await service.readBlob(f.entry)
+  assert.ok(rawKeys.some(value => value.some(byte => byte !== 0)))
+  controller.abort()
+  assert.ok(rawKeys.every(value => value.every(byte => byte === 0)))
+  await assert.rejects(service.readBlob(f.entry), { name: 'AbortError' })
+})
+
+test('a denied editor read clears cached file secrets before subsequent reopening', async t => {
+  const f = await fixture(t)
+  const encrypted = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data)
+  const originalOpen = globalThis.ClubCrypto.openVaultMessage
+  let openings = 0
+  globalThis.ClubCrypto.openVaultMessage = (...args) => { openings++; return originalOpen(...args) }
+  const service = client.createVaultClient({ user: f.user })
+  t.after(() => service.close())
+  globalThis.fetch = async () => json({ enabled: true, entries: [f.entry], receivedShares: [] })
+  await service.list(); assert.equal(openings, 1)
+  globalThis.fetch = async () => new Response('{"error":"revoked or disabled"}', { status: 403 })
+  await assert.rejects(service.readBlob(f.entry), /revoked or disabled/)
+  globalThis.fetch = async () => new Response(encrypted)
+  assert.equal((await service.readBlob(f.entry)).size, f.data.length)
+  assert.equal(openings, 2)
+})
+
+test('saving edited copies uses fresh encrypted entries and never changes originals or shares', async t => {
+  const f = await fixture(t)
+  const parentId = randomUUID(), requests = [], reservations = [], ciphertexts = new Map()
+  const source = { ...f.entry, parentId, name: 'untrusted-row-name.html' }
+  const service = client.createVaultClient({ user: f.user })
+  t.after(() => service.close())
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, method: options.method })
+    if (path === '/api/vault/entries') {
+      const entry = JSON.parse(options.body)
+      reservations.push(entry)
+      assert.equal(entry.parentId, parentId)
+      assert.ok(!options.body.includes('Edited confidential contents'))
+      assert.ok(!options.body.includes(f.file.name))
+      return json({ entry: { ...entry, state: 'uploading' } })
+    }
+    if (/\/chunks\/0$/u.test(path)) { ciphertexts.set(path.split('/')[4], Buffer.from(options.body)); return json({}) }
+    if (path.endsWith('/complete')) return json({})
+    throw new Error('Unexpected mutation: ' + path)
+  }
+  const edited = new Blob(['Edited confidential contents'], { type: 'text/plain' })
+  const first = await service.saveEditedCopy(source, edited)
+  const second = await service.saveEditedCopy(source, edited)
+  assert.notEqual(first.id, f.entry.id)
+  assert.notEqual(second.id, first.id)
+  assert.notEqual(first.descriptor.contentId, second.descriptor.contentId)
+  assert.equal(first.name, 'private-plan-计划 (edited).txt')
+  assert.equal(first.parentId, parentId)
+  assert.ok(!requests.some(({ method, path }) => ['PATCH', 'DELETE'].includes(method) || path.includes('/shares') || path.includes(f.entry.id)))
+  assert.notDeepEqual(ciphertexts.get(first.id), ciphertexts.get(second.id))
+  const opened = await vault.openEntry(f.user, { ...first, ownerId: f.user.id })
+  const decoded = await vault.decryptChunk(opened.secret, first.descriptor, 0, ciphertexts.get(first.id))
+  assert.equal(new TextDecoder().decode(decoded), 'Edited confidential contents')
+  assert.equal(source.name, 'untrusted-row-name.html')
+  assert.equal(reservations.length, 2)
+})
+
+test('member files open through recipient access and edited copies belong to the recipient root', async t => {
+  const f = await fixture(t)
+  const encrypted = await vault.encryptChunk(f.created.secret, f.created.descriptor, 0, f.data)
+  const window = {}
+  runInNewContext(accountScript, { window, crypto: webcrypto, TextEncoder, TextDecoder, EventTarget, atob, btoa,
+    sessionStorage: storage(), localStorage: storage(), location: { origin: 'https://rooms.example.test' } })
+  const registration = await window.ClubCrypto.prepareRegistration('editor-recipient', 'A long editor recipient passphrase')
+  const user = { id: randomUUID(), username: 'editor-recipient', publicKey: registration.publicKey, identity: registration.identity }
+  await window.ClubCrypto.unlock(user, 'A long editor recipient passphrase')
+  const shareId = randomUUID()
+  const envelope = await vault.sealMemberShare(f.user, f.entry, f.created.opened, shareId, user)
+  globalThis.ClubCrypto = window.ClubCrypto
+  const share = { id: shareId, ownerId: f.user.id, entryId: f.entry.id, recipientId: user.id,
+    descriptor: f.entry.descriptor, envelope, owner: { id: f.user.id, publicKey: f.user.publicKey } }
+  const entry = { ...share, id: share.entryId, receivedShareId: shareId, share, kind: 'file', state: 'ready', parentId: null }
+  const service = client.createVaultClient({ user })
+  t.after(() => service.close())
+  let reads = 0, saved
+  globalThis.fetch = async (path, options) => {
+    if (path === `/api/vault/received/${shareId}/chunks/0`) { reads++; return new Response(encrypted) }
+    if (path === '/api/vault/entries') { saved = JSON.parse(options.body); return json({}) }
+    if (path.startsWith('/api/vault/entries/') && (path.endsWith('/chunks/0') || path.endsWith('/complete'))) return json({})
+    throw new Error('Unexpected endpoint: ' + path)
+  }
+  assert.equal(await (await service.readBlob(entry)).text(), await f.file.text())
+  const result = await service.saveEditedCopy(entry, new Blob(['a recipient copy'], { type: 'text/plain' }), { parentId: randomUUID(), name: 'my-copy.txt' })
+  assert.equal(reads, 1)
+  assert.equal(saved.parentId, null)
+  assert.equal(result.parentId, null)
+  const reopened = await vault.openEntry(user, result)
+  assert.equal(reopened.ownerId, user.id)
+  assert.equal(reopened.name, 'my-copy.txt')
+  await assert.rejects(service.readBlob({ ...entry, share: { ...share, recipientId: randomUUID() } }), /unavailable/)
+  assert.equal(reads, 1)
+})
+
+test('edited copy names keep their extension inside the final UTF-8 byte limit', () => {
+  const long = '界'.repeat(83) + 'aa.txt'
+  assert.equal(new TextEncoder().encode(long).byteLength, 255)
+  const name = client.editedVaultName(long)
+  assert.ok(name.endsWith(' (edited).txt'))
+  assert.ok(new TextEncoder().encode(name).byteLength <= 240)
+  assert.equal(client.editedVaultName('CON.txt'), '_CON (edited).txt')
 })

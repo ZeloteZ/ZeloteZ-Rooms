@@ -37,6 +37,23 @@ async function fixture(t, bytes = new TextEncoder().encode('A private file that 
 }
 const shareRow = (entry, owner, id, envelope) => ({ id, entryId: entry.id, ownerId: owner.id, descriptor: entry.descriptor, envelope, owner: { id: owner.id, publicKey: owner.publicKey } })
 
+test('room playback references authenticate the sender, room and party while hiding the Vault capability and key', async () => {
+  const sender = await account('vault-watch-sender'), recipient = await account('vault-watch-recipient')
+  const room = randomUUID(), party = randomUUID(), scope = `zelotez-vault/1/room/${sender.user.id}/${room}`
+  const content = { type: 'vault-watch/1', channelId: room, partyId: party,
+    link: { id: randomUUID(), token: 'PRIVATE_VAULT_CAPABILITY', keyFragment: 'PRIVATE_VAULT_DECRYPTION_KEY' } }
+  const { envelope } = await sender.crypto.sealVaultMessage(scope, party, content, [sender.user, recipient.user])
+  assert.ok(!JSON.stringify(envelope).includes(content.link.token))
+  assert.ok(!JSON.stringify(envelope).includes(content.link.keyFragment))
+  const result = await recipient.crypto.openVaultMessage(scope, party, envelope, sender.user)
+  assert.equal(result.content.link.keyFragment, content.link.keyFragment)
+  await assert.rejects(recipient.crypto.openVaultMessage(scope, randomUUID(), envelope, sender.user))
+  await assert.rejects(recipient.crypto.openVaultMessage(`zelotez-vault/1/room/${sender.user.id}/${randomUUID()}`, party, envelope, sender.user))
+  await assert.rejects(recipient.crypto.openVaultMessage(scope, party, envelope, recipient.user))
+  await assert.rejects(recipient.crypto.openVaultMessage(scope, party, { ...envelope, historyGrant: null }, sender.user))
+  await assert.rejects(recipient.crypto.sealVaultMessage(scope, party, content, [sender.user, recipient.user]))
+})
+
 test('owner headers hide names, MIME and file keys and reopen with the existing account identity', async t => {
   const f = await fixture(t)
   const serialized = JSON.stringify(f.entry.envelope)

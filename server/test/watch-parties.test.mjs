@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,7 +22,11 @@ async function fixture(t) {
   const community = createCommunity(db, { ...auth, appearance: { profile: () => ({}) } })
   let now = 100_000
   const temporary = new Set()
+  const shares = new Map()
+  let beforeBody
   const watch = createWatchParties({ ...auth, dataDir, channelAccess: community.channelAccess,
+    validateWatchEnvelope: community.validateWatchEnvelope,
+    watchShare: (ownerId, shareId) => shares.get(shareId) === ownerId,
     isTemporaryChannel: id => temporary.has(id), now: () => now })
   t.after(async () => {
     watch.close()
@@ -35,7 +39,13 @@ async function fixture(t) {
   const users = Object.fromEntries(['host', 'viewer', 'moderator', 'stranger'].map(name => [name, randomUUID()]))
   const insertUser = db.prepare(`INSERT INTO users(id, username, display_name, password_hash, admin, public_key, identity, created_at)
     VALUES (?, ?, ?, 'unused', 0, '{}', '{}', ?)`)
-  for (const [name, id] of Object.entries(users)) insertUser.run(id, name, name, timestamp)
+  const publicKeys = {}
+  for (const [name, id] of Object.entries(users)) {
+    insertUser.run(id, name, name, timestamp)
+    const { kty, crv, x, y } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' })
+    publicKeys[id] = { kty, crv, x, y }
+    db.prepare('UPDATE users SET public_key = ? WHERE id = ?').run(JSON.stringify(publicKeys[id]), id)
+  }
   function createRoom() {
     const channel = randomUUID()
     const room = randomUUID()
@@ -69,7 +79,14 @@ async function fixture(t) {
 
   async function fixtureCall(handler, actor, method, body, headers, waitToWrite) {
     const bytes = body === undefined ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body))
-    const fixtureRequest = Readable.from(bytes === null ? [] : [bytes])
+    const fixtureRequest = Readable.from((async function *() {
+      if (bytes !== null) {
+        const pending = beforeBody
+        beforeBody = undefined
+        if (pending) await pending()
+        yield bytes
+      }
+    })())
     fixtureRequest.method = method
     fixtureRequest.headers = {
       ...(actor && { cookie: `zelotez_session=${actor.token}`, 'x-rooms-account': actor.userId }),
@@ -108,11 +125,137 @@ async function fixture(t) {
     assert.fail('Watch party files were left behind')
   }
 
+  function vaultSource(owner = users.host) {
+    const shareId = randomUUID()
+    shares.set(shareId, owner)
+    const encode = bytes => randomBytes(bytes).toString('base64url')
+    return { id: randomUUID(), source: 'vault', shareId, envelope: {
+      v: 1, ephemeral: publicKeys[owner], nonce: encode(12), body: encode(128),
+      keys: Object.fromEntries(community.chatKeys(channel).map(({ id }) => [id, { nonce: encode(12), blob: encode(48) }])),
+    } }
+  }
   return { request, guestRequest, createRoom, session, users, room, channel, temporary, guestSnapshot: watch.guestSnapshot,
+    db, community, shares, publicKeys, vaultSource, beforeNextBody: callback => { beforeBody = callback },
     controlGuestPlayback: watch.controlGuestPlayback, reportGuestViewer: watch.reportGuestViewer,
     homeActivity: watch.homeActivity,
     waitForCleanup, tick: milliseconds => { now += milliseconds } }
 }
+
+test('Vault watch sources keep only authenticated opaque references and synchronize through bounded viewer leases', async t => {
+  const f = await fixture(t)
+  const host = f.session(f.users.host), viewer = f.session(f.users.viewer)
+  const source = f.vaultSource()
+  const { party } = (await f.request(host, 'POST', '', source)).data
+  assert.equal(party.id, source.id)
+  assert.equal(party.source, 'vault')
+  assert.equal(party.title, 'ZeloteZ Vault')
+  assert.equal(party.state, 'ready')
+  assert.equal(party.playing, false)
+  assert.equal(party.shareId, source.shareId)
+  assert.deepEqual(party.vaultEnvelope, source.envelope)
+  assert.deepEqual(party.vaultOwner, { id: f.users.host, publicKey: f.publicKeys[f.users.host] })
+  for (const field of ['mime', 'size', 'filename', 'key', 'token', 'url', 'mediaUrl', 'file', 'uploaderSession', 'hostSession']) {
+    assert.equal(Object.hasOwn(party, field), false, field)
+  }
+  assert.equal((await f.request(viewer)).data.party.id, party.id)
+  assert.equal(f.homeActivity(viewer.userId)[0].title, 'ZeloteZ Vault')
+  for (const [method, resource, body] of [['PUT', 'upload?offset=0', Buffer.alloc(28)], ['GET', 'media'],
+    ['HEAD', 'media'], ['PATCH', 'metadata', { title: 'plaintext title' }]]) {
+    await assert.rejects(f.request(host, method, `/${party.id}/${resource}`, body), { status: 404 })
+  }
+  await f.waitForCleanup()
+  const player = { playerId: randomUUID(), revision: 1 }
+  await f.request(viewer, 'POST', `/${party.id}/viewers`, player)
+  const playing = (await f.request(host)).data.party
+  assert.equal(playing.playing, true)
+  f.tick(2000)
+  const seek = (await f.request(viewer, 'PATCH', `/${party.id}`, { action: 'seek', position: 12, revision: playing.revision })).data.party
+  f.tick(500)
+  const paused = (await f.request(viewer, 'PATCH', `/${party.id}`, { action: 'pause', revision: seek.revision })).data.party
+  assert.equal(paused.position, 12.5)
+  await f.request(viewer, 'PATCH', `/${party.id}`, { action: 'play', revision: paused.revision })
+  f.tick(12_001)
+  assert.equal((await f.request(host)).data.party.playing, false)
+  f.shares.delete(source.shareId)
+  assert.equal((await f.request(host)).data.party, null)
+})
+
+test('Vault sources reject plaintext extras, stale recipients, forged sender keys, guests and unauthorized sharing', async t => {
+  const f = await fixture(t)
+  const host = f.session(f.users.host), viewer = f.session(f.users.viewer), stranger = f.session(f.users.stranger)
+  const source = f.vaultSource()
+  await assert.rejects(f.request(null, 'POST', '', source), { status: 401 })
+  await assert.rejects(f.request(viewer, 'POST', '', f.vaultSource(f.users.viewer)), { status: 403 })
+  await assert.rejects(f.request(stranger, 'POST', '', f.vaultSource(f.users.stranger)), { status: 404 })
+  for (const field of ['filename', 'mime', 'key', 'token', 'url', 'title', 'size', 'vaultOwner']) {
+    await assert.rejects(f.request(host, 'POST', '', { ...source, [field]: 'plaintext' }), { status: 400 })
+  }
+  for (const mutate of [
+    input => { delete input.id }, input => { input.id = '../community.sqlite' }, input => { input.shareId = 2 },
+    input => { input.envelope.filename = 'plaintext' }, input => { input.envelope.ephemeral.key = 'secret' },
+    input => { input.envelope.keys[f.users.host].key = 'plaintext' }, input => { input.envelope.historyGrant = {} },
+    input => { input.envelope.ephemeral = f.publicKeys[f.users.moderator] },
+    input => { input.envelope.nonce = 'bad' }, input => { input.envelope.body = 'x'.repeat(27001) },
+  ]) {
+    const input = structuredClone(source); mutate(input)
+    await assert.rejects(f.request(host, 'POST', '', input), { status: 400 })
+  }
+  const stale = structuredClone(source); delete stale.envelope.keys[f.users.viewer]
+  await assert.rejects(f.request(host, 'POST', '', stale), { status: 409 })
+  const wrongShare = f.vaultSource(f.users.moderator)
+  await assert.rejects(f.request(host, 'POST', '', { ...source, shareId: wrongShare.shareId }), { status: 404 })
+  f.temporary.add(f.channel)
+  await assert.rejects(f.request(host, 'POST', '', source), { status: 404 })
+  f.temporary.delete(f.channel)
+  f.beforeNextBody(() => f.db.prepare('DELETE FROM topic_members WHERE topic_id = ? AND user_id = ?').run(f.room, f.users.viewer))
+  await assert.rejects(f.request(host, 'POST', '', source), { status: 409 })
+  const fresh = f.vaultSource()
+  f.beforeNextBody(() => host.revoke())
+  await assert.rejects(f.request(host, 'POST', '', fresh), { status: 401 })
+})
+
+test('Vault queue advance binds the source uploader independently of its original host and retires revoked sources', async t => {
+  const f = await fixture(t)
+  const host = f.session(f.users.host), moderator = f.session(f.users.moderator), viewer = f.session(f.users.viewer)
+  const first = (await f.request(host, 'POST', '', { source: 'youtube', videoId: 'K5ABskPJN1Q' })).data.party
+  const firstVault = f.vaultSource(f.users.moderator), secondVault = f.vaultSource()
+  await f.request(moderator, 'POST', `/${first.id}/queue`, firstVault)
+  await f.request(host, 'POST', `/${first.id}/queue`, secondVault)
+  const queued = (await f.request(viewer)).data.queue
+  assert.deepEqual(queued.map(item => item.id), [firstVault.id, secondVault.id])
+  assert.deepEqual(queued[0].vaultOwner, { id: f.users.moderator, publicKey: f.publicKeys[f.users.moderator] })
+  assert.deepEqual(queued[0].vaultEnvelope, firstVault.envelope)
+  assert.equal(queued[0].shareId, firstVault.shareId)
+  await assert.rejects(f.request(host, 'POST', `/${first.id}/queue`, secondVault), { status: 409 })
+  f.shares.delete(secondVault.shareId)
+  assert.deepEqual((await f.request(viewer)).data.queue.map(item => item.id), [firstVault.id])
+  const next = (await f.request(host, 'PATCH', `/${first.id}`, { action: 'next', revision: first.revision })).data.party
+  assert.equal(next.id, firstVault.id)
+  assert.equal(next.hostId, f.users.host)
+  assert.equal(next.vaultOwner.id, f.users.moderator)
+  assert.equal(next.sessionId, first.id)
+  moderator.revoke()
+  assert.equal((await f.request(host)).data.party, null)
+})
+
+test('Vault ready queue entries expire with uploader access and a departed host retires the complete watch session', async t => {
+  const f = await fixture(t)
+  const host = f.session(f.users.host), moderator = f.session(f.users.moderator)
+  const source = f.vaultSource()
+  const party = (await f.request(host, 'POST', '', source)).data.party
+  const queued = f.vaultSource(f.users.moderator)
+  await f.request(moderator, 'POST', `/${party.id}/queue`, queued)
+  moderator.leave()
+  assert.deepEqual((await f.request(host)).data.queue, [])
+  const reader = f.session(f.users.viewer)
+  f.db.prepare('INSERT INTO topic_members(topic_id,user_id,role,joined_at,approved) VALUES (?,?,?,?,1)')
+    .run(f.room, f.users.stranger, 'member', new Date().toISOString())
+  const newlyJoined = f.session(f.users.stranger)
+  const visible = (await f.request(newlyJoined)).data.party
+  assert.equal(Object.hasOwn(visible.vaultEnvelope.keys, f.users.stranger), false)
+  host.leave()
+  assert.equal((await f.request(reader)).data.party, null)
+})
 
 test('guest media is limited to read-only byte ranges for the authorized temporary room and source', async t => {
   const { request, guestRequest, session, users, room, channel, temporary, guestSnapshot, homeActivity } = await fixture(t)

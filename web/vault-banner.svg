@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 180" fill="none">
+  <defs>
+    <linearGradient id="surface" x2="1440" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#141a2a"/><stop offset=".58" stop-color="#202d49"/><stop offset="1" stop-color="#35476b"/>
+    </linearGradient>
+    <radialGradient id="light" cx="0" cy="0" r="1" gradientTransform="translate(1130 40) rotate(155) scale(570 270)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#adbdff" stop-opacity=".17"/><stop offset="1" stop-color="#adbdff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path fill="url(#surface)" d="M0 0h1440v180H0z"/>
+  <path fill="url(#light)" d="M0 0h1440v180H0z"/>
+  <g stroke="#b1c1ef" stroke-opacity=".12">
+    <path d="m650-100 400 400m-240-400 400 400m-240-400 400 400M780-100 380 300m560-400L540 300m560-400L700 300m560-400L860 300"/>
+    <circle cx="1190" cy="90" r="142"/><circle cx="1190" cy="90" r="106"/><circle cx="1190" cy="90" r="68"/>
+  </g>
+  <g stroke="#d2dbf8" stroke-opacity=".25" stroke-width="2.5">
+    <rect x="1167" y="77" width="46" height="37" rx="8"/>
+    <path d="M1176 77V65a14 14 0 0 1 28 0v12m-14 14v10" stroke-linecap="round"/>
+  </g>
+</svg>

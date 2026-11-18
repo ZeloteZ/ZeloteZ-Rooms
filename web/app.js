@@ -681,7 +681,11 @@ async function render(force = false) {
     else if (route.page === "invites" && user.admin) page = await renderAdmin({ ...context, onSecurity: openAccountSecurity });
     else if (route.page === "help") page = renderHowItWorks();
     else if (route.page === "downloads") page = renderDownloads(context);
-    else if (route.page === "vault") page = renderVault(context);
+    else if (route.page === "vault") {
+      const vault = renderVault(context);
+      page = vault.node;
+      banner = vault.header;
+    }
     else if (route.page === "watch" && roomIdPattern.test(route.topicId ?? "")) {
       const quick = quickViewerHeading();
       banner = quick.header;

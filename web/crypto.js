@@ -225,7 +225,7 @@ window.ClubCrypto = (() => {
 
   function vaultContext(scope, ownerId) {
     if (typeof scope !== "string") return false;
-    const match = /^zelotez-vault\/1\/(owner|member|public-link)\/([a-f0-9-]{36})(?:\/([a-f0-9-]{36}))?$/u.exec(scope);
+    const match = /^zelotez-vault\/1\/(owner|member|public-link|room)\/([a-f0-9-]{36})(?:\/([a-f0-9-]{36}))?$/u.exec(scope);
     return Boolean(match && match[2] === ownerId && ((match[1] === "owner") === !match[3]));
   }
 

@@ -65,7 +65,7 @@ const temporaryChannels = {
 const channelManagement = createChannelManagement(db, { requireSession, isTemporaryTopic: topicId => quickRooms.isTemporaryTopic(topicId) })
 const presence = createPresence(db, auth)
 const watchParties = createWatchParties({ ...auth, ...temporaryChannels, dataDir: process.env.WATCH_MEDIA_DIR || dataDir,
-  channelAccess: community.channelAccess })
+  channelAccess: community.channelAccess, validateWatchEnvelope: community.validateWatchEnvelope, watchShare: vault.watchShare })
 const history = createHistory(db, { requireSession })
 const streams = createStreams(db, {
   ...temporaryChannels,

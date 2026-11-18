@@ -91,6 +91,7 @@ function mediaRange(header, size) {
 }
 
 export function createWatchParties({ dataDir, requireSession, sessionKey, isSessionActive, channelAccess,
+  validateWatchEnvelope = () => { throw missing() }, watchShare = () => false,
   isTemporaryChannel = () => false, assertTemporarySource = () => {}, noteTemporarySource = () => {},
   now = () => Math.floor(performance.timeOrigin + performance.now()) }) {
   const folder = join(dataDir, 'watch-videos')
@@ -158,7 +159,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     Object.assign(video, {
       sessionId: party.sessionId, firstSource: party.firstSource, queue: party.queue,
       hostId: party.hostId, hostSession: party.hostSession, expiresAt: party.expiresAt,
-      updatedAt: time, playing: video.source === 'local', autoStart: video.source === 'youtube',
+      updatedAt: time, playing: video.source === 'local', autoStart: video.source !== 'local',
     })
     parties.set(party.channelId, video)
     discardVideo(party)
@@ -169,15 +170,21 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const party = parties.get(channelId)
     if (!party) return null
     if (party.expiresAt <= time || (party.state === 'uploading' && party.uploadUntil <= time) ||
-        !isSessionActive(party.hostSession, party.hostId) || !channelAccess(party.hostId, channelId)?.canStream) {
+        !isSessionActive(party.hostSession, party.hostId) || !channelAccess(party.hostId, channelId)?.canStream || !vaultSourceActive(party)) {
       retire(party)
       return null
     }
     for (const video of [...party.queue]) {
-      if (video.state === 'uploading' && (video.expiresAt <= time || video.uploadUntil <= time ||
-          !isSessionActive(video.uploaderSession, video.uploaderId) || !channelAccess(video.uploaderId, channelId)?.canStream)) retire(video)
+      if (!vaultSourceActive(video) || (video.state === 'uploading' && (video.expiresAt <= time || video.uploadUntil <= time ||
+          !isSessionActive(video.uploaderSession, video.uploaderId) || !channelAccess(video.uploaderId, channelId)?.canStream))) retire(video)
     }
     return party.waitingForNext ? advance(party, time) : party
+  }
+
+  function vaultSourceActive(party) {
+    return party.source !== 'vault' || (!isTemporaryChannel(party.channelId) &&
+      isSessionActive(party.uploaderSession, party.uploaderId) && channelAccess(party.uploaderId, party.channelId)?.canStream &&
+      watchShare(party.uploaderId, party.shareId))
   }
 
   function sweep() {
@@ -248,7 +255,8 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
   }
 
   function queueState(party) {
-    return party?.queue.map(({ id, source, title, state, videoId }) => ({ id, source, title, state, ...(videoId && { videoId }) })) ?? []
+    return party?.queue.map(({ id, source, title, state, videoId, vaultEnvelope, vaultOwner, shareId }) => ({ id, source, title, state,
+      ...(videoId && { videoId }), ...(source === 'vault' && { vaultEnvelope, vaultOwner, shareId }) })) ?? []
   }
 
   function snapshot(actor, access, party, time) {
@@ -256,7 +264,8 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const visible = party && (party.state === 'ready' || canStop)
     return { party: visible ? {
       ...playbackState(party, time), hostId: party.hostId, state: party.state,
-      ...(party.source === 'youtube' ? { videoId: party.videoId } : { mime: party.mime,
+      ...(party.source === 'vault' ? { vaultEnvelope: party.vaultEnvelope, vaultOwner: party.vaultOwner, shareId: party.shareId } :
+        party.source === 'youtube' ? { videoId: party.videoId } : { mime: party.mime,
         ...(party.state === 'uploading' ? { offset: party.offset, size: party.size } :
           { mediaUrl: `${watchPath(party.channelId, party.id)}/media` }) }),
     } : null, queue: visible ? queueState(party) : [], serverTime: time, canShare: Boolean(access.canStream), canStop }
@@ -284,7 +293,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
   function guestParty(scope, time) {
     if (!isTemporaryChannel(scope.channelId) || !['youtube', 'local'].includes(scope.source)) return null
     const party = activeParty(scope.channelId, time)
-    return party?.state === 'ready' && party.hostId === scope.ownerId && party.firstSource === scope.source ? party : null
+    return party?.state === 'ready' && party.source !== 'vault' && party.hostId === scope.ownerId && party.firstSource === scope.source ? party : null
   }
 
   function guestSnapshot(scope) {
@@ -329,8 +338,14 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
 
   async function start(request, response, actor, channelId, queueBehind) {
     if (!accessTo(actor, channelId).canStream) throw new RequestError(403, 'Du darfst in diesem Channel nicht streamen.')
-    const { source, videoId, mime, size, title } = await readJson(request)
-    if (source !== 'youtube' && source !== 'local') throw new RequestError(400, 'Ungültige Auswahl.')
+    const input = await readJson(request, 48 * 1024)
+    const { source, videoId, mime, size, title, shareId } = input
+    if (source !== 'youtube' && source !== 'local' && source !== 'vault') throw new RequestError(400, 'Ungültige Auswahl.')
+    if (source === 'vault' && (Object.keys(input).length !== 4 ||
+        !['id', 'source', 'shareId', 'envelope'].every(field => Object.hasOwn(input, field)) ||
+        typeof input.id !== 'string' || !partyIdPattern.test(input.id) || typeof shareId !== 'string' || !partyIdPattern.test(shareId))) {
+      throw new RequestError(400, 'Ungültige Auswahl.')
+    }
     if (source === 'youtube' && (typeof videoId !== 'string' || !youtubeId.test(videoId))) {
       throw new RequestError(400, 'Ungültige YouTube-Video-ID.')
     }
@@ -342,6 +357,11 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     const current = requireSession(request)
     const access = accessTo(current, channelId)
     if (current.id !== actor.id || !access.canStream) throw new RequestError(403, 'Du darfst in diesem Channel nicht streamen.')
+    let vaultSource
+    if (source === 'vault') {
+      if (isTemporaryChannel(channelId) || !watchShare(current.id, shareId)) throw missing()
+      vaultSource = validateWatchEnvelope(current.id, channelId, input.envelope)
+    }
     sweep()
     const time = now()
     const active = activeParty(channelId, time)
@@ -355,12 +375,17 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
     }
     if (!queueBehind) assertTemporarySource(channelId, current.id, source)
     chargeStart(current.id, time, Boolean(queueBehind))
-    const id = randomUUID()
+    const id = source === 'vault' ? input.id : randomUUID()
+    for (const running of parties.values()) {
+      if (running.id === id || running.queue.some(video => video.id === id)) throw conflict()
+    }
     const party = { id, channelId, source, uploaderId: current.id, uploaderSession: sessionKey(request),
-      title: source === 'local' ? watchTitle(title, source) : '',
+      title: source === 'vault' ? 'ZeloteZ Vault' : source === 'local' ? watchTitle(title, source) : '',
       playing: false, position: 0, updatedAt: time, revision: 1,
       commandWindowUntil: time, commandCount: 0,
-      ...(source === 'youtube' ? { videoId, state: 'ready', expiresAt: time + partyLifetime, viewers: new Map() } : {
+      ...(source === 'vault' ? { vaultEnvelope: vaultSource.envelope, vaultOwner: vaultSource.owner, shareId,
+        state: 'ready', expiresAt: time + partyLifetime, viewers: new Map(), autoStart: true } :
+        source === 'youtube' ? { videoId, state: 'ready', expiresAt: time + partyLifetime, viewers: new Map() } : {
         mime, size, state: 'uploading', expiresAt: time + uploadLifetime,
         uploadUntil: time + uploadIdleTime, file: join(folder, `${id}.video`), offset: 0,
       }),
@@ -634,6 +659,7 @@ export function createWatchParties({ dataDir, requireSession, sessionKey, isSess
         return true
       }
       const party = specificParty(channelId, partyId, time)
+      if (party.source === 'vault' && ['media', 'metadata', 'upload'].includes(resource)) throw missing()
       if (resource === 'media' && (method === 'GET' || method === 'HEAD')) await serveMemberMedia(request, response, actor, party)
       else if (resource === 'metadata' && method === 'PATCH') await addMetadata(request, response, actor, party)
       else if (resource === 'viewers' && (method === 'POST' || method === 'DELETE')) await reportMemberViewer(request, response, actor, party)

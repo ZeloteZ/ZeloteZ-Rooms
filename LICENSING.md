@@ -26,4 +26,6 @@ External contributions require the documented agreement described in [CONTRIBUTI
 
 Third-party software, libraries, notices, and other material identified with their own license remain under those terms. This project license does not replace or restrict their original licenses. Dependency manifests, lockfiles, supplied license files, and packaged component notices identify those components and their terms; they must also be respected when distributing a source checkout or binary.
 
+Vault's local PDF tools include Mozilla PDF.js 6.5.438 (Apache-2.0) and PDF-LIB 1.17.1 (MIT). Their original license notices, bundled font notices, and PDF-LIB dependency licenses are included in `web/vendor/`. These components run on the user's device; no external document service is used.
+
 When distributing ZeloteZ Rooms, include the project license or its official URL and preserve the `Required Notice:` above, as required by the license. Preserve and include the applicable third-party notices as well. Desktop, container, and browser-extension packages must include the applicable license notices. Existing release downloads are not replaced by changes to this source revision.

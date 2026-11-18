@@ -354,6 +354,27 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     return { canView: true, canManage, canStream, topicId: channel.topic_id, topicTitle: channel.topic_title, channelTitle: channel.title }
   }
 
+  function validateWatchEnvelope(userId, channelId, value) {
+    const channel = getChannel(userId, channelId, 'live')
+    if (channel.is_temporary || !channelAccess(userId, channelId)?.canStream) throw missing()
+    const invalid = () => new RequestError(400, 'Ungültige verschlüsselte Nachricht.')
+    const exact = (item, fields) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).length !== fields.length ||
+          fields.some(field => !Object.hasOwn(item, field))) throw invalid()
+    }
+    exact(value, ['v', 'ephemeral', 'nonce', 'body', 'keys'])
+    exact(value.ephemeral, ['kty', 'crv', 'x', 'y'])
+    if (!value.keys || typeof value.keys !== 'object' || Array.isArray(value.keys)) throw invalid()
+    for (const box of Object.values(value.keys)) exact(box, ['nonce', 'blob'])
+    const recipients = recipientKeys.all(channel.topic_id)
+    const envelope = validateEnvelope(value, recipients)
+    const uploader = recipients.find(recipient => recipient.id === userId)
+    if (!uploader) throw missing()
+    const { kty, crv, x, y } = JSON.parse(uploader.public_key)
+    if (kty !== value.ephemeral.kty || crv !== value.ephemeral.crv || x !== value.ephemeral.x || y !== value.ephemeral.y) throw invalid()
+    return { envelope: JSON.parse(envelope), owner: { id: userId, publicKey: { kty, crv, x, y } } }
+  }
+
   function requireManager(role) {
     if (role !== 'owner' && role !== 'admin') throw forbidden()
   }
@@ -946,7 +967,7 @@ export function createCommunity(db, { requireSession, appearance, recordMentions
     return true
   }
 
-  return { handle, channelAccess, homeActivity, assertChatWritable: direct.assertCanSend,
+  return { handle, channelAccess, validateWatchEnvelope, homeActivity, assertChatWritable: direct.assertCanSend,
     quickDestinations: userId => quickDestinations.all(userId),
     removeTemporaryTopic: (id, ownerId) => {
       const topic = getTopic(ownerId, id)

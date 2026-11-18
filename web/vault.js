@@ -1,6 +1,9 @@
 import { locale, t } from "./i18n.js";
-import { api, button, closeDialog, copyField, el, field, form, select, showDialog, status, tell } from "./ui.js";
+import { api, button, closeDialog, copyField, el, field, form, notify, select, showDialog, status, tell } from "./ui.js";
 import { createVaultClient, uploadNativeVaultSelection } from "./vault-client.js";
+import { openVaultEditor } from "./vault-editor.js";
+import { vaultFileKind } from "./vault-media-edit.js";
+import { canShareVaultPlayback, openVaultRoomShare } from "./vault-room-share.js";
 
 export function vaultBytes(value) {
   if (!Number.isFinite(value) || value < 0) return "—";
@@ -11,7 +14,7 @@ export function vaultBytes(value) {
 }
 
 export function vaultSafeName(value) {
-  return typeof value === "string" && value.trim() && new TextEncoder().encode(value).byteLength <= 255 && !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069/\\]/u.test(value)
+  return typeof value === "string" && value.trim() && new TextEncoder().encode(value).byteLength <= 255 && !/[\p{Cc}\u202a-\u202e\u2066-\u2069/\\]/u.test(value)
     && value !== "." && value !== ".." ? value : null;
 }
 
@@ -48,10 +51,10 @@ function date(value) {
 export function renderVaultLauncher({ signal, user, enabled } = {}) {
   const link = el("a", { class: "panel vault-launcher", href: "#/vault", hidden: enabled !== true,
     "aria-label": t("Open ZeloteZ Vault", "ZeloteZ Vault öffnen") },
-    el("span", { class: "vault-launcher-icon", "aria-hidden": "true" }, "◇"),
+    el("span", { class: "vault-launcher-icon vault-lock", "aria-hidden": "true" }),
     el("span", { class: "vault-launcher-copy" }, el("strong", {}, "ZeloteZ Vault"),
       el("span", {}, t("Your encrypted files", "Deine verschlüsselten Dateien"))),
-    el("span", { class: "vault-launcher-arrow", "aria-hidden": "true" }, "↗"));
+    el("span", { class: "vault-launcher-arrow", "aria-hidden": "true" }, "›"));
   if (enabled === undefined && user) {
     void api("vault/config", { signal }).then(config => {
       if (!signal?.aborted) link.hidden = config.enabled !== true;
@@ -65,7 +68,13 @@ export function renderVault(context) {
   const client = context.vault ?? createVaultClient(context);
   const feedback = status(t("Opening your vault…", "Dein Vault wird geöffnet …"));
   const rows = el("div", { class: "vault-entries", role: "list", "aria-label": t("Vault files", "Vault-Dateien"), tabindex: 0 });
-  const breadcrumbs = el("nav", { class: "vault-breadcrumbs", "aria-label": t("Folder path", "Ordnerpfad") });
+  const breadcrumbList = el("ol", { class: "vault-breadcrumb-list" });
+  const breadcrumbs = el("nav", { class: "vault-breadcrumbs", "aria-label": t("Folder path", "Ordnerpfad") }, breadcrumbList);
+  const banner = el("div", { class: "room-header-content vault-header" },
+    el("a", { class: "room-home-link", href: "#/rooms" }, t("Home", "Home")),
+    el("div", { class: "room-hero vault-hero" },
+      el("span", { class: "vault-banner-icon vault-lock", "aria-hidden": "true" }),
+      el("div", { class: "vault-banner-copy" }, el("h1", { id: "vault-heading", tabindex: -1 }, "ZeloteZ Vault"), breadcrumbs)));
   const quotaLabel = el("p", { class: "vault-quota-label subtle" });
   const quotaBar = el("progress", { class: "vault-quota-bar", max: 1, value: 0,
     "aria-label": t("Storage used", "Belegter Speicher") });
@@ -79,43 +88,77 @@ export function renderVault(context) {
   const picker = el("input", { type: "file", multiple: true, hidden: true, "aria-label": t("Choose files", "Dateien auswählen") });
   const upload = button(t("Upload files", "Dateien hochladen"), () => picker.click(), { class: "primary", disabled: true });
   const newFolder = button(t("New folder", "Neuer Ordner"), () => editName(), { disabled: true });
-  const refreshButton = button(t("Refresh", "Aktualisieren"), () => refresh(), { class: "ghost", disabled: true });
+  const refreshLabel = t("Refresh", "Aktualisieren");
+  const refreshButton = button("↻", () => refresh(),
+    { class: "ghost icon-button", disabled: true, title: refreshLabel, "aria-label": refreshLabel });
+  const settingsTitle = t("Vault settings", "Vault-Einstellungen");
+  const settingsButton = button("⚙", () => openSettings(),
+    { class: "ghost vault-settings-button", title: settingsTitle, "aria-label": settingsTitle, "aria-haspopup": "dialog" });
   const toolbar = el("div", { class: "vault-toolbar", hidden: true },
     el("div", { class: "inline vault-toolbar-actions" }, upload, newFolder, refreshButton, picker),
     el("div", { class: "vault-toolbar-filters" }, search, sorting));
-  const ownTab = button(t("My vault", "Mein Vault"), () => setView(false), { class: "ghost", "aria-pressed": true });
-  const sharedTab = button(t("Shared with me", "Mit mir geteilt"), () => setView(true), { class: "ghost", "aria-pressed": false });
-  const views = el("div", { class: "inline vault-views", role: "group", "aria-label": t("Vault view", "Vault-Ansicht"), hidden: true }, ownTab, sharedTab);
+  const ownTab = button(t("My vault", "Mein Vault"), () => setView(false),
+    { class: "vault-tab", id: "vault-own-tab", role: "tab", "aria-selected": "true", "aria-controls": "vault-file-panel", tabindex: 0 });
+  const sharedTab = button(t("Shared with me", "Mit mir geteilt"), () => setView(true),
+    { class: "vault-tab", id: "vault-shared-tab", role: "tab", "aria-selected": "false", "aria-controls": "vault-file-panel", tabindex: -1 });
+  const views = el("div", { class: "vault-views", role: "tablist", "aria-label": t("Vault view", "Vault-Ansicht"), hidden: true }, ownTab, sharedTab);
   const empty = el("div", { class: "vault-empty", hidden: true });
   const dropHint = el("p", { class: "subtle vault-drop-hint", hidden: true },
     t("Drop files here to encrypt and upload them.", "Ziehe Dateien hierher, um sie verschlüsselt hochzuladen."));
+  const fileArea = el("div", { class: "vault-file-area" }, feedback, empty, rows);
+  const previousPage = button("‹", () => changePage(-1), { class: "ghost icon-button", "aria-label": t("Previous page", "Vorherige Seite") });
+  const nextPage = button("›", () => changePage(1), { class: "ghost icon-button", "aria-label": t("Next page", "Nächste Seite") });
+  const pageLabel = el("span", { class: "vault-page-label", role: "status" });
+  const itemCount = el("span", { class: "vault-item-count subtle" });
+  const pagination = el("div", { class: "vault-pagination", hidden: true }, el("div", { class: "vault-footer-copy" }, itemCount, dropHint),
+    el("div", { class: "inline vault-page-controls" }, previousPage, pageLabel, nextPage));
+  const filePanel = el("section", { class: "vault-file-panel", id: "vault-file-panel", role: "tabpanel", "aria-labelledby": ownTab.id, tabindex: 0 },
+    toolbar, fileArea, pagination);
   const browser = el("section", { class: "panel vault-browser", "aria-label": t("Vault file manager", "Vault-Dateimanager") },
-    views, toolbar, breadcrumbs, dropHint, feedback, empty, rows);
+    el("div", { class: "vault-browser-heading" }, views, quota, settingsButton), filePanel);
   const page = el("section", { class: "secondary-page vault-page", "aria-labelledby": "vault-heading" },
-    el("header", { class: "page-heading" }, el("div", { class: "vault-heading" },
-      el("h1", { id: "vault-heading", tabindex: -1 }, "ZeloteZ Vault"),
-      el("p", { class: "subtle" }, t("Private files. Encrypted before upload.", "Private Dateien. Vor dem Upload verschlüsselt."))),
-    el("a", { class: "button ghost", href: "#/rooms" }, t("Back to rooms", "Zurück zu den Räumen"))),
-    el("div", { class: "vault-content" }, quota, browser, transfers,
-      el("p", { class: "subtle vault-privacy-note" },
-        t("File names and contents are encrypted on your device. Keep access to your account keys; the operator cannot recover your files without them.",
-          "Dateinamen und Inhalte werden auf deinem Gerät verschlüsselt. Bewahre den Zugang zu deinen Kontoschlüsseln: Der Betreiber kann deine Dateien ohne sie nicht wiederherstellen."))));
+    browser, transfers);
   let snapshot = { entries: [], enabled: false };
   let parentId = null;
   let generation = 0;
   let uploading = false;
   let received = false;
+  let pageIndex = 0;
+  let pageSize = 8;
   const jobs = new Set();
   const queue = [];
   let ownedDialog = null;
   let refreshNative = () => {};
   const desktop = globalThis.roomsVault;
-  if (desktop) page.querySelector(".vault-content").append(desktopPanel());
+  const integration = desktop ? desktopPanel() : null;
 
   function current() { return !signal.aborted; }
   function vaultDialog(title, content) { ownedDialog = content; showDialog(title, content); }
   function report(error) {
-    if (current() && error?.name !== "AbortError") tell(feedback, error.message || t("The vault request failed.", "Die Vault-Anfrage ist fehlgeschlagen."), "error");
+    if (current() && error?.name !== "AbortError") notify(error.message || t("The vault request failed.", "Die Vault-Anfrage ist fehlgeschlagen."));
+  }
+  function openSettings() {
+    const content = el("div", { class: "stack vault-settings-dialog" },
+      el("p", { class: "muted" }, t("Private files. Encrypted before upload.", "Private Dateien. Vor dem Upload verschlüsselt.")),
+      el("p", { class: "subtle" },
+        t("File names and contents are encrypted on your device. Keep access to your account keys; the operator cannot recover your files without them.",
+          "Dateinamen und Inhalte werden auf deinem Gerät verschlüsselt. Bewahre den Zugang zu deinen Kontoschlüsseln: Der Betreiber kann deine Dateien ohne sie nicht wiederherstellen.")),
+      integration);
+    vaultDialog(t("Vault settings", "Vault-Einstellungen"), content);
+  }
+  function openEntry(entry) {
+    void openVaultEditor({ entry, client, signal, onSaved: async () => { await refresh(); },
+      ...(canShareVaultPlayback(entry, user) ? { onShare: () => sharePlayback(entry) } : {}) }).catch(report);
+  }
+  function sharePlayback(entry) {
+    return openVaultRoomShare({ entry, client, user, signal }).catch(report);
+  }
+  function fileKind(entry) {
+    const kind = vaultFileKind(entry);
+    return kind === "other" ? "file" : kind;
+  }
+  function fileGlyph(entry) {
+    return { image: "▧", video: "▷", audio: "♪", pdf: "PDF", text: "≡", file: "▤" }[fileKind(entry)];
   }
   function entryName(entry) { return entry.name || t("Encrypted item", "Verschlüsseltes Element"); }
   function isFolder(entry) { return entry.kind === "folder"; }
@@ -138,14 +181,21 @@ export function renderVault(context) {
   }
   function openFolder(id) {
     parentId = id;
+    pageIndex = 0;
     search.value = "";
     paint();
     rows.focus({ preventScroll: true });
   }
   function setView(shared) {
-    received = shared; parentId = null; search.value = "";
-    ownTab.setAttribute("aria-pressed", String(!shared)); sharedTab.setAttribute("aria-pressed", String(shared));
+    received = shared; parentId = null; search.value = ""; pageIndex = 0;
+    ownTab.setAttribute("aria-selected", String(!shared)); sharedTab.setAttribute("aria-selected", String(shared));
+    ownTab.tabIndex = shared ? -1 : 0; sharedTab.tabIndex = shared ? 0 : -1;
+    filePanel.setAttribute("aria-labelledby", shared ? sharedTab.id : ownTab.id);
     paint();
+  }
+  function changePage(delta) {
+    pageIndex = Math.max(0, pageIndex + delta);
+    paint(); rows.focus({ preventScroll: true });
   }
   function paintBreadcrumbs() {
     const chain = [];
@@ -158,9 +208,21 @@ export function renderVault(context) {
       chain.unshift(entry);
       id = entry.parentId;
     }
-    breadcrumbs.replaceChildren(button(t("My vault", "Mein Vault"), () => openFolder(null), { class: "ghost", "aria-current": parentId ? null : "page" }),
-      ...chain.flatMap((entry, index) => [el("span", { "aria-hidden": "true" }, "/"),
-        button(entryName(entry), () => openFolder(entry.id), { class: "ghost", "aria-current": index === chain.length - 1 ? "page" : null })]));
+    const rootName = received ? t("Shared with me", "Mit mir geteilt") : t("My vault", "Mein Vault");
+    const crumb = (name, action, active = false) => el("li", {}, button(name, action,
+      { class: "ghost", title: name, "aria-current": active ? "page" : null }));
+    const separator = () => el("li", { class: "vault-path-separator", "aria-hidden": "true" }, "›");
+    const parts = [crumb(rootName, () => received ? setView(true) : openFolder(null), received || !chain.length)];
+    if (!received && chain.length > 3) {
+      const ancestors = chain.slice(0, -2);
+      parts.push(separator(), el("li", {}, el("details", { class: "vault-path-overflow" },
+        el("summary", { class: "button ghost", "aria-label": t("Parent folders", "Übergeordnete Ordner") }, "…"),
+        el("div", { class: "vault-path-ancestors" }, ancestors.map(entry => button(entryName(entry), () => openFolder(entry.id), { class: "ghost" }))))));
+    }
+    const visible = received ? [] : chain.length > 3 ? chain.slice(-2) : chain;
+    for (const entry of visible) parts.push(separator(), crumb(entryName(entry), () => openFolder(entry.id), entry.id === parentId));
+    breadcrumbList.replaceChildren(...parts);
+    breadcrumbs.title = [rootName, ...(received ? [] : chain.map(entryName))].join(" / ");
   }
   function paint() {
     if (!current()) return;
@@ -169,7 +231,7 @@ export function renderVault(context) {
     views.hidden = !enabled;
     toolbar.hidden = !enabled;
     quota.hidden = !enabled;
-    breadcrumbs.hidden = !enabled || received;
+    breadcrumbs.hidden = !enabled;
     dropHint.hidden = !enabled || received;
     upload.hidden = received;
     newFolder.hidden = received;
@@ -177,7 +239,7 @@ export function renderVault(context) {
     newFolder.disabled = !enabled;
     refreshButton.disabled = false;
     if (!enabled) {
-      rows.replaceChildren(); empty.hidden = true;
+      rows.replaceChildren(); empty.hidden = true; pagination.hidden = true;
       tell(feedback, t("ZeloteZ Vault is not enabled on this instance.", "ZeloteZ Vault ist auf dieser Instanz nicht aktiviert."));
       return;
     }
@@ -194,7 +256,14 @@ export function renderVault(context) {
     entries.sort((a, b) => Number(isFolder(b)) - Number(isFolder(a)) || (sorting.value === "date"
       ? new Date(b.updatedAt) - new Date(a.updatedAt) : sorting.value === "size" ? (b.plainBytes ?? b.size ?? 0) - (a.plainBytes ?? a.size ?? 0)
         : entryName(a).localeCompare(entryName(b), locale(), { numeric: true })));
-    rows.replaceChildren(...entries.map(entryRow));
+    pageIndex = Math.min(pageIndex, Math.max(0, Math.ceil(entries.length / pageSize) - 1));
+    const first = pageIndex * pageSize;
+    rows.replaceChildren(...entries.slice(first, first + pageSize).map(entryRow));
+    pagination.hidden = false;
+    previousPage.disabled = !pageIndex;
+    nextPage.disabled = first + pageSize >= entries.length;
+    pageLabel.textContent = t("{page} / {pages}", "{page} / {pages}", { page: pageIndex + 1, pages: Math.max(1, Math.ceil(entries.length / pageSize)) });
+    itemCount.textContent = t("{count} items", "{count} Elemente", { count: entries.length });
     rows.hidden = !entries.length;
     empty.hidden = !!entries.length;
     empty.replaceChildren(el("span", { class: "vault-empty-icon", "aria-hidden": "true" }, "◇"),
@@ -206,11 +275,16 @@ export function renderVault(context) {
   function entryRow(entry) {
     const locked = entry.locked === true;
     const name = entryName(entry);
-    const primary = button(name, () => isFolder(entry) ? openFolder(entry.id) : download(entry),
+    const kind = fileKind(entry);
+    const openLabel = kind === "audio" || kind === "video" ? t("Play", "Abspielen")
+      : kind === "file" ? t("Open", "Öffnen") : t("Open and edit", "Öffnen und bearbeiten");
+    const primary = button(name, () => isFolder(entry) ? openFolder(entry.id) : openEntry(entry),
       { class: "ghost vault-entry-name", disabled: locked, title: name });
     const actions = el("details", { class: "vault-entry-menu" },
       el("summary", { class: "button ghost", "aria-label": t("Actions for {name}", "Aktionen für {name}", { name }) }, "⋯"));
     const menu = el("div", { class: "vault-entry-actions" },
+      !isFolder(entry) && button(openLabel, () => openEntry(entry), { disabled: locked }),
+      canShareVaultPlayback(entry, user) && button(t("Play in a room", "In einem Raum abspielen"), () => void sharePlayback(entry)),
       !isFolder(entry) && button(t("Download", "Herunterladen"), () => download(entry), { disabled: locked }),
       !entry.receivedShareId && button(t("Rename", "Umbenennen"), () => editName(entry), { disabled: locked }),
       !entry.receivedShareId && button(t("Move", "Verschieben"), () => moveEntry(entry), { disabled: locked }),
@@ -218,8 +292,19 @@ export function renderVault(context) {
       !entry.receivedShareId && button(t("Delete", "Löschen"), () => deleteEntry(entry), { class: "danger" }));
     menu.addEventListener("click", event => { if (event.target.closest("button")) actions.open = false; });
     actions.append(menu);
+    actions.addEventListener("toggle", () => {
+      if (!actions.open) return;
+      for (const other of rows.querySelectorAll("details[open]")) if (other !== actions) other.open = false;
+      const trigger = actions.querySelector("summary").getBoundingClientRect();
+      const width = Math.min(210, document.documentElement.clientWidth - 24);
+      menu.style.inlineSize = width + "px";
+      menu.style.insetInlineEnd = Math.max(12, document.documentElement.clientWidth - trigger.right) + "px";
+      const height = menu.getBoundingClientRect().height;
+      const top = trigger.bottom + height + 12 <= innerHeight ? trigger.bottom + 5 : Math.max(12, trigger.top - height - 5);
+      menu.style.insetBlockStart = top + "px";
+    });
     return el("div", { class: "vault-entry", role: "listitem", "data-vault-id": entry.uiId || entry.id },
-      el("span", { class: "vault-entry-icon", "aria-hidden": "true" }, locked ? "◇" : isFolder(entry) ? "▱" : "▤"),
+      el("span", { class: "vault-entry-icon", "aria-hidden": "true", "data-kind": isFolder(entry) ? "folder" : fileKind(entry) }, locked ? "◇" : isFolder(entry) ? "▱" : fileGlyph(entry)),
       el("div", { class: "vault-entry-title" }, primary,
         el("span", { class: "subtle" }, locked ? t("This item could not be decrypted.", "Dieses Element konnte nicht entschlüsselt werden.")
           : isFolder(entry) ? t("Folder", "Ordner") : entry.type || t("File", "Datei"))),
@@ -234,7 +319,10 @@ export function renderVault(context) {
       if (!current() || generation !== request) return;
       snapshot = { ...result, entries: Array.isArray(result.entries) ? result.entries : [] };
       tell(feedback, ""); paint();
-    } catch (error) { report(error); }
+    } catch (error) {
+      if (current()) tell(feedback, snapshot.enabled ? "" : error.message, "error");
+      report(error);
+    }
     finally { if (current() && generation === request) refreshButton.disabled = false; }
   }
   function nameDialog(title, initial, action) {
@@ -278,9 +366,10 @@ export function renderVault(context) {
     const combined = AbortSignal.any([signal, controller.signal]);
     const label = el("strong", {}, title);
     const progress = el("progress", { max: 1, value: 0, "aria-label": title });
-    const note = status(t("Preparing encryption…", "Verschlüsselung wird vorbereitet …"));
+    const note = status(t("Preparing secure transfer…", "Sichere Übertragung wird vorbereitet …"));
     const cancel = button(t("Cancel", "Abbrechen"), () => controller.abort(), { class: "ghost" });
-    const node = el("section", { class: "vault-transfer" }, el("div", { class: "section-heading" }, label, cancel), progress, note);
+    const node = el("section", { class: "vault-transfer", role: "status", "aria-label": title },
+      el("div", { class: "section-heading" }, label, cancel), progress, note);
     transfers.hidden = false; transfers.append(node);
     const update = value => {
       if (!current()) return;
@@ -291,14 +380,13 @@ export function renderVault(context) {
         : t("{percent}% complete", "{percent}% abgeschlossen", { percent: Math.min(100, Math.round(done / Math.max(1, total) * 100)) }));
     };
     return Promise.resolve().then(() => task({ signal: combined, onProgress: update })).then(() => {
-      if (current()) { progress.value = progress.max; tell(note, t("Completed", "Abgeschlossen")); }
+      if (current()) notify(title + " · " + t("Completed", "Abgeschlossen"));
     }).catch(error => {
-      if (current()) tell(note, error.name === "AbortError" ? t("Cancelled", "Abgebrochen") : error.message, error.name === "AbortError" ? "" : "error");
+      if (current()) notify(title + " · " + (error.name === "AbortError" ? t("Cancelled", "Abgebrochen") : error.message));
     }).finally(() => {
       jobs.delete(controller);
+      node.remove(); transfers.hidden = !transfers.childElementCount;
       if (current()) {
-        cancel.textContent = t("Dismiss", "Ausblenden");
-        cancel.replaceWith(button(t("Dismiss", "Ausblenden"), () => { node.remove(); transfers.hidden = !transfers.childElementCount; }, { class: "ghost" }));
         void refresh();
       }
     });
@@ -481,14 +569,25 @@ export function renderVault(context) {
       });
       archiveRunning = false;
       await pendingSelection();
-      if (uploaded && current()) await shareEntry(uploaded);
+      if (uploaded && current()) {
+        if (document.querySelector("#dialog")?.open) notify(t(
+          "Your encrypted ZIP is ready. Open its file menu to share it.", "Dein verschlüsseltes ZIP ist bereit. Öffne zum Teilen sein Dateimenü."));
+        else await shareEntry(uploaded);
+      }
     }
     const unsubscribe = desktop.onPending?.(() => { autoStarted = false; void pendingSelection(); });
     signal.addEventListener("abort", () => { unsubscribe?.(); void desktop.cancelArchive().catch(() => {}); }, { once: true });
     void statusIntegration(); void pendingSelection();
     return panel;
   }
-  search.addEventListener("input", paint); sorting.addEventListener("change", paint);
+  views.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const shared = event.key === "End" ? true : event.key === "Home" ? false : !received;
+    setView(shared); (shared ? sharedTab : ownTab).focus({ preventScroll: true });
+  });
+  search.addEventListener("input", () => { pageIndex = 0; paint(); });
+  sorting.addEventListener("change", () => { pageIndex = 0; paint(); });
   picker.addEventListener("change", () => { addFiles(picker.files ?? []); picker.value = ""; });
   browser.addEventListener("dragover", event => {
     if (snapshot.enabled && event.dataTransfer?.types.includes("Files")) { event.preventDefault(); browser.classList.add("vault-drop-active"); }
@@ -499,13 +598,34 @@ export function renderVault(context) {
     if (!snapshot.enabled || !event.dataTransfer?.files.length) return;
     event.preventDefault(); addFiles(event.dataTransfer.files);
   });
+  document.addEventListener("click", event => {
+    for (const menu of rows.querySelectorAll("details[open]")) if (!menu.contains(event.target)) menu.open = false;
+  }, { signal });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") for (const menu of rows.querySelectorAll("details[open]")) menu.open = false;
+  }, { signal });
+  const toast = document.querySelector("#toast");
+  function fitRows() {
+    if (!current()) return;
+    if (toast) page.style.setProperty("--vault-toast-offset", toast.hidden ? "0px" : toast.getBoundingClientRect().height + 10 + "px");
+    if (!fileArea.clientHeight) return;
+    const rowHeight = Number.parseFloat(getComputedStyle(page).getPropertyValue("--vault-row-height")) || 60;
+    const fitting = Math.max(1, Math.floor(fileArea.clientHeight / rowHeight));
+    if (fitting !== pageSize) { pageSize = fitting; paint(); }
+  }
+  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fitRows) : null;
+  observer?.observe(fileArea);
+  if (toast) observer?.observe(toast);
+  globalThis.addEventListener?.("resize", fitRows, { signal });
   signal.addEventListener("abort", () => {
+    observer?.disconnect();
     queue.length = 0; for (const job of jobs) job.abort();
     if (ownedDialog?.isConnected) closeDialog();
     snapshot = { entries: [], enabled: false }; client.close?.();
   }, { once: true });
+  paintBreadcrumbs();
   void refresh();
-  return page;
+  return { node: page, header: banner };
 }
 
 export function renderVaultAdminPanel({ signal, approval }) {

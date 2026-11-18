@@ -230,6 +230,34 @@ test('public links use only hashed bearer capabilities, never URL keys; file del
   assert.equal((await f.request('GET', path, undefined, { user: null, headers })).status, 404)
 })
 
+test('watch sources accept only active own public shares and recheck feature, expiry, suspension and file state', async t => {
+  const f = await fixture(t)
+  assert.equal(f.vault.watchShare(f.people.alice.id, randomUUID()), false)
+  await f.enable()
+  const row = await f.readyFile()
+  const id = randomUUID(), expiresAt = Date.now() + 10000
+  assert.equal((await f.request('POST', `/api/vault/entries/${row.id}/shares`, { id, tokenHash: encoded(32), envelope: header(), expiresAt })).status, 201)
+  assert.equal(f.vault.watchShare(f.people.alice.id, id), true)
+  assert.equal(f.vault.watchShare(f.people.bob.id, id), false)
+  assert.equal(f.vault.watchShare(f.people.alice.id, '../community.sqlite'), false)
+  const memberId = randomUUID()
+  assert.equal((await f.request('POST', `/api/vault/entries/${row.id}/shares`, { id: memberId, recipientId: f.people.bob.id,
+    envelope: envelope([f.people.alice.id, f.people.bob.id]), expiresAt })).status, 201)
+  assert.equal(f.vault.watchShare(f.people.alice.id, memberId), false)
+  f.db.prepare('INSERT INTO disabled_accounts VALUES (?,?)').run(f.people.alice.id, Math.floor(Date.now() / 1000))
+  assert.equal(f.vault.watchShare(f.people.alice.id, id), false)
+  f.db.prepare('DELETE FROM disabled_accounts WHERE user_id = ?').run(f.people.alice.id)
+  await f.enable(vaultLimits.defaultQuotaBytes, false)
+  assert.equal(f.vault.watchShare(f.people.alice.id, id), false)
+  await f.enable()
+  assert.equal(f.vault.watchShare(f.people.alice.id, id), true)
+  f.db.prepare("UPDATE vault_entries SET state = 'uploading' WHERE id = ?").run(row.id)
+  assert.equal(f.vault.watchShare(f.people.alice.id, id), false)
+  f.db.prepare("UPDATE vault_entries SET state = 'ready' WHERE id = ?").run(row.id)
+  f.tick(11000)
+  assert.equal(f.vault.watchShare(f.people.alice.id, id), false)
+})
+
 test('expiry is checked without relying on housekeeping and disabling aborts reservations but retains committed data', async t => {
   const f = await fixture(t); await f.enable()
   const ready = await f.readyFile()
