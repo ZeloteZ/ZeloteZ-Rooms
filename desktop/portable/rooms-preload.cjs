@@ -3,6 +3,13 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktop", true);
+if (process.isMainFrame && ["win32", "linux"].includes(process.platform)) contextBridge.exposeInMainWorld("roomsDesktopShare", {
+  arm: (id, language) => navigator.userActivation.isActive
+    ? ipcRenderer.invoke("rooms:share-arm", id, language) : Promise.resolve(false),
+  take: id => ipcRenderer.invoke("rooms:share-take", id),
+  preview: (id, thumbnail, aspect, sourceWidth, sourceHeight) => ipcRenderer.invoke("rooms:share-preview", id, thumbnail, aspect, sourceWidth, sourceHeight),
+  cancel: id => ipcRenderer.invoke("rooms:share-cancel", id),
+});
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsDesktopNotifications", {
   notify: input => ipcRenderer.invoke("rooms:desktop-notify", input),
 });

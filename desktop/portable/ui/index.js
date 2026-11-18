@@ -257,6 +257,10 @@ function settings(state) {
 async function setup() {
   const state = await bridge.state();
   if (!state) return;
+  if (state.mode === "share") {
+    window.roomsShare(state);
+    return;
+  }
   if (state.mode === "settings") {
     settings(state);
     return;

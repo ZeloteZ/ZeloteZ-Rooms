@@ -1,6 +1,6 @@
 import { accountHeaders, api, button, checkAccountResponse, el, identifier, notify, topicHref } from "./ui.js";
 import { language, t } from "./i18n.js";
-import { cropDesktopShare } from "./desktop-share.js";
+import { cropDesktopShare, desktopSharePreview, desktopShareSettings } from "./desktop-share.js";
 import { prepareDesktopAudio } from "./desktop-audio.js";
 
 const streamId = /^[a-f0-9]{32}$/u;
@@ -57,7 +57,7 @@ async function captureDisplay(withAudio, desktopOptions) {
   if (!devices?.getDisplayMedia || typeof RTCPeerConnection !== "function") {
     throw new Error(t("Screen sharing is unavailable in this browser.", "Die Bildschirmfreigabe ist in diesem Browser nicht verfügbar."));
   }
-  const fps = desktopOptions?.fps ?? 30;
+  const fps = desktopOptions?.unified ? 60 : desktopOptions?.fps ?? 30;
   const size = desktopOptions ? { resizeMode: { ideal: "none" } }
     : { width: { ideal: 1920 }, height: { ideal: 1080 } };
   try {
@@ -169,9 +169,29 @@ export function createScreenShareController({ signal }, dock) {
     sharing = entry;
     update();
     try {
+      const unified = desktopOptions?.unified === true;
+      const setup = unified ? window.roomsDesktopShare : null;
+      const captureId = unified ? crypto.randomUUID() : undefined;
+      // Unlock Web Audio while the original Share click still has user activation.
+      let desktopAudio;
+      let audioUnavailable = false;
+      try {
+        desktopAudio = (unified ? Boolean(window.roomsDesktopAudio) : desktopOptions?.audio && desktopOptions.audio !== "none")
+          ? prepareDesktopAudio(controller.signal, captureId) : null;
+      } catch (error) {
+        if (!unified) throw error;
+        audioUnavailable = true;
+      }
+      if (unified) {
+        controller.signal.addEventListener("abort", () => {
+          Promise.resolve(setup.cancel(captureId)).catch(() => {});
+        }, { once: true });
+        if (!await setup.arm(captureId, language())) {
+          throw new Error(t("Screen sharing was cancelled or denied.", "Die Bildschirmfreigabe wurde abgebrochen oder abgelehnt."));
+        }
+        controller.signal.throwIfAborted();
+      }
       const useAudio = withAudio && !desktopOptions;
-      const audioMode = desktopOptions?.audio;
-      const desktopAudio = audioMode && audioMode !== "none" ? prepareDesktopAudio(controller.signal) : null;
       const source = await captureDisplay(useAudio, desktopOptions);
       if (controller.signal.aborted) {
         for (const track of source.getTracks()) track.stop();
@@ -186,6 +206,31 @@ export function createScreenShareController({ signal }, dock) {
         if (sharing === entry) stop(t("Screen sharing ended.", "Die Bildschirmfreigabe wurde beendet."));
       };
       input.addEventListener("ended", sourceEnded, { once: true, signal: controller.signal });
+      if (unified) {
+        let settings = await setup.take(captureId);
+        controller.signal.throwIfAborted();
+        if (settings?.preview === true) {
+          const still = await desktopSharePreview(source, controller.signal);
+          settings = await setup.preview(captureId, still.image, still.aspect, still.width, still.height);
+          controller.signal.throwIfAborted();
+        }
+        if (!settings) {
+          stop();
+          return;
+        }
+        desktopOptions = desktopShareSettings(settings);
+        if (desktopOptions.audio === "none") desktopAudio?.close();
+        else if (audioUnavailable) {
+          throw new Error(t("The desktop audio mixer couldn’t start.", "Die Desktop-Tonausgabe konnte nicht starten."));
+        }
+        else if (!desktopAudio) {
+          throw new Error(t("The selected audio output is unavailable.", "Die ausgewählte Tonquelle ist offline."));
+        }
+        // The native picker sets quality after capture has begun; cap the source as well as the encoder.
+        await input.applyConstraints({ frameRate: { ideal: desktopOptions.fps, max: desktopOptions.fps } }).catch(() => {});
+        controller.signal.throwIfAborted();
+      }
+      const audioMode = desktopOptions?.audio;
       const media = desktopOptions?.region
         ? await cropDesktopShare(source, desktopOptions, controller.signal, resized => {
           if (sharing !== entry) return;
@@ -202,7 +247,7 @@ export function createScreenShareController({ signal }, dock) {
       video.contentHint = "detail";
       const displaySurface = input.getSettings().displaySurface;
       let audio = useAudio && ["browser", "window"].includes(displaySurface) ? media.getAudioTracks()[0] : null;
-      if (desktopAudio) {
+      if (desktopAudio && audioMode !== "none") {
         audio = await desktopAudio(audioMode, note => {
           if (sharing === entry) stop(note);
         });
@@ -220,7 +265,7 @@ export function createScreenShareController({ signal }, dock) {
       if (capabilities.get("video")?.length === 0) {
         throw new Error(t("This browser can’t encode H.264 for live video.", "Dieser Browser kann Live-Video nicht als H.264 übertragen."));
       }
-      if (desktopAudio && capabilities.get("audio")?.length === 0) {
+      if (desktopAudio && audioMode !== "none" && capabilities.get("audio")?.length === 0) {
         throw new Error(t("This desktop app can’t encode stream audio.", "Diese Desktop-App kann den Streamton nicht kodieren."));
       }
       const audioTrack = capabilities.get("audio")?.length === 0 ? null : audio;

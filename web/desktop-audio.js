@@ -1,23 +1,32 @@
 import { t } from "./i18n.js";
 
-export function prepareDesktopAudio(signal) {
+export function prepareDesktopAudio(signal, id = crypto.randomUUID()) {
   const bridge = window.roomsDesktopAudio;
   const context = new AudioContext({ sampleRate: 48000 });
-  const ready = Promise.all([context.resume(), context.audioWorklet.addModule(new URL("./desktop-audio-worklet.js", import.meta.url))])
-    .then(() => true, () => false);
-  const id = crypto.randomUUID();
+  let ready;
+  try {
+    ready = Promise.all([context.resume(), context.audioWorklet.addModule(new URL("./desktop-audio-worklet.js", import.meta.url))])
+      .then(() => true, () => false);
+  } catch (error) {
+    context.close().catch(() => {});
+    throw error;
+  }
   let timer;
-  let requested = false;
   let track;
+  let closed = false;
 
-  signal.addEventListener("abort", () => {
+  function close() {
+    if (closed) return;
+    closed = true;
     clearTimeout(timer);
     track?.stop();
-    if (requested) bridge.close(id).catch(() => {});
+    bridge.close(id).catch(() => {});
     context.close().catch(() => {});
-  }, { once: true });
+  }
+  signal.addEventListener("abort", close, { once: true });
+  if (signal.aborted) close();
 
-  return async (mode, ended) => {
+  const open = async (mode, ended) => {
     if (!await ready) {
       signal.throwIfAborted();
       throw new Error(t("The desktop audio mixer couldn’t start.", "Die Desktop-Tonausgabe konnte nicht starten."));
@@ -29,7 +38,6 @@ export function prepareDesktopAudio(signal) {
     });
     source.connect(destination);
     track = destination.stream.getAudioTracks()[0];
-    requested = true;
 
     function disconnected() {
       if (!signal.aborted) ended(t("The selected audio output stopped. Start sharing again to choose another.",
@@ -58,4 +66,6 @@ export function prepareDesktopAudio(signal) {
     }
     throw new Error(t("The selected audio output is unavailable.", "Die ausgewählte Tonquelle ist offline."));
   };
+  open.close = close;
+  return open;
 }

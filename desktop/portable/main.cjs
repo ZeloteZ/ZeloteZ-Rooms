@@ -5,6 +5,7 @@ const { mkdir, readFile, rename, rm, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { installAudio, audioArguments } = require("./audio.cjs");
+const { installShareSetup } = require("./share-setup.cjs");
 const { desktopNotifications } = require("./desktop-notifications.cjs");
 const { detachedVideo } = require("./detached-video.cjs");
 const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
@@ -253,6 +254,7 @@ function localWindow(mode, state, parent) {
   const titles = {
     audio: text("Choose audio", "Tonquelle auswählen", "选择音频"),
     picker: text("Share your screen", "Bildschirm teilen", "共享屏幕"),
+    share: text("Share your screen", "Bildschirm teilen", "共享屏幕"),
     settings: state.currentOrigin ? text("Desktop settings", "Desktop-Einstellungen", "桌面设置") : "ZeloteZ Rooms",
     "update-intro": text("Desktop updates", "Desktop-Updates", "桌面版更新"),
   };
@@ -261,8 +263,8 @@ function localWindow(mode, state, parent) {
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b0b0e" : "#f4f6fb",
     title: titles[mode],
     useContentSize: settings || introduction,
-    width: introduction ? 470 : settings ? 610 : 745,
-    height: introduction ? 380 : settings ? (state.currentOrigin ? 625 : 555) : 590,
+    width: introduction ? 470 : settings ? 610 : mode === "share" ? 880 : 745,
+    height: introduction ? 380 : settings ? (state.currentOrigin ? 625 : 555) : mode === "share" ? 650 : 590,
     minWidth: 340, minHeight: 310,
     webPreferences: {
       preload: path.join(__dirname, "local-preload.cjs"), sandbox: true, contextIsolation: true,
@@ -285,15 +287,19 @@ function localWindow(mode, state, parent) {
 
 function localSender(event) {
   const local = localWindows.get(event.sender.id);
-  if (local?.contents === event.sender && event.senderFrame === event.sender.mainFrame
-      && event.senderFrame.url === localUrl) return local;
+  const frame = event.senderFrame;
+  if (local?.contents === event.sender && frame && !frame.detached && frame === event.sender.mainFrame
+      && frame.url === localUrl) return local;
   return null;
 }
 
 ipcMain.handle("rooms:local-state", event => localSender(event)?.state ?? null);
 ipcMain.handle("rooms:local-cancel", event => localSender(event)?.window.close());
+ipcMain.handle("rooms:local-share-sources", event => localSender(event)?.share?.sources());
+ipcMain.handle("rooms:local-share-audio", (event, mode) => localSender(event)?.share?.audio(mode));
 ipcMain.handle("rooms:local-submit", (event, input) => {
   const local = localSender(event);
+  if (local?.share) return local.share.submit(input);
   if (!local?.state.sources || !Number.isInteger(input) || input < 0 || input >= local.state.sources.length) return false;
   local.selection = input;
   local.window.close();
@@ -636,8 +642,14 @@ function installPermissions(window, web, origin, media, isActive) {
   let microphone = false;
   let microphonePrompt;
   let picking = false;
-  const approveAudio = installAudio(web, value => isActive() && isRoomsPage(value, origin),
+  const wayland = process.platform === "linux" && Boolean(process.env.WAYLAND_DISPLAY);
+  const canShare = value => isActive() && isRoomsPage(value, origin);
+  const audio = installAudio(web, canShare,
     (mode, sources) => choose(window, "audio", sources, { audioMode: mode, sources: sources.map(source => ({ name: source.title })) }));
+  const configureShare = installShareSetup(web, {
+    allowed: canShare, audio, portal: wayland,
+    showDialog: state => localWindow("share", state, window),
+  });
   const allowed = (contents, target, main) => isActive()
     && contents === web && main === true && isRoomsPage(web.getURL(), origin) && webUrl(target)?.origin === origin;
 
@@ -672,7 +684,8 @@ function installPermissions(window, web, origin, media, isActive) {
     picking = true;
     let capture = null;
     try {
-      const wayland = process.platform === "linux" && Boolean(process.env.WAYLAND_DISPLAY);
+      const unified = configureShare(request.frame, callback);
+      if (unified) return await unified;
       const sources = await desktopCapturer.getSources({
         types: ["screen", "window"],
         // PipeWire's chooser already shows previews. Some Wayland backends only
@@ -693,7 +706,7 @@ function installPermissions(window, web, origin, media, isActive) {
     try {
       if (!capture || !valid()) callback(null);
       else {
-        approveAudio();
+        audio.approve();
         callback({ video: capture });
       }
     } catch {

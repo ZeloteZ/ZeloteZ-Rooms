@@ -626,5 +626,8 @@ export default Object.freeze({
   "YouTube link": "YouTube 链接",
   "YouTube video": "YouTube 视频",
   "ZeloteZ Rooms – Home": "ZeloteZ Rooms – 首页",
-  "ZeloteZ Rooms is currently unavailable.": "ZeloteZ Rooms 暂时不可用。"
+  "ZeloteZ Rooms is currently unavailable.": "ZeloteZ Rooms 暂时不可用。",
+  "The screen sharing settings are invalid. Choose your source again.": "屏幕共享设置无效。请重新选择来源。",
+  "The selected region is too small. Choose a larger area.": "所选区域太小。请选择更大的区域。",
+  "The screen preview is unavailable. Choose your source again.": "屏幕预览不可用。请重新选择来源。"
 });

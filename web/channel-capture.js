@@ -6,7 +6,8 @@ export function createChannelCapture({ room, screenShare, nativeBroadcast }, cha
   const legacy = window.webkit?.messageHandlers?.roomsCapture;
   const native = window.roomsNativeCapture;
   const browser = !legacy && !native;
-  const portable = browser && window.roomsDesktop === true ? desktopShareControls() : null;
+  const unified = browser && typeof window.roomsDesktopShare?.arm === "function";
+  const portable = browser && !unified && window.roomsDesktop === true ? desktopShareControls() : null;
   const audioBridge = window.roomsDesktopAudio;
   const audioModes = Array.isArray(audioBridge?.supportedModes) ? audioBridge.supportedModes : ["application", "system"];
   const portableAudio = portable && audioBridge ? select([
@@ -19,7 +20,7 @@ export function createChannelCapture({ room, screenShare, nativeBroadcast }, cha
   if (portable) portable.element.hidden = false;
   if (portableAudio) portable.element.append(field(t("Stream audio", "Streamton"), portableAudio));
   const audio = el("input", { type: "checkbox" });
-  const options = browser ? portable?.element ?? el("label", { class: "inline subtle" }, audio,
+  const options = browser && !unified ? portable?.element ?? el("label", { class: "inline subtle" }, audio,
     t("Include tab or app audio when available", "Tab- oder Anwendungston teilen, wenn verfügbar")) : null;
 
   async function start() {
@@ -30,7 +31,7 @@ export function createChannelCapture({ room, screenShare, nativeBroadcast }, cha
       if (result === "busy") throw new Error(t("The capture controls are already open.", "Die Aufnahmesteuerung ist bereits geöffnet."));
       if (result !== "opened") throw new Error(t("The capture window couldn’t open.", "Das Aufnahmefenster konnte nicht geöffnet werden."));
     } else {
-      const settings = portable ? { ...portable.options(), audio: portableAudio?.value ?? "none" } : null;
+      const settings = unified ? { unified: true } : portable ? { ...portable.options(), audio: portableAudio?.value ?? "none" } : null;
       await screenShare.start(room, channel, audio.checked, settings);
     }
   }

@@ -116,18 +116,30 @@ ipcMain.handle("rooms:audio-open", async (event, id, mode) => {
     return "unavailable";
   }
   const { session, frame } = request;
-  if (session.recording || Date.now() >= session.approvedUntil) return "unavailable";
+  if (session.recording) return "unavailable";
+  const selection = session.selection;
+  if (selection) {
+    if (performance.now() >= selection.expiresAt) {
+      session.selection = null;
+      return "unavailable";
+    }
+    if (selection.frame !== frame || selection.id !== id || selection.mode !== mode) return "unavailable";
+    session.selection = null;
+  } else if (Date.now() >= session.approvedUntil) return "unavailable";
   session.approvedUntil = 0;
   const recording = { id };
   session.recording = recording;
   const current = () => session.recording === recording && requestSession(event)?.frame === frame;
   try {
-    const choices = await session.backend.outputs(mode);
-    if (!current()) return "cancelled";
-    if (!choices.length) return "empty";
-    const picker = session.choose(mode, choices);
-    recording.picker = picker.window;
-    const selected = await picker.result;
+    let selected = selection?.source;
+    if (!selected) {
+      const choices = await session.backend.outputs(mode);
+      if (!current()) return "cancelled";
+      if (!choices.length) return "empty";
+      const picker = session.choose(mode, choices);
+      recording.picker = picker.window;
+      selected = await picker.result;
+    }
     if (!current() || !selected) return "cancelled";
     const fresh = (await session.backend.outputs(mode)).some(candidate =>
       candidate.serial === selected.serial && candidate.identity === selected.identity);
@@ -143,16 +155,22 @@ ipcMain.handle("rooms:audio-open", async (event, id, mode) => {
 
 ipcMain.handle("rooms:audio-close", (event, id) => {
   const request = requestSession(event);
-  if (request && request.session.recording?.id === id) dispose(request.session);
+  if (!request) return;
+  if (request.session.selection?.id === id) request.session.selection = null;
+  if (request.session.recording?.id === id) dispose(request.session);
 });
 
 function installAudio(web, allowed, choose) {
   const id = web.id;
   const backend = process.platform === "linux" ? linuxAudio : windowsAudio;
-  const session = { allowed, choose, backend, approvedUntil: 0, recording: null };
+  const session = { allowed, choose, backend, approvedUntil: 0, selection: null, recording: null };
   if (backend) sessions.set(id, session);
-  function revoke() {
+  function clear() {
     session.approvedUntil = 0;
+    session.selection = null;
+  }
+  function revoke() {
+    clear();
     dispose(session);
   }
   web.on("did-start-navigation", details => {
@@ -160,10 +178,31 @@ function installAudio(web, allowed, choose) {
   });
   web.on("render-process-gone", revoke);
   web.once("destroyed", () => {
+    clear();
     dispose(session);
     sessions.delete(id);
   });
-  return () => { session.approvedUntil = Date.now() + 180_000; };
+  return {
+    modes: Object.freeze([...(backend?.modes ?? [])]),
+    outputs: mode => backend?.modes.includes(mode) ? backend.outputs(mode) : Promise.resolve([]),
+    approve() {
+      clear();
+      session.approvedUntil = Date.now() + 180_000;
+    },
+    select(frame, id, mode, source) {
+      clear();
+      if (session.recording || !frame || frame.detached || frame !== web.mainFrame || !allowed(frame.url) ||
+          typeof id !== "string" || id.length !== 36 || !token.test(id)) return false;
+      if (mode === "none") return true;
+      if (!backend?.modes.includes(mode) || typeof source?.serial !== "string" || !source.serial || source.serial.length > 1024 ||
+          typeof source.identity !== "string" || !source.identity || source.identity.length > 1024 ||
+          /[\p{Cc}\p{Cf}\p{Cs}]/u.test(source.serial + source.identity)) return false;
+      session.selection = { frame, id, mode, source: { serial: source.serial, identity: source.identity },
+        expiresAt: performance.now() + 30_000 };
+      return true;
+    },
+    clear,
+  };
 }
 
 function audioArguments() {

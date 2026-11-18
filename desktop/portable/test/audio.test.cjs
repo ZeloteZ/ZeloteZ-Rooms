@@ -91,6 +91,9 @@ function integration({ platform = "win32", modes = ["application", "system"], fr
   const commands = [];
   const children = [];
   let reads = 0;
+  let picks = 0;
+  let changed = false;
+  let time = 100;
   let allowed = true;
   const child = () => {
     const process = new EventEmitter();
@@ -101,10 +104,10 @@ function integration({ platform = "win32", modes = ["application", "system"], fr
   };
   const backend = { modes, error: "windows", async outputs() {
     if (failure) throw new Error("List unavailable");
-    return reads++ === 0 || fresh ? [selected] : [{ ...selected, identity: "new process" }];
+    return (reads++ === 0 || fresh) && !changed ? [selected] : [{ ...selected, identity: "new process" }];
   }, record(mode, target) { commands.push([mode, target]); return child(); } };
   runInNewContext(readFileSync(audioFile, "utf8"), {
-    module: moduleShim, process: { platform }, Buffer, setTimeout, clearTimeout,
+    module: moduleShim, process: { platform }, Buffer, setTimeout, clearTimeout, performance: { now: () => time },
     require(name) {
       if (name === "electron") return { ipcMain: { handle: (name, handler) => handlers.set(name, handler) } };
       if (name === "./windows-audio.cjs") return { createWindowsAudio: () => platform === "win32" ? backend : null };
@@ -119,9 +122,12 @@ function integration({ platform = "win32", modes = ["application", "system"], fr
   web.id = 10;
   web.mainFrame = { url: "https://rooms.example.test/", detached: false, send: (...args) => sent.push(args) };
   const event = { sender: web, senderFrame: web.mainFrame };
-  const approve = moduleShim.exports.installAudio(web, () => allowed, (_mode, choices) => ({ result: Promise.resolve(choices[0]) }));
-  return { handlers, event, web, approve, sent, commands, children, arguments: moduleShim.exports.audioArguments,
-    deny() { allowed = false; }, reads: () => reads };
+  const audio = moduleShim.exports.installAudio(web, () => allowed, (_mode, choices) => {
+    picks++;
+    return { result: Promise.resolve(choices[0]) };
+  });
+  return { handlers, event, web, audio, approve: () => audio.approve(), sent, commands, children, arguments: moduleShim.exports.audioArguments,
+    deny() { allowed = false; }, changeSource() { changed = true; }, tick(ms) { time += ms; }, reads: () => reads, picks: () => picks };
 }
 
 async function recording(fixture, mode = "application") {
@@ -152,6 +158,99 @@ test("Windows capture requires current main-frame approval, validates source ide
   const broken = integration({ failure: true });
   broken.approve();
   assert.equal(await broken.handlers.get("rooms:audio-open")(broken.event, id, "system"), "windows");
+});
+
+test("main-process audio selection is copied, single-use and opens without a second source picker", async () => {
+  const fixture = integration();
+  assert.equal(Object.isFrozen(fixture.audio.modes), true);
+  assert.deepEqual([...fixture.audio.modes], ["application", "system"]);
+  assert.deepEqual(Array.from(await fixture.audio.outputs("unknown")), []);
+  const source = { ...selected };
+  assert.equal(fixture.audio.select(fixture.web.mainFrame, id, "application", source), true);
+  source.serial = "other target";
+  source.identity = "other identity";
+  const open = fixture.handlers.get("rooms:audio-open");
+  assert.equal(await open(fixture.event, "a" + id.slice(1), "application"), "unavailable");
+  assert.equal(await open(fixture.event, id, "system"), "unavailable");
+  const pending = open(fixture.event, id, "application");
+  for (let attempt = 0; attempt < 10 && !fixture.children.length; attempt++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fixture.children.length, 1);
+  assert.equal(fixture.picks(), 0);
+  assert.equal(fixture.reads(), 1);
+  assert.deepEqual({ ...fixture.commands[0][1] }, { serial: selected.serial, identity: selected.identity });
+  fixture.children[0].stdout.emit("data", Buffer.alloc(4));
+  assert.equal(await pending, "ok");
+  fixture.handlers.get("rooms:audio-close")(fixture.event, id);
+  assert.equal(await open(fixture.event, id, "application"), "unavailable");
+  assert.equal(fixture.picks(), 0);
+});
+
+test("explicit no-audio choice and invalid or expired selections never use a leftover legacy approval", async () => {
+  for (const choice of ["none", "expired", "frame", "id", "mode", "source"]) {
+    const fixture = integration();
+    fixture.approve();
+    let accepted;
+    if (choice === "none") accepted = fixture.audio.select(fixture.web.mainFrame, id, "none");
+    if (choice === "expired") {
+      accepted = fixture.audio.select(fixture.web.mainFrame, id, "application", selected);
+      fixture.tick(30_000);
+    }
+    if (choice === "frame") accepted = fixture.audio.select({ ...fixture.web.mainFrame }, id, "application", selected);
+    if (choice === "id") accepted = fixture.audio.select(fixture.web.mainFrame, id + "\n", "application", selected);
+    if (choice === "mode") accepted = fixture.audio.select(fixture.web.mainFrame, id, "unknown", selected);
+    if (choice === "source") accepted = fixture.audio.select(fixture.web.mainFrame, id, "application", { ...selected, identity: "\u0000" });
+    assert.equal(accepted, choice === "none" || choice === "expired", choice);
+    assert.equal(await fixture.handlers.get("rooms:audio-open")(fixture.event, id, "application"), "unavailable", choice);
+    assert.equal(fixture.picks(), 0);
+    assert.equal(fixture.reads(), 0);
+    assert.equal(fixture.children.length, 0);
+  }
+  const unsupported = integration({ modes: ["system"] });
+  assert.deepEqual(Array.from(await unsupported.audio.outputs("application")), []);
+  assert.equal(unsupported.audio.select(unsupported.web.mainFrame, id, "application", selected), false);
+});
+
+test("preselected audio rechecks identity and permissions and cancellation invalidates pending grants", async () => {
+  const stale = integration();
+  stale.audio.select(stale.web.mainFrame, id, "application", selected);
+  stale.changeSource();
+  const open = stale.handlers.get("rooms:audio-open");
+  assert.equal(await open(stale.event, id, "application"), "unavailable");
+  assert.equal(await open(stale.event, id, "application"), "unavailable");
+  assert.equal(stale.children.length, 0);
+  assert.equal(stale.picks(), 0);
+  for (const cancellation of ["close", "clear", "navigation", "renderer", "destroyed", "revoked"]) {
+    const fixture = integration();
+    fixture.audio.select(fixture.web.mainFrame, id, "application", selected);
+    if (cancellation === "close") fixture.handlers.get("rooms:audio-close")(fixture.event, id);
+    if (cancellation === "clear") fixture.audio.clear();
+    if (cancellation === "navigation") fixture.web.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    if (cancellation === "renderer") fixture.web.emit("render-process-gone");
+    if (cancellation === "destroyed") fixture.web.emit("destroyed");
+    if (cancellation === "revoked") fixture.deny();
+    assert.equal(await fixture.handlers.get("rooms:audio-open")(fixture.event, id, "application"), "unavailable", cancellation);
+    assert.equal(fixture.picks(), 0);
+    assert.equal(fixture.children.length, 0);
+  }
+  const cancelled = integration();
+  cancelled.audio.select(cancelled.web.mainFrame, id, "application", selected);
+  const pending = cancelled.handlers.get("rooms:audio-open")(cancelled.event, id, "application");
+  cancelled.handlers.get("rooms:audio-close")(cancelled.event, id);
+  assert.equal(await pending, "cancelled");
+  assert.equal(cancelled.children.length, 0);
+});
+
+test("clearing pending permissions preserves the active recording until its normal close", async () => {
+  const fixture = integration();
+  const { pending, child } = await recording(fixture);
+  child.stdout.emit("data", Buffer.alloc(4));
+  assert.equal(await pending, "ok");
+  fixture.audio.clear();
+  assert.equal(child.killed, undefined);
+  child.stdout.emit("data", Buffer.alloc(4));
+  assert.equal(fixture.sent.length, 2);
+  fixture.handlers.get("rooms:audio-close")(fixture.event, id);
+  assert.equal(child.killed, true);
 });
 
 test("Windows PCM fragments preserve stereo sample frames and closing, navigation or sender revocation ends recording", async () => {

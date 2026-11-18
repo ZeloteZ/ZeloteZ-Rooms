@@ -7,6 +7,8 @@
     <title>ZeloteZ Rooms</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="share.css">
+    <script src="share.js" defer></script>
     <script src="index.js" defer></script>
   </head>
   <body>
@@ -14,6 +16,53 @@
       <div class="brand"><img src="icon.png" width="32" height="32" alt=""><span>ZeloteZ <span class="brand-detail">Rooms</span></span></div>
       <h1 id="heading"></h1>
       <p class="note" id="description"></p>
+      <section id="share-dialog" hidden>
+        <div class="share-layout">
+          <section class="share-visual" aria-labelledby="share-source-label">
+            <div class="share-source-heading">
+              <h2 id="share-source-label"></h2>
+              <button type="button" id="share-source-refresh"></button>
+            </div>
+            <div class="share-source-kinds" id="share-source-kinds" role="group">
+              <button type="button" id="share-screen" aria-pressed="true"></button>
+              <button type="button" id="share-window" aria-pressed="false"></button>
+            </div>
+            <select id="share-source" aria-labelledby="share-source-label"></select>
+            <p id="share-source-status" class="share-hint" role="status"></p>
+            <div id="share-preview-stage" class="share-preview-stage">
+              <img id="share-preview-image" alt="" hidden>
+              <p id="share-preview-placeholder"></p>
+              <div id="share-crop-area" class="share-crop-area" role="group" tabindex="0" aria-describedby="share-crop-help share-crop-status" hidden>
+                <div id="share-crop-rect" class="share-crop-rect">
+                  <span class="share-crop-handle" data-corner="nw"></span>
+                  <span class="share-crop-handle" data-corner="ne"></span>
+                  <span class="share-crop-handle" data-corner="sw"></span>
+                  <span class="share-crop-handle" data-corner="se"></span>
+                </div>
+              </div>
+            </div>
+            <label class="share-crop-toggle" for="share-crop"><input type="checkbox" id="share-crop"><span id="share-crop-label"></span></label>
+            <p id="share-crop-help" class="share-hint"></p>
+            <p id="share-crop-status" class="share-crop-status" role="status"></p>
+          </section>
+          <section class="share-options" aria-labelledby="share-options-heading">
+            <h2 id="share-options-heading"></h2>
+            <div class="share-quality">
+              <label for="share-height"><span id="share-quality-label"></span><select id="share-height"><option value="720">720p</option><option value="1080" selected>1080p</option><option value="1440">1440p</option></select></label>
+              <label for="share-fps"><span id="share-fps-label"></span><select id="share-fps"><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
+            </div>
+            <label class="share-field" for="share-audio-mode"><span id="share-audio-label"></span><select id="share-audio-mode"><option value="none"></option><option value="application"></option><option value="system"></option></select></label>
+            <div id="share-audio-controls" hidden>
+              <label class="share-field" for="share-audio-source"><span id="share-audio-source-label"></span><select id="share-audio-source"></select></label>
+              <button type="button" id="share-audio-refresh"></button>
+            </div>
+            <p id="share-audio-status" class="share-hint" role="status"></p>
+            <p id="share-privacy-note" class="share-hint share-privacy-note"></p>
+          </section>
+        </div>
+        <p id="share-dialog-error" class="error" role="alert" hidden></p>
+        <div class="actions share-actions"><button type="button" id="share-dialog-cancel"></button><button type="button" id="share-dialog-start" class="primary" disabled></button></div>
+      </section>
       <section id="preferences" hidden>
         <div class="settings-tabs" id="settings-tabs" role="group">
           <button type="button" id="general-settings-tab" aria-controls="general-preferences" aria-pressed="true"></button>

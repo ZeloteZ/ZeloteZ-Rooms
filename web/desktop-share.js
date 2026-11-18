@@ -22,6 +22,102 @@ function bound(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+export function desktopShareSettings(value) {
+  const region = value?.region;
+  if (![720, 1080, 1440].includes(value?.height) || ![30, 60].includes(value?.fps) ||
+      !["none", "application", "system"].includes(value?.audio) || (region !== null &&
+      (!region || !["x", "y", "width", "height", "aspect"].every(key => Number.isFinite(region[key])) ||
+      !Number.isSafeInteger(region.sourceWidth) || region.sourceWidth <= 0 ||
+      !Number.isSafeInteger(region.sourceHeight) || region.sourceHeight <= 0 ||
+      region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 || region.aspect <= 0 ||
+      region.x + region.width > 1 + 1e-6 || region.y + region.height > 1 + 1e-6))) {
+    throw new Error(t("The screen sharing settings are invalid. Choose your source again.",
+      "Die Freigabeeinstellungen sind ungültig. Wähle deine Quelle erneut."));
+  }
+  return { height: value.height, fps: value.fps, audio: value.audio, region: region && {
+    x: region.x, y: region.y, width: region.width, height: region.height, aspect: region.aspect,
+    sourceWidth: region.sourceWidth, sourceHeight: region.sourceHeight,
+  } };
+}
+
+export function normalizedDesktopRegion(region, sourceWidth, sourceHeight) {
+  if (!Number.isSafeInteger(sourceWidth) || sourceWidth <= 0 || !Number.isSafeInteger(sourceHeight) || sourceHeight <= 0 ||
+      !region || !Number.isFinite(region.aspect) || region.aspect <= 0 ||
+      region.sourceWidth !== sourceWidth || region.sourceHeight !== sourceHeight ||
+      Math.abs(sourceWidth / sourceHeight / region.aspect - 1) > .02) {
+    throw new Error(t("The capture source changed size. Select a region again.",
+      "Die Größe der Aufnahme hat sich geändert. Wähle den Ausschnitt erneut."));
+  }
+  desktopShareSettings({ height: 1080, fps: 30, audio: "none", region });
+  const x = Math.ceil(region.x * sourceWidth);
+  const y = Math.ceil(region.y * sourceHeight);
+  const right = Math.floor(Math.min(1, region.x + region.width) * sourceWidth);
+  const bottom = Math.floor(Math.min(1, region.y + region.height) * sourceHeight);
+  if (right - x < Math.min(32, sourceWidth) || bottom - y < Math.min(32, sourceHeight)) {
+    throw new Error(t("The selected region is too small. Choose a larger area.",
+      "Der ausgewählte Ausschnitt ist zu klein. Wähle einen größeren Bereich."));
+  }
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+async function sourceVideo(source, signal) {
+  signal.throwIfAborted();
+  const video = el("video", { muted: true, playsinline: true });
+  video.muted = true;
+  video.srcObject = new MediaStream(source.getVideoTracks());
+  try {
+    await new Promise((resolve, reject) => {
+      function finish(error) {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
+        video.removeEventListener("loadeddata", ready);
+        video.removeEventListener("error", failed);
+        if (error) reject(error);
+        else resolve();
+      }
+      const ready = () => {
+        if (video.videoWidth && video.videoHeight && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) finish();
+      };
+      const failed = () => finish(new Error(t("The screen preview is unavailable. Choose your source again.",
+        "Die Bildschirmvorschau ist nicht verfügbar. Wähle deine Quelle erneut.")));
+      const abort = () => finish(signal.reason);
+      const timer = setTimeout(failed, 8000);
+      signal.addEventListener("abort", abort, { once: true });
+      video.addEventListener("loadeddata", ready);
+      video.addEventListener("error", failed, { once: true });
+      video.play().then(ready, failed);
+    });
+    signal.throwIfAborted();
+    return video;
+  } catch (error) {
+    video.srcObject = null;
+    throw error;
+  }
+}
+
+export async function desktopSharePreview(source, signal) {
+  const video = await sourceVideo(source, signal);
+  try {
+    const aspect = video.videoWidth / video.videoHeight;
+    const scale = Math.min(1, 640 / video.videoWidth, 640 / video.videoHeight);
+    const canvas = el("canvas", { width: Math.max(1, Math.round(video.videoWidth * scale)),
+      height: Math.max(1, Math.round(video.videoHeight * scale)) });
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error(t("The screen preview is unavailable. Choose your source again.",
+      "Die Bildschirmvorschau ist nicht verfügbar. Wähle deine Quelle erneut."));
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    let image = canvas.toDataURL("image/jpeg", .7);
+    if (image.length > 250000) image = canvas.toDataURL("image/jpeg", .4);
+    if (!image.startsWith("data:image/jpeg;base64,") || image.length > 250000) {
+      throw new Error(t("The screen preview is unavailable. Choose your source again.",
+        "Die Bildschirmvorschau ist nicht verfügbar. Wähle deine Quelle erneut."));
+    }
+    return { image, aspect, width: video.videoWidth, height: video.videoHeight };
+  } finally {
+    video.srcObject = null;
+  }
+}
+
 function chooseRegion(video, track, signal) {
   return new Promise(resolve => {
     const caption = t("Drag over the preview to choose an area. Use the arrow keys to move it or Shift and the arrow keys to resize it.",
@@ -156,14 +252,25 @@ function chooseRegion(video, track, signal) {
   });
 }
 
-export async function cropDesktopShare(source, { height: maxHeight, fps }, signal, onEnded) {
+export async function cropDesktopShare(source, { height: maxHeight, fps, region: chosenRegion = true }, signal, onEnded) {
   const input = source.getVideoTracks()[0];
-  const video = el("video", { muted: true, playsinline: true });
-  video.muted = true;
-  video.srcObject = new MediaStream([input]);
-  const selection = await chooseRegion(video, input, signal);
+  const video = chosenRegion === true ? el("video", { muted: true, playsinline: true }) : await sourceVideo(source, signal);
+  if (chosenRegion === true) {
+    video.muted = true;
+    video.srcObject = new MediaStream([input]);
+  }
+  let selection;
+  try {
+    selection = chosenRegion === true ? await chooseRegion(video, input, signal) : {
+      region: normalizedDesktopRegion(chosenRegion, video.videoWidth, video.videoHeight),
+      sourceWidth: video.videoWidth, sourceHeight: video.videoHeight,
+    };
+    signal.throwIfAborted();
+  } catch (error) {
+    video.srcObject = null;
+    throw error;
+  }
   if (!selection) return null;
-  signal.throwIfAborted();
 
   const { region, sourceWidth, sourceHeight } = selection;
   if (video.videoWidth !== sourceWidth || video.videoHeight !== sourceHeight) {

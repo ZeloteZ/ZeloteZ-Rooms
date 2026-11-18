@@ -5,6 +5,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 if (process.isMainFrame) contextBridge.exposeInMainWorld("roomsLocal", {
   state: () => ipcRenderer.invoke("rooms:local-state"),
   submit: input => ipcRenderer.invoke("rooms:local-submit", input),
+  captureSources: () => ipcRenderer.invoke("rooms:local-share-sources"),
+  captureAudio: mode => ipcRenderer.invoke("rooms:local-share-audio", mode),
+  onCapturePreview: callback => { ipcRenderer.on("rooms:local-share-preview", (_event, payload) => callback(payload)); },
   preference: (name, value) => ipcRenderer.invoke("rooms:local-preference", name, value),
   check: address => ipcRenderer.invoke("rooms:local-check", address),
   connect: address => ipcRenderer.invoke("rooms:local-connect", address),

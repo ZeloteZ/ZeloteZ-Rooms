@@ -16,7 +16,7 @@ Rooms requires the Chromium sandbox on Linux. If you see a startup error about t
 
 To open YouTube videos from the browser extension, start the installed app once and connect to the same Rooms address in both the app and the extension. On Linux, start the executable AppImage from the location where you’ll keep it. On desktops that support XDG link handlers, it registers `zelotez-rooms:` if no default handler is set. If you move or update the AppImage, run it once to update the entry it manages. If your system uses another handler, choose Rooms in your system’s link settings if available. You can also choose **Continue in browser** from the extension. [Extension installation guide](../extension/README.md)
 
-Open a live channel, choose the resolution and frame rate, then click **Share screen** to select a screen or application window. For a region, enable the crop option and select the area in the local preview before starting.
+Open a live channel and click **Share screen** to choose the screen or window, quality and audio together. For a region, enable the crop option and select the area in the preview before starting. Linux systems using Wayland ask for permission in the system source picker.
 
 On Linux, set **Stream audio** to **Application audio** or **System audio** and choose the output when prompted. For application audio, start playback in the app so its output appears in the picker. System audio includes everything played through the selected device. The AppImage uses the PipeWire tools `pw-dump` and `pw-record` from your system for these modes.
 

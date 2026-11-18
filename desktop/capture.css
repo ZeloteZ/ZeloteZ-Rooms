@@ -11,9 +11,9 @@ headerbar {
   padding: 4px 12px;
 }
 
-.workspace { padding: 18px; }
+.workspace { padding: 14px; }
 .wordmark { font-size: 14px; font-weight: 755; letter-spacing: 0.2px; }
-.preview-title { font-size: 19px; font-weight: 740; }
+.preview-title { font-size: 17px; font-weight: 740; }
 
 .state {
   font-size: 12px;
@@ -49,7 +49,7 @@ headerbar {
   background: #191b25;
   border: 1px solid #2d3140;
   border-radius: 14px;
-  padding: 12px 14px;
+  padding: 12px;
 }
 
 .control-panel flowboxchild { padding: 0; }
@@ -69,6 +69,7 @@ headerbar {
 }
 
 .control-panel .suggested-action:hover:not(:disabled) { background: #546dec; }
+.control-panel .linked button { padding: 5px 7px; }
 .control-panel .linked button:checked { color: #e5ebff; background: #373d5d; }
 
 .metric {

@@ -7,9 +7,9 @@ import gi
 
 gi.require_foreign("cairo")
 for namespace, version in (("Gtk", "4.0"), ("Adw", "1"), ("Graphene", "1.0"),
-                           ("Xdp", "1.0"), ("XdpGtk4", "1.0")):
+                           ("Pango", "1.0"), ("Xdp", "1.0"), ("XdpGtk4", "1.0")):
     gi.require_version(namespace, version)
-from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Xdp, XdpGtk4
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango, Xdp, XdpGtk4
 
 from app_audio import list_audio_outputs, validate_audio_output
 from i18n import decimal, t
@@ -97,7 +97,7 @@ class CaptureWindow(Adw.ApplicationWindow):
     def __init__(self, app, room_session, *, parent=None, preview_frame=None, on_metrics=None):
         initialize_media(preview_frame is not None)
         title = t("Screen sharing")
-        super().__init__(application=app, title=title, default_width=800, default_height=740)
+        super().__init__(application=app, title=title, default_width=860, default_height=650)
         if parent is not None:
             self.set_transient_for(parent)
         self.style_provider = add_capture_style()
@@ -143,27 +143,32 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.timer = GLib.timeout_add(200, self.update_status)
 
     def build_preview(self):
-        pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, hexpand=True, vexpand=True)
+        pane = Gtk.Box(spacing=12, hexpand=True, vexpand=True)
         pane.add_css_class("workspace")
+        preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, hexpand=True, vexpand=True)
+        preview.add_css_class("preview-panel")
+        pane.append(preview)
         toolbar = Gtk.Box(spacing=12)
         self.preview_heading = label(t("Capture preview"), "preview-title")
         self.preview_heading.set_hexpand(True)
         toolbar.append(self.preview_heading)
         self.source_summary = label("", "muted")
         toolbar.append(self.source_summary)
-        pane.append(toolbar)
+        preview.append(toolbar)
 
         stack = Gtk.Stack(hexpand=True, vexpand=True, overflow=Gtk.Overflow.HIDDEN, vhomogeneous=False)
         stack.add_css_class("viewfinder")
+        stack.set_size_request(-1, 260)
         stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         stack.set_transition_duration(160)
-        pane.append(stack)
+        preview.append(stack)
         self.preview_stack = stack
 
         empty = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=14, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER
         )
         icon = Gtk.Image.new_from_icon_name("video-display-symbolic")
+        icon.set_halign(Gtk.Align.CENTER)
         icon.set_pixel_size(32)
         icon.add_css_class("display-icon")
         empty.append(icon)
@@ -201,22 +206,43 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.message = label("", "muted")
         self.message.set_visible(False)
         self.message.add_css_class("stream-status")
-        pane.append(self.message)
+        preview.append(self.message)
         self.controls = Gtk.Stack(vhomogeneous=False, hhomogeneous=False)
+        self.controls.set_size_request(340, -1)
+        self.controls.set_hexpand(False)
+        self.controls.set_valign(Gtk.Align.START)
         self.controls.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.controls.set_transition_duration(150)
         self.controls.add_named(self.build_setup_controls(), "setup")
         self.controls.add_named(self.build_live_controls(), "live")
-        pane.append(self.controls)
-        return pane
+        control_column = Adw.Clamp(child=self.controls, maximum_size=340, tightening_threshold=340)
+        control_column.set_valign(Gtk.Align.START)
+        pane.append(control_column)
+
+        compact = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 740sp"))
+        compact.add_setter(pane, "orientation", Gtk.Orientation.VERTICAL)
+        compact.add_setter(stack, "height-request", 210)
+        compact.add_setter(stack, "vexpand", False)
+        compact.add_setter(preview, "vexpand", False)
+        compact.add_setter(self.controls, "width-request", -1)
+        compact.add_setter(self.controls, "hexpand", True)
+        compact.add_setter(control_column, "maximum-size", 740)
+        compact.add_setter(control_column, "hexpand", True)
+        compact.add_setter(self.setup_actions, "orientation", Gtk.Orientation.VERTICAL)
+        compact.add_setter(self.setup_actions, "halign", Gtk.Align.FILL)
+        compact.add_setter(self.live_actions, "orientation", Gtk.Orientation.VERTICAL)
+        compact.add_setter(self.live_spacer, "visible", False)
+        self.add_breakpoint(compact)
+
+        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(pane)
+        return scroll
 
     def build_setup_controls(self):
         controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         controls.add_css_class("control-panel")
-        options = Gtk.FlowBox(
-            selection_mode=Gtk.SelectionMode.NONE, column_spacing=14, row_spacing=12,
-            min_children_per_line=1, max_children_per_line=2,
-        )
+        options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         source = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
         source.append(label(t("Capture source"), "section-title"))
         modes = Gtk.Box(homogeneous=True)
@@ -247,6 +273,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         controls.append(self.build_audio_controls())
 
         actions = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+        self.setup_actions = actions
         self.start = Gtk.Button(label=t("Start stream"))
         self.start.add_css_class("suggested-action")
         self.start.add_css_class("primary-action")
@@ -260,7 +287,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         return controls
 
     def build_audio_controls(self):
-        self.audio_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
+        self.audio_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.audio_panel.add_css_class("audio-panel")
         self.audio_mode = Gtk.DropDown.new_from_strings([t("No audio"), t("Application audio"), t("System audio")])
         self.audio_mode.set_selected(0)
@@ -270,6 +297,19 @@ class CaptureWindow(Adw.ApplicationWindow):
         row = Gtk.Box(spacing=8)
         self.audio_picker = Gtk.DropDown.new_from_strings([t("Choose an audio output")])
         self.audio_picker.set_hexpand(True)
+        source_factory = Gtk.SignalListItemFactory()
+
+        def setup_source(_factory, item):
+            item.set_child(Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, max_width_chars=26))
+
+        def bind_source(_factory, item):
+            title = item.get_item().get_string()
+            item.get_child().set_label(title)
+            item.get_child().set_tooltip_text(title)
+
+        source_factory.connect("setup", setup_source)
+        source_factory.connect("bind", bind_source)
+        self.audio_picker.set_factory(source_factory)
         self.audio_picker.update_property([Gtk.AccessibleProperty.LABEL], [t("Audio output to share")])
         self.audio_picker.connect("notify::selected", self.update_start)
         row.append(self.audio_picker)
@@ -314,7 +354,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.audio_details.set_visible(requested)
         if requested:
             self.refresh_audio()
-            self.update_start()
+        self.update_start()
 
     def refresh_audio(self, _button=None):
         if not self.has_audio_request() or self.audio_scan is not None:
@@ -355,10 +395,12 @@ class CaptureWindow(Adw.ApplicationWindow):
         controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         controls.add_css_class("control-panel")
         actions = Gtk.Box(spacing=8)
+        self.live_actions = actions
         self.hide_preview = Gtk.ToggleButton(label=t("Hide preview"))
         self.hide_preview.connect("toggled", self.toggle_preview)
         actions.append(self.hide_preview)
         spacer = Gtk.Box(hexpand=True)
+        self.live_spacer = spacer
         actions.append(spacer)
         finish = Gtk.Button(label=t("End stream"))
         finish.add_css_class("destructive-action")
@@ -432,7 +474,6 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.app_source.set_sensitive(can_pick)
         for widget in (self.resolution, self.rate):
             widget.set_sensitive(not busy)
-        self.audio_panel.set_visible(state in ("ready", "connecting"))
         self.audio_panel.set_sensitive(not busy)
         self.controls.set_visible_child_name("live" if state == "live" else "setup")
         self.preview_heading.set_label(t("Live preview") if state == "live" else t("Capture preview"))
@@ -488,7 +529,7 @@ class CaptureWindow(Adw.ApplicationWindow):
         if not button.get_active() or not hasattr(self, "start"):
             return
         if self.capture_type is not None and self.capture_type != self.selected_capture_type():
-            self.cleanup()
+            self.cleanup(preserve_audio=True)
             self.set_state("idle")
             self.notice()
             return
@@ -499,7 +540,7 @@ class CaptureWindow(Adw.ApplicationWindow):
             self.notice(t("Drag a rectangle in the preview.") if self.area.get_active() else "")
 
     def choose_monitor(self, _button):
-        self.cleanup()
+        self.cleanup(preserve_audio=True)
         self.capture_type = self.selected_capture_type()
         self.notice()
         self.set_state("picking")
@@ -834,10 +875,11 @@ class CaptureWindow(Adw.ApplicationWindow):
         self.set_state("idle")
         self.notice(t("Stream ended.") if live else "")
 
-    def cleanup(self):
+    def cleanup(self, *, preserve_audio=False):
         self.finish_room_stream()
         self.cropped_preview.set_frame()
-        self.audio_mode.set_selected(0)
+        if not preserve_audio:
+            self.audio_mode.set_selected(0)
         self.audio_output = None
         if self.request is not None:
             request, self.request = self.request, None
