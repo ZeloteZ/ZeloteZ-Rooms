@@ -4,8 +4,25 @@
 .vault-editor-dialog #dialog-heading { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 1.1rem; min-inline-size: 0; }
 .vault-editor-dialog #dialog-content { min-block-size: 0; min-inline-size: 0; overflow: hidden; }
 .vault-editor { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; block-size: 100%; min-block-size: 0; gap: 12px; }
-.vault-editor-intro { display: flex; align-items: center; gap: 12px; min-inline-size: 0; }
+.vault-editor-intro { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-inline-size: 0; }
 .vault-editor-intro p { margin: 0; font-size: .77rem; color: var(--muted); line-height: 1.45; }
+.vault-editor-mode { margin-inline-start: auto; flex: none; font-size: .75rem; min-block-size: 31px; padding: 5px 9px; }
+.vault-editor-viewing { grid-template-rows: auto minmax(0, 1fr) auto; }
+.vault-editor-viewing .vault-editor-intro > p { display: none; }
+.vault-editor-viewing .vault-editor-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.vault-text-viewer { display: block; inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; box-sizing: border-box; margin: 0; padding: 18px; overflow: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); background: #101219; font: .85rem/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; user-select: text; }
+.vault-pdf-viewer { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0; padding: 10px; box-sizing: border-box; }
+.vault-viewer-navigation { display: flex; align-items: center; gap: 7px; min-inline-size: 0; }
+.vault-viewer-navigation > select { flex: 1; min-inline-size: 0; padding: 6px; font-size: .75rem; }
+.vault-viewer-navigation > .button { flex: none; padding: 3px 10px; min-block-size: 30px; }
+.vault-pdf-viewer-page { display: grid; place-items: center; min-block-size: 0; min-inline-size: 0; overflow: hidden; }
+.vault-pdf-viewer > .status { margin: 0; font-size: .72rem; }
+.vault-office-readonly:not(:has(.vault-office-navigation)) { grid-template-rows: minmax(0, 1fr); }
+.vault-office .vault-office-readonly-body { display: block; min-inline-size: 0; min-block-size: 0; overflow: auto; overscroll-behavior: contain; padding: 14px; color: var(--text); line-height: 1.65; user-select: text; }
+.vault-office-readonly-body p { margin: 0 0 1em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vault-office-readonly-body table { border-collapse: collapse; table-layout: fixed; inline-size: 100%; margin-block-end: 14px; }
+.vault-office-readonly-body .vault-office-readonly-table :is(td, th) { padding: 7px 9px; border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; text-align: start; }
+.vault-office-readonly-body th { background: #1a2030; font-weight: 550; }
 .vault-editor-kind { border: 1px solid var(--line-strong); background: var(--raised); color: var(--accent); border-radius: 7px; padding: 4px 8px; font-size: .75rem; font-weight: 650; flex: none; }
 .vault-editor-workspace { display: grid; grid-template-columns: minmax(0, 1fr) clamp(210px, 25%, 280px); gap: 14px; min-block-size: 0; min-inline-size: 0; overflow: hidden; }
 .vault-editor-stage { display: grid; place-items: center; min-block-size: 0; min-inline-size: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #090a0f; position: relative; }
@@ -139,8 +156,7 @@
   .vault-player-speed { inline-size: 56px; min-inline-size: 50px; padding: 5px 3px; font-size: .68rem; }
 }
 @media (max-height: 520px) and (min-width: 681px) {
-  .vault-editor-intro { display: none; }
-  .vault-editor { grid-template-rows: minmax(0, 1fr) auto auto; }
+  .vault-editor-intro > p { display: none; }
   .vault-editor-player { grid-template-rows: minmax(0, 1fr) auto; }
 }
 

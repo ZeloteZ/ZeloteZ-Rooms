@@ -17,7 +17,7 @@ Deaktivieren sperrt Uploads, Downloads und beide Freigabearten. Fertige Dateien 
 1. Wähle auf der Rooms-Übersicht rechts unter **Gerade live** den Zugang **ZeloteZ Vault**. Er erscheint nur bei aktivierter Funktion.
 2. Die erste Spalte **Dateien** enthält deine eigenen Dateien und Ordner sowie den Ordner **Mit mir geteilt**. Öffne **Mit mir geteilt → Benutzername des Absenders**, um die lesenden Freigaben dieses Mitglieds zu sehen.
 3. Öffne einen Ordner, um seinen Inhalt in der nächsten Spalte zu sehen. Die Hauptspalte und höchstens zwei Unterordnerspalten bleiben gleichzeitig sichtbar. In schmalen Fenstern erscheinen automatisch weniger Ordnerspalten, ohne horizontale Scrollleiste. Tiefere Ordner verwenden die rechte Spalte erneut. Der Pfad im Banner enthält weiterhin alle Ebenen; wähle einen übergeordneten Ordner zum Zurückgehen oder öffne über **…** die ausgeblendeten Vorfahren.
-4. Wähle eine Dateizeile, um Vorschau, Player oder Bearbeitungswerkzeuge neben den Ordnern zu öffnen. Die Vorschau bleibt geöffnet, während du andere Ordner durchsuchst. Mit **×** in der Vorschau schließt du die Datei.
+4. Wähle eine Dateizeile, um Vorschau, Player oder Archivbrowser neben den Ordnern zu öffnen. Dateien öffnen sich zuerst zur Ansicht; die Bearbeitung beginnt erst über **Zum Editor**. Die Vorschau bleibt geöffnet, während du andere Ordner durchsuchst. Mit **×** in der Vorschau schließt du die Datei.
 5. Ein Rechtsklick auf eine Zeile oder ihr **⋯**-Button öffnet Aktionen wie **Öffnen**, **Herunterladen**, Umbenennen, Verschieben, Teilen und Löschen. Per Tastatur erreichst du das Menü über die Kontextmenütaste oder **Umschalt+F10**. Die verfügbaren Aktionen hängen vom Eintrag ab; empfangene Freigaben können das Original des Absenders nicht verändern.
 6. Erstelle Ordner, wähle **Dateien hochladen** oder ziehe lokale Dateien in einen deiner eigenen Ordner. Mehrere Dateien werden nacheinander hochgeladen. Eigene Vault-Dateien und -Ordner verschiebst du auf einen anderen eigenen Ordner oder den Hauptordner im Pfad; alternativ wählst du **Verschieben** im Dateimenü. Ein Ordner lässt sich nicht in sich selbst oder einen seiner Unterordner verschieben. **Mit mir geteilt** und die darin enthaltenen Absenderordner sind schreibgeschützt. Freigaben gelten für Dateien; Ordner strukturieren deinen eigenen Speicher.
 7. Suche und sortiere im aktuellen Ordner. Lange Listen scrollen innerhalb ihrer Spalte; auch die Vorschau hat einen eigenen Scrollbereich. Banner und gesamte Seite bleiben an ihrem Platz. Ein Wechsel zwischen vorherigen und nächsten Seiten ist nicht nötig.
@@ -28,7 +28,9 @@ Laufende Übertragungen erscheinen als kompakte Benachrichtigungen mit Fortschri
 
 ## Lokal öffnen, abspielen und bearbeiten
 
-Wähle eine Dateizeile oder **Öffnen** im Dateimenü. Player oder Bearbeitungswerkzeuge erscheinen im getrennten Vorschaubereich. Die Datei wird auf deinem Gerät geprüft und entschlüsselt. Vorschau und Bearbeitung senden keinen Klartext an den Server oder einen externen Bearbeitungsdienst. HTML, SVG und Quellcode bleiben reiner Text und werden im Editor niemals ausgeführt. Öffentliche Freigabelinks bieten weiterhin Downloads; die Bearbeitungswerkzeuge gehören zum Vault angemeldeter Nutzer.
+Wähle eine Dateizeile oder **Öffnen** im Dateimenü. Die Datei öffnet sich zuerst in einer schreibgeschützten Ansicht im getrennten Vorschaubereich. Bei Bildern, PDFs, Text und unterstützten Office-Dateien startest du die Bearbeitung über **Zum Editor**; mit **Zur Vorschau** kehrst du zur schreibgeschützten Ansicht zurück. Audio und Video nutzen den Player, Archive den Archivbrowser.
+
+Die Datei wird auf deinem Gerät geprüft und entschlüsselt. Vorschau und Bearbeitung senden keinen Klartext an den Server oder einen externen Bearbeitungsdienst. HTML, SVG und Quellcode bleiben reiner Text und werden weder in der Vorschau noch im Editor ausgeführt. Öffentliche Freigabelinks bieten weiterhin Downloads; die Anzeige- und Bearbeitungswerkzeuge gehören zum Vault angemeldeter Nutzer.
 
 | Dateityp | Werkzeuge | Lokale Grenzen |
 | --- | --- | --- |
@@ -61,7 +63,7 @@ PDF-Vorschauen sind passiv. Gespeicherte PDF-Kopien entfernen interaktive Links,
 
 Bei Bildern, PDFs, Text und unterstützten Office-Dateien gibst du einen Kopienamen ein und wählst **Verschlüsselte Kopie speichern**. Jeder Speichervorgang lädt eine neue, frisch verschlüsselte Datei hoch; Original und bestehende Freigaben bleiben unverändert. Die Kopie einer eigenen Datei landet im selben Ordner. Die bearbeitete Kopie einer Mitgliederfreigabe landet im Hauptordner **Dateien** und gehört dir; sie ändert die Datei des Absenders nicht. Für die zusätzliche Datei muss ausreichend freier Vault-Speicher vorhanden sein. Teile die neue Kopie bei Bedarf gesondert.
 
-Ungespeicherte Änderungen existieren nur im geöffneten Editor. Beim Dateiwechsel, Schließen des Editors oder Verlassen des Vault wirst du gefragt, ob du sie verwerfen möchtest. Abmelden oder das Ende deiner Sitzung bricht die Arbeit sofort ab und verwirft lokale Änderungen. Eine automatische Entwurfswiederherstellung gibt es nicht.
+Ungespeicherte Änderungen existieren nur im geöffneten Editor. Beim Zurückkehren zur Vorschau, Dateiwechsel, Schließen des Editors oder Verlassen des Vault wirst du gefragt, ob du sie verwerfen möchtest. Abmelden oder das Ende deiner Sitzung bricht die Arbeit sofort ab und verwirft lokale Änderungen. Eine automatische Entwurfswiederherstellung gibt es nicht.
 
 Andere Formate kannst du weiterhin speichern, teilen und für eine passende lokale Anwendung herunterladen. Office-Formate außerhalb von DOCX und XLSX, etwa PPTX, ODT, ODS oder ältere DOC- und XLS-Dateien, haben keine eingebauten Bearbeitungswerkzeuge.
 

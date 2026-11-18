@@ -9,9 +9,14 @@ export function officeColumnName(index) {
   return name;
 }
 
-export async function officeEditor(blob, entry, { signal, stage, tools, dirtyChanged, disposers }) {
+export async function officeEditor(blob, entry, { signal, stage, tools, dirtyChanged, disposers, readOnly = false }) {
   const model = await parseVaultOffice(blob, vaultOfficeFormat(entry), { signal });
   abortEditor(signal);
+  if (readOnly === true) {
+    officeViewer(model, { signal, stage, tools, disposers });
+    return null;
+  }
+  tools.hidden = false;
   if (model.format === "docx" && !model.blocks.length) model.blocks.push({ type: "paragraph", text: "" });
   const host = el("section", { class: "vault-office", "aria-label": t("Office document", "Office-Dokument") });
   const body = el("div", { class: "vault-office-body" });
@@ -95,6 +100,64 @@ export async function officeEditor(blob, entry, { signal, stage, tools, dirtyCha
   });
   render();
   return options => exportVaultOffice(model, options);
+}
+
+function officeViewer(model, { signal, stage, tools, disposers }) {
+  const host = el("section", { class: "vault-office vault-office-readonly", "aria-label": t("Office document", "Office-Dokument") });
+  const body = el("div", { class: "vault-office-body vault-office-readonly-body" });
+  let alive = true, sheetIndex = 0;
+  function table(rows, worksheet = false) {
+    const grid = el("table", { class: "vault-office-table vault-office-readonly-table" });
+    const columns = Math.max(1, ...rows.map(row => row.length));
+    if (worksheet) grid.append(el("thead", {}, el("tr", {}, el("th", { scope: "col" }, ""),
+      Array.from({ length: columns }, (_, index) => el("th", { scope: "col" }, officeColumnName(index))))));
+    grid.append(el("tbody", {}, rows.map((row, index) => el("tr", {},
+      worksheet && el("th", { scope: "row" }, String(index + 1)),
+      row.map(value => el("td", {}, value)),
+      row.length < columns && el("td", { colspan: columns - row.length }, "")))));
+    return grid;
+  }
+  if (model.format === "docx") {
+    body.append(...model.blocks.map(block => block.type === "paragraph"
+      ? el("p", { class: "vault-office-readonly-paragraph" }, block.text) : table(block.rows)));
+    if (!model.blocks.length) body.append(el("p", { class: "subtle" }, t("This document is empty.", "Dieses Dokument ist leer.")));
+  } else {
+    const picker = select(model.sheets.map((sheet, index) => [String(index), sheet.name]), "0");
+    picker.setAttribute("aria-label", t("Worksheet", "Tabellenblatt"));
+    const previous = button("‹", () => changeSheet(sheetIndex - 1), { class: "ghost", "aria-label": t("Previous section", "Vorheriger Abschnitt") });
+    const next = button("›", () => changeSheet(sheetIndex + 1), { class: "ghost", "aria-label": t("Next section", "Nächster Abschnitt") });
+    function changeSheet(index) {
+      if (!alive || signal?.aborted || !Number.isInteger(index) || index < 0 || index >= model.sheets.length) return;
+      sheetIndex = index; renderSheet();
+    }
+    function renderSheet() {
+      const sheet = model.sheets[sheetIndex];
+      body.replaceChildren(sheet?.rows.length ? table(sheet.rows, true)
+        : el("p", { class: "subtle" }, t("This worksheet is empty.", "Dieses Tabellenblatt ist leer.")));
+      picker.value = String(sheetIndex);
+      previous.disabled = sheetIndex === 0; next.disabled = sheetIndex >= model.sheets.length - 1;
+    }
+    picker.addEventListener("change", () => changeSheet(Number(picker.value)));
+    host.append(el("div", { class: "vault-office-navigation" }, previous, picker, next));
+    renderSheet();
+  }
+  function cleanup() {
+    if (!alive) return;
+    alive = false; signal?.removeEventListener("abort", cleanup);
+    for (const item of host.querySelectorAll("p,td,th,option")) item.textContent = "";
+    host.replaceChildren();
+    for (const section of model.blocks ?? model.sheets ?? []) {
+      if (section.type === "paragraph") section.text = "";
+      if (typeof section.name === "string") section.name = "";
+      for (const row of section.rows ?? []) row.fill("");
+      if (section.rows) section.rows.length = 0;
+    }
+    if (model.blocks) model.blocks.length = 0;
+    if (model.sheets) model.sheets.length = 0;
+  }
+  tools.hidden = true; host.append(body); stage.append(host);
+  disposers.push(cleanup);
+  signal?.addEventListener("abort", cleanup, { once: true });
 }
 
 function officeGrid(sheet, host, { dirtyChanged, typed, focus, error, signal }) {

@@ -61,9 +61,11 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
   const urls = new Set();
   const disposers = [];
   let dirty = false, saving = false, builder = null, alive = true, child = null, closeCheck = null;
+  let mode = "viewer", modeBusy = true, modeScope = null, sourceBlob = null, modeGeneration = 0;
   const kind = vaultFileKind(entry);
   const playbackOnly = kind === "video" || kind === "audio";
   const archiveOnly = kind === "archive";
+  const editable = ["image", "text", "pdf", "office"].includes(kind);
   const filename = el("input", { type: "text", value: playbackOnly ? entry.name : editedFileName(entry.name, kind === "image" ? "png" : undefined),
     maxlength: 255, autocomplete: "off", spellcheck: false, disabled: true, "aria-label": t("Copy name", "Name der Kopie") });
   const feedback = status(t("Decrypting on this device…", "Wird auf diesem Gerät entschlüsselt …"));
@@ -71,18 +73,16 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
   const stage = el("div", { class: "vault-editor-stage", "aria-busy": true });
   const tools = el("aside", { class: "vault-editor-tools", hidden: playbackOnly, "aria-label": t("Editing tools", "Bearbeitungswerkzeuge") });
   const save = button(t("Save encrypted copy", "Verschlüsselte Kopie speichern"), saveCopy, { class: "primary", disabled: true });
+  const modeButton = button(t("Open editor", "Zum Editor"), changeMode, { class: "vault-editor-mode", disabled: true, hidden: !editable });
+  const introCopy = el("p");
+  const footer = el("footer", { class: "vault-editor-footer", hidden: true }, field(t("Copy name", "Name der Kopie"), filename), save);
   const shell = el("section", { class: "vault-editor" + (playbackOnly ? " vault-editor-player" : archiveOnly ? " vault-editor-browser" : ""), "data-editor-kind": kind },
     !playbackOnly && el("div", { class: "vault-editor-intro" },
       el("span", { class: "vault-editor-kind" }, ({ image: t("Image", "Bild"), video: t("Video", "Video"), audio: t("Audio", "Audio"),
         pdf: "PDF", text: t("Text", "Text"), office: "Office", archive: t("Archive", "Archiv"), other: t("File", "Datei") })[kind]),
-      el("p", {}, archiveOnly ? t("Open files locally or save an extracted file to Vault. The original archive stays unchanged.",
-        "Öffne Dateien lokal oder speichere entpackte Dateien in Vault. Das Originalarchiv bleibt unverändert.")
-        : kind === "office" ? t("Edit text and tables locally. Copies omit complex layout and images; formulas stay text.",
-          "Bearbeite Text und Tabellen lokal. Kopien übernehmen kein komplexes Layout und keine Bilder; Formeln bleiben Text.")
-          : t("Edit locally. Save an encrypted copy; the original and its shares stay unchanged.",
-            "Bearbeite lokal und speichere eine verschlüsselte Kopie. Original und Freigaben bleiben erhalten."))),
+      introCopy, modeButton),
     el("div", { class: "vault-editor-workspace" }, stage, tools),
-    !playbackOnly && !archiveOnly && el("footer", { class: "vault-editor-footer" }, field(t("Copy name", "Name der Kopie"), filename), save),
+    !playbackOnly && !archiveOnly && footer,
     el("div", { class: "vault-editor-feedback", "aria-live": "polite" }, progress, feedback));
   const dismiss = button(back ? t("Back to archive", "Zurück zum Archiv") : "×", () => { void requestClose(); }, {
     class: "vault-editor-dismiss", title: back ? t("Back to archive", "Zurück zum Archiv") : t("Close preview", "Vorschau schließen"),
@@ -93,7 +93,7 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
   const node = inline ? el("section", { class: "vault-editor-inline", "aria-label": t("File preview", "Dateivorschau") }, heading, shell) : shell;
   const mounted = { node, ready: null, requestClose, close: requestClose, dispose: cleanup,
     get dirty() { return alive && (dirty || !!child?.dirty); }, get saving() { return alive && (saving || !!child?.saving); },
-    get closed() { return !alive; } };
+    get closed() { return !alive; }, get mode() { return mode; } };
   const update = value => {
     if (!alive) return;
     const done = Number(value?.done ?? value?.loaded ?? 0), total = Math.max(1, Number(value?.total ?? 1));
@@ -121,7 +121,7 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
   }
   function cleanup() {
     if (!alive) return;
-    alive = false; scope.abort();
+    alive = false; modeGeneration++; scope.abort(); modeScope?.abort(); sourceBlob = null;
     child?.dispose(); child = null;
     releasePreview();
     signal?.removeEventListener("abort", cleanup);
@@ -187,9 +187,36 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
     return next.ready;
   }
   mounted.canClose = canClose;
+  async function changeMode() {
+    if (!alive || !editable || modeBusy || saving) return;
+    modeBusy = true; modeButton.disabled = true;
+    if (mode === "editor" && !await canClose()) {
+      if (alive) { modeBusy = false; modeButton.disabled = false; }
+      return;
+    }
+    if (!alive || lifetime.aborted) return;
+    mode = mode === "viewer" ? "editor" : "viewer"; dirty = false;
+    if (mode === "viewer") filename.value = editedFileName(entry.name, kind === "image" ? "png" : undefined);
+    await initialize();
+  }
+  function paintMode() {
+    shell.setAttribute("data-mode", mode);
+    shell.classList[mode === "viewer" && editable ? "add" : "remove"]("vault-editor-viewing");
+    modeButton.textContent = mode === "viewer" ? t("Open editor", "Zum Editor") : t("Back to viewer", "Zur Vorschau");
+    modeButton.hidden = !editable;
+    tools.hidden = playbackOnly || kind === "other" || editable && mode !== "editor";
+    footer.hidden = mode !== "editor" || !editable;
+    introCopy.textContent = archiveOnly ? t("Open files locally or save an extracted file to Vault. The original archive stays unchanged.",
+      "Öffne Dateien lokal oder speichere entpackte Dateien in Vault. Das Originalarchiv bleibt unverändert.")
+      : mode === "viewer" ? t("View locally. Your original file stays unchanged.", "Lokal ansehen. Deine Originaldatei bleibt unverändert.")
+        : kind === "office" ? t("Edit text and tables locally. Copies omit complex layout and images; formulas stay text.",
+          "Bearbeite Text und Tabellen lokal. Kopien übernehmen kein komplexes Layout und keine Bilder; Formeln bleiben Text.")
+          : t("Edit locally. Save an encrypted copy; the original and its shares stay unchanged.",
+            "Bearbeite lokal und speichere eine verschlüsselte Kopie. Original und Freigaben bleiben erhalten.");
+  }
   function objectUrl(blob) { const url = URL.createObjectURL(blob); urls.add(url); return url; }
   async function saveCopy() {
-    if (!builder || saving || !alive) return;
+    if (mode !== "editor" || !builder || saving || !alive) return;
     const name = filename.value.trim();
     if (!name || new TextEncoder().encode(name).byteLength > 255 || /[\p{Cc}\u202a-\u202e\u2066-\u2069/\\]/u.test(name) || [".", ".."].includes(name)) {
       tell(feedback, t("Use a name of up to 255 bytes without slashes or control characters.", "Verwende einen Namen mit höchstens 255 Bytes ohne Schrägstriche oder Steuerzeichen."), "error");
@@ -227,8 +254,14 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
   return mounted;
 
   async function initialize() {
+    const generation = ++modeGeneration;
+    modeBusy = true; modeButton.disabled = true; modeScope?.abort(); releasePreview();
+    modeScope = new AbortController();
+    const contentSignal = AbortSignal.any([lifetime, modeScope.signal]);
+    stage.replaceChildren(); tools.replaceChildren(); builder = null; filename.disabled = true;
+    stage.setAttribute("aria-busy", "true"); progress.hidden = false; paintMode();
     try {
-      abortEditor(lifetime);
+      abortEditor(contentSignal);
       if (kind === "other") {
         stage.append(el("div", { class: "vault-editor-unavailable" }, el("strong", {}, t("No local editor for this file type", "Kein lokaler Editor für diesen Dateityp")),
           el("p", {}, t("Download this file to open it in a suitable app.", "Lade diese Datei herunter, um sie in einer passenden App zu öffnen.")), downloadControl()));
@@ -238,10 +271,15 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
       const maximum = kind === "text" ? VAULT_EDITOR_LIMITS.textBytes : kind === "pdf" ? VAULT_EDITOR_LIMITS.pdfBytes
         : kind === "office" ? VAULT_OFFICE_LIMITS.inputBytes : archiveOnly ? VAULT_ARCHIVE_LIMITS.inputBytes : VAULT_EDITOR_LIMITS.inputBytes;
       const mediaInput = kind === "image" || playbackOnly;
-      const blob = await (mediaInput && client.readMediaBlob ? client.readMediaBlob : client.readBlob)(entry,
-        { signal: lifetime, maxBytes: mediaInput ? VAULT_EDITOR_LIMITS.mediaBytes : maximum, onProgress: update });
-      abortEditor(lifetime);
-      const environment = { signal: lifetime, stage, tools, filename, objectUrl, disposers, dirtyChanged, update, onShare: entry.receivedShareId ? undefined : onShare };
+      if (!sourceBlob) {
+        const loaded = await (mediaInput && client.readMediaBlob ? client.readMediaBlob : client.readBlob)(entry,
+          { signal: contentSignal, maxBytes: mediaInput ? VAULT_EDITOR_LIMITS.mediaBytes : maximum, onProgress: update });
+        abortEditor(contentSignal); sourceBlob = loaded;
+      }
+      const blob = sourceBlob;
+      abortEditor(contentSignal);
+      const environment = { signal: contentSignal, stage, tools, filename, objectUrl, disposers, dirtyChanged, update,
+        readOnly: mode === "viewer", onShare: entry.receivedShareId ? undefined : onShare };
       if (kind === "image") builder = await imageEditor(blob, environment);
       else if (kind === "text") builder = await textEditor(blob, entry, environment);
       else if (kind === "pdf") builder = await pdfEditor(blob, environment);
@@ -276,19 +314,22 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
         },
       });
       else { await mediaPlayer(blob, kind, environment); builder = null; }
-      abortEditor(lifetime);
+      abortEditor(contentSignal);
       save.disabled = !builder; progress.hidden = true;
       tell(feedback, builder ? t("Ready · changes stay on this device until you save.", "Bereit · Änderungen bleiben bis zum Speichern auf diesem Gerät.") : "");
     } catch (error) {
-      if (alive && error?.name !== "AbortError") {
+      if (alive && generation === modeGeneration && error?.name !== "AbortError") {
         releasePreview();
         tell(feedback, error?.code?.startsWith("VAULT_ARCHIVE_") ? archiveError(error) : error.message, "error"); progress.hidden = true;
         stage.replaceChildren(el("div", { class: "vault-editor-unavailable" }, el("p", {}, t("Download this file to open it in a suitable app.", "Lade diese Datei herunter, um sie in einer passenden App zu öffnen.")), downloadControl()));
         tools.hidden = true; const footer = shell.querySelector(".vault-editor-footer"); if (footer) footer.hidden = true;
+        modeButton.hidden = mode === "viewer";
       }
     } finally {
-      if (alive) { stage.removeAttribute("aria-busy"); filename.disabled = !builder; }
-      else {
+      if (alive && generation === modeGeneration) {
+        modeBusy = false; modeButton.disabled = !editable;
+        stage.removeAttribute("aria-busy"); filename.disabled = !builder;
+      } else if (!alive) {
         // A browser decoder may finish after the caller has disposed the pane.
         releasePreview(); stage.replaceChildren(); tools.replaceChildren(); builder = null;
       }
@@ -296,7 +337,7 @@ function createVaultEditorSession({ entry, client, signal, onSaved, onShare, onC
   }
 }
 
-async function textEditor(blob, entry, { signal, stage, tools, disposers, dirtyChanged }) {
+async function textEditor(blob, entry, { signal, stage, tools, disposers, dirtyChanged, readOnly = false }) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let decoded;
   try {
@@ -305,6 +346,11 @@ async function textEditor(blob, entry, { signal, stage, tools, disposers, dirtyC
   } catch (error) { if (error?.name === "AbortError") throw error; throw new Error(error.code === "VAULT_TEXT_BINARY" ? t("This file contains binary data and cannot be edited as text.", "Diese Datei enthält Binärdaten und kann nicht als Text bearbeitet werden.")
     : t("This file is not supported UTF-8 or UTF-16 text.", "Diese Datei enthält keinen unterstützten UTF-8- oder UTF-16-Text.")); }
   finally { bytes.fill(0); }
+  if (readOnly) {
+    const content = el("pre", { class: "vault-text-viewer", tabindex: 0, "aria-label": t("File text", "Dateitext") }, decoded.value);
+    decoded.value = ""; disposers.push(() => { content.textContent = ""; });
+    stage.append(content); return null;
+  }
   const input = el("textarea", { class: "vault-text-editor", spellcheck: false, autocapitalize: "off", autocomplete: "off",
     "aria-label": t("File text", "Dateitext"), maxlength: VAULT_EDITOR_LIMITS.textBytes });
   input.value = decoded.value; decoded.value = "";
@@ -332,13 +378,20 @@ async function textEditor(blob, entry, { signal, stage, tools, disposers, dirtyC
   };
 }
 
-async function imageEditor(blob, { signal, stage, tools, filename, disposers, dirtyChanged }) {
+async function imageEditor(blob, { signal, stage, tools, filename, disposers, dirtyChanged, readOnly = false }) {
   const image = await decodeVaultImage(blob, { signal });
   if (signal?.aborted) { image.close(); abortEditor(signal); }
   disposers.push(() => image.close());
   abortEditor(signal);
   imageCrop(image.width, image.height);
-  const canvas = el("canvas", { class: "vault-image-canvas", "aria-label": t("Edited image preview", "Vorschau des bearbeiteten Bildes") });
+  const canvas = el("canvas", { class: "vault-image-canvas", "aria-label": readOnly ? t("Image preview", "Bildvorschau") : t("Edited image preview", "Vorschau des bearbeiteten Bildes") });
+  disposers.push(() => { canvas.width = 1; canvas.height = 1; });
+  if (readOnly) {
+    canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error(t("The image could not be exported.", "Das Bild konnte nicht exportiert werden."));
+    context.drawImage(image, 0, 0); stage.append(canvas); return null;
+  }
   const rotation = select([["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], "0");
   const flipX = el("input", { type: "checkbox" }), flipY = el("input", { type: "checkbox" });
   const format = select([["image/png", "PNG"], ["image/jpeg", "JPEG"], ["image/webp", "WebP"]], "image/png");
@@ -368,7 +421,6 @@ async function imageEditor(blob, { signal, stage, tools, filename, disposers, di
     cropFeedback, field(t("Output format", "Ausgabeformat"), format),
     el("p", { class: "subtle" }, t("Export creates a static image and removes the source file’s metadata.", "Der Export erstellt ein statisches Bild und entfernt die Metadaten der Quelldatei.")));
   stage.append(canvas); draw();
-  disposers.push(() => { canvas.width = 1; canvas.height = 1; });
   return async () => {
     abortEditor(signal); draw();
     const output = await canvasBlob(canvas, format.value);
@@ -496,7 +548,7 @@ async function mediaPlayer(blob, kind, { signal, stage, tools, objectUrl, dispos
   stage.append(player);
 }
 
-async function pdfEditor(blob, { signal, stage, tools, objectUrl, disposers, dirtyChanged }) {
+async function pdfEditor(blob, { signal, stage, tools, objectUrl, disposers, dirtyChanged, readOnly = false }) {
   const signature = new TextDecoder().decode(await blob.slice(0, 5).arrayBuffer());
   if (signature !== "%PDF-") throw new Error(t("This file is not a supported PDF document.", "Diese Datei ist kein unterstütztes PDF-Dokument."));
   const pdfjs = await import("/vendor/pdfjs-6.5.438/pdf.mjs");
@@ -509,6 +561,7 @@ async function pdfEditor(blob, { signal, stage, tools, objectUrl, disposers, dir
   const pdf = await boundedPdfTask(loading.promise, signal, 30000, error => { if (error) void loading.destroy().catch(() => {}); });
   abortEditor(signal);
   if (pdf.numPages > VAULT_EDITOR_LIMITS.pdfPages) throw new Error(t("The PDF editor supports documents with up to 500 pages.", "Der PDF-Editor unterstützt Dokumente mit bis zu 500 Seiten."));
+  if (readOnly) return pdfViewer(pdf, { signal, stage, disposers });
   const pages = Array.from({ length: pdf.numPages }, (_, original) => ({ original, rotation: 0, note: { text: "", x: 10, y: 10, size: 16 } }));
   let current = 0, renderTask, serial = 0;
   const canvas = el("canvas", { class: "vault-pdf-canvas", "aria-label": t("PDF page preview", "Vorschau der PDF-Seite") });
@@ -604,6 +657,46 @@ async function pdfEditor(blob, { signal, stage, tools, objectUrl, disposers, dir
     });
     return boundedPdfTask(operation, signal, 60000, () => worker.terminate());
   };
+}
+
+async function pdfViewer(pdf, { signal, stage, disposers }) {
+  let current = 0, serial = 0, renderTask;
+  const canvas = el("canvas", { class: "vault-pdf-canvas", "aria-label": t("PDF page preview", "Vorschau der PDF-Seite") });
+  const choice = select(Array.from({ length: pdf.numPages }, (_, index) => [String(index),
+    t("Page {number}", "Seite {number}", { number: index + 1 })]), "0");
+  choice.setAttribute("aria-label", t("Page", "Seite"));
+  const previous = button("‹", () => { current--; void render(); },
+    { "aria-label": t("Previous page", "Vorherige Seite"), class: "ghost" });
+  const next = button("›", () => { current++; void render(); },
+    { "aria-label": t("Next page", "Nächste Seite"), class: "ghost" });
+  const note = status();
+  const viewport = el("div", { class: "vault-pdf-viewer-page" }, canvas);
+  const node = el("div", { class: "vault-pdf-viewer" },
+    el("div", { class: "vault-viewer-navigation" }, previous, choice, next), viewport, note);
+  disposers.push(() => { serial++; renderTask?.cancel(); canvas.width = 1; canvas.height = 1; });
+  async function render() {
+    const generation = ++serial;
+    current = Math.max(0, Math.min(pdf.numPages - 1, current)); choice.value = String(current);
+    previous.disabled = current === 0; next.disabled = current === pdf.numPages - 1;
+    renderTask?.cancel();
+    try {
+      const page = await pdf.getPage(current + 1);
+      abortEditor(signal); if (generation !== serial) return;
+      const base = page.getViewport({ scale: 1 });
+      const bounds = page.getViewport({ scale: Math.min(2, 1800 / Math.max(base.width, base.height)) });
+      if (!Number.isFinite(bounds.width * bounds.height) || bounds.width * bounds.height > 16 * 1024 ** 2 || Math.min(bounds.width, bounds.height) < 1)
+        throw new Error(t("This PDF page exceeds the local preview limit.", "Diese PDF-Seite überschreitet die lokale Vorschaugrenze."));
+      canvas.width = Math.ceil(bounds.width); canvas.height = Math.ceil(bounds.height);
+      const task = page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: bounds, annotationMode: 0 });
+      renderTask = task;
+      await boundedPdfTask(task.promise, signal, 30000, error => { if (error) task.cancel(); });
+      if (generation === serial && !signal.aborted) tell(note, "");
+    } catch (error) {
+      if (!signal.aborted && generation === serial && error.name !== "RenderingCancelledException") tell(note, error.message, "error");
+    }
+  }
+  choice.addEventListener("change", () => { current = Number(choice.value); void render(); });
+  stage.append(node); await render(); return null;
 }
 
 function documentForCanvas() { return document.createElement("canvas"); }

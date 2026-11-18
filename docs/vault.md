@@ -17,7 +17,7 @@ Disabling Vault blocks uploads, downloads, and both kinds of shares. Completed f
 1. On the Rooms overview, select **ZeloteZ Vault** below **Live now** on the right. The entry appears only when Vault is enabled.
 2. The first column, **Files**, contains your own files and folders and the **Shared With Me** folder. Open **Shared With Me → sender's username** to browse that member's read-only shares.
 3. Open a folder to show its contents in the next column. The root column and up to two subfolder columns are visible together. Narrow windows automatically show fewer folder columns, without a horizontal scrollbar. Deeper folders reuse the rightmost column. The banner's breadcrumbs retain the complete path; select an ancestor to return, or use **…** to reach ancestors hidden from the breadcrumb bar.
-4. Select a file row to open its preview, player, or editing tools beside the folders. The preview stays open while you browse other folders. Use **×** in the preview to close the file.
+4. Select a file row to open its viewer, player, or archive browser beside the folders. Files open for viewing first; editing starts only after you choose **Open editor**. The preview stays open while you browse other folders. Use **×** in the preview to close the file.
 5. Right-click a row or use its **⋯** button for actions such as **Open**, **Download**, renaming, moving, sharing, and deletion. The menu also opens with the keyboard's context-menu key or **Shift+F10**. Available actions depend on the item; received shares cannot change the sender's original file.
 6. Create folders, choose **Upload files**, or drop local files into one of your own folders. Multiple files upload in sequence. To move your own Vault files or folders, drag them onto another own folder or the root breadcrumb, or choose **Move** in the item menu. A folder cannot be moved into itself or one of its descendants. **Shared With Me** and its sender folders are read-only destinations. Only files can be shared; folders organize your own storage.
 7. Search and sort the current folder. Long lists scroll inside their columns, and the preview scrolls within its own area; the banner and overall page stay in place. There are no previous/next pages.
@@ -28,7 +28,9 @@ Open the gear button **Vault settings** for the privacy information and optional
 
 ## Open, play, and edit locally
 
-Select a file row or choose **Open** in its menu. Its player or editing tools appear in the separate preview area. The file is authenticated and decrypted on your device; previewing and editing do not send plaintext to the server or an external editing service. HTML, SVG, and source code are handled as plain text and never executed in the editor. Public sharing links continue to provide downloads; these editing tools are part of the signed-in Vault.
+Select a file row or choose **Open** in its menu. The file opens first in a read-only viewer in the separate preview area. For images, PDFs, text, and supported Office files, choose **Open editor** to start editing; **Back to viewer** returns to the read-only view. Audio and video use the player, and archives use the archive browser.
+
+The file is authenticated and decrypted on your device; previewing and editing do not send plaintext to the server or an external editing service. HTML, SVG, and source code are handled as plain text and never executed in the viewer or editor. Public sharing links continue to provide downloads; these viewing and editing tools are part of the signed-in Vault.
 
 | File type | Available tools | Local limits |
 | --- | --- | --- |
@@ -61,7 +63,7 @@ PDF previews are passive. Saved PDF copies remove interactive links, forms, atta
 
 For images, PDFs, text, and supported Office files, choose a copy name and **Save encrypted copy**. Each save uploads a new file with fresh encryption; the original file and its existing shares remain unchanged. An edited copy of your own file is saved in the same folder. An edited copy of a member share is saved in the root of **Files** and belongs to you; it does not change the sender's file. Saving a copy needs enough free Vault storage for the additional file. Share the new copy separately if needed.
 
-Unsaved changes remain only in the open editor. Switching files, closing the editor, or leaving Vault asks you to confirm whether to discard them. Signing out or the end of your session cancels work immediately and discards local edits. There is no automatic draft recovery.
+Unsaved changes remain only in the open editor. Returning to the viewer, switching files, closing the editor, or leaving Vault asks you to confirm whether to discard them. Signing out or the end of your session cancels work immediately and discards local edits. There is no automatic draft recovery.
 
 Other formats can still be stored, shared, and downloaded for a suitable local application. Office formats beyond DOCX and XLSX, such as PPTX, ODT, ODS, and older DOC or XLS files, do not have built-in editing tools.
 
