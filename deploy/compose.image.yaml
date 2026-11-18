@@ -17,10 +17,6 @@ services:
       - community:/data
       - watch-media:/watch-data
       - type: bind
-        source: ${ROOMS_DESKTOP_DOWNLOADS_DIR:-./desktop-downloads}
-        target: /srv/desktop-downloads
-        read_only: true
-      - type: bind
         source: ${RTMPS_CERT_DIR:-./deploy/tls}
         target: /tls
         read_only: true

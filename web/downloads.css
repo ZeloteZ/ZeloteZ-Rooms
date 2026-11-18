@@ -8,7 +8,7 @@
 }
 .download-heading { gap: 7px; }
 .download-content { min-inline-size: 0; }
-.download-content > .status { margin-block-end: 10px; }
+.download-content > p { margin-block-start: 14px; }
 .download-intro {
   display: grid;
   gap: 12px;

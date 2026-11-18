@@ -10,16 +10,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir "$fixtures/tls"
+mkdir -p "$fixtures/tls" "$fixtures/desktop-downloads/0.1.0"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=rooms.example.test \
   -keyout "$fixtures/tls/privkey.pem" -out "$fixtures/tls/fullchain.pem" >/dev/null 2>&1
 chmod 644 "$fixtures/tls/privkey.pem"
+printf '{"version":"999.0.0"}\n' > "$fixtures/desktop-downloads/release.json"
+printf 'dummy installer\n' > "$fixtures/desktop-downloads/0.1.0/ZeloteZ-Rooms-0.1.0-x64.exe"
 
 docker run --detach --name "$container" --read-only --tmpfs /tmp:mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges --publish 127.0.0.1::8080 \
   --health-interval=1s --health-timeout=5s \
   --env PUBLIC_ORIGIN=https://rooms.example.test --env TRUST_PROXY_IP=1 \
   --env ROOMS_TRUSTED_PROXY_IPS=127.0.0.1 \
+  --mount "type=bind,source=$fixtures/desktop-downloads,target=/srv/desktop-downloads,readonly" \
   --mount "type=bind,source=$fixtures/tls,target=/tls,readonly" "$image"
 
 for attempt in {1..30}; do
@@ -35,6 +38,11 @@ fi
 
 port=$(docker port "$container" 8080/tcp)
 curl --fail --silent --show-error -H 'X-Real-IP: 192.0.2.24' "http://$port/api/setup" | jq -e '.available == true'
+curl --fail --silent --show-error "http://$port/api/desktop/release" |
+  jq -e '.product == "zelotez-rooms" and .protocol == 1 and (.version | (type == "string" and . != "999.0.0"))'
+for path in /api/desktop-downloads /downloads/desktop/0.1.0/ZeloteZ-Rooms-0.1.0-x64.exe; do
+  [[ $(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "http://$port$path") == 404 ]]
+done
 docker exec "$container" wget -qO /dev/null --header='X-Real-IP: 192.0.2.25' http://127.0.0.1:8080/api/setup
 logs=$(docker logs "$container" 2>&1)
 [[ "$logs" != *'192.0.2.24 "GET /api/setup"'* ]]
@@ -60,6 +68,7 @@ docker exec "$container" rooms-role media /bin/sh -ec '
 docker exec "$container" rooms-role gateway /bin/sh -ec '
   head -c 1 /srv/www/index.html >/dev/null
   ! head -c 1 /tls/privkey.pem >/dev/null 2>&1
+  ! head -c 1 /srv/desktop-downloads/release.json >/dev/null 2>&1
 '
 docker exec "$container" rooms-role relay /bin/sh -ec '
   ! head -c 1 /tls/privkey.pem >/dev/null 2>&1

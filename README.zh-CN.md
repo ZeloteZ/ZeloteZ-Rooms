@@ -58,7 +58,7 @@ docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms 
 
 ## 桌面应用
 
-在浏览器中登录 Rooms，点击头像旁的“客户端”。页面会根据你的系统推荐安装包，也可以手动选择 Linux AppImage 或 Windows 安装包，两者均适用于 x64 架构。
+在浏览器中登录 Rooms，点击头像旁的“客户端”。页面会根据你的系统推荐 x64 版 Linux AppImage 或 Windows 安装包，并链接到 GitHub 上的官方发布。如果仓库是私有的，请使用有权访问该仓库的 GitHub 账户登录。[最新版本](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
 
 桌面更新通知可以自行开启。在桌面设置中启用通知并选择检查间隔。应用会检查已验证的 Rooms 实例提供的版本，并在浏览器中打开该实例的下载页面。
 

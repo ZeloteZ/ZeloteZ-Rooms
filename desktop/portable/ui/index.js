@@ -56,12 +56,12 @@ function settings(state) {
     control("keep-running-detail").textContent = t("Keep calls and streams active when you close the window", "Anrufe und Streams beim Schließen des Fensters fortsetzen", "关闭窗口时继续通话和直播");
     control("updates-heading").textContent = t("Desktop updates", "Desktop-Updates", "桌面版更新");
     control("update-checks-label").textContent = t("Notify me about updates", "Über Updates benachrichtigen", "通知我有可用更新");
-    control("update-checks-detail").textContent = t("Ask your connected Rooms server about new desktop versions.", "Bei deinem verbundenen Rooms-Server nach neuen Desktop-Versionen fragen.", "通过当前连接的 Rooms 服务器查询桌面版更新。");
+    control("update-checks-detail").textContent = t("Check GitHub for new desktop versions.", "Auf GitHub nach neuen Desktop-Versionen suchen.", "在 GitHub 上检查桌面版更新。");
     control("update-interval-label").textContent = t("Check frequency", "Prüfintervall", "检查频率");
     const intervals = [t("Hourly", "Stündlich", "每小时"), t("Every 6 hours", "Alle 6 Stunden", "每 6 小时"), t("Daily", "Täglich", "每天"), t("Weekly", "Wöchentlich", "每周")];
     intervals.forEach((label, index) => { control("updateInterval").options[index].textContent = label; });
     checkUpdate.textContent = t("Check now", "Jetzt prüfen", "立即检查");
-    openRelease.textContent = t("Open update page", "Update-Seite öffnen", "打开更新页面");
+    openRelease.textContent = t("Open GitHub Releases", "GitHub-Releases öffnen", "打开 GitHub 发布页面");
     renderUpdateControls();
     control("connection-heading").textContent = t("Connection", "Verbindung", "连接");
     control("current-server-label").textContent = t("Current server", "Aktueller Server", "当前服务器");
@@ -115,12 +115,10 @@ function settings(state) {
 
   function renderUpdateControls() {
     checkUpdate.disabled = updating;
-    openRelease.hidden = updateResult?.status !== "available";
+    openRelease.classList.toggle("primary", updateResult?.status === "available");
     const statuses = {
-      instance: t("Connect to your Rooms server under General, then check again.",
-        "Verbinde dich unter „Allgemein“ mit deinem Rooms-Server und prüfe erneut.", "请先在“常规”中连接 Rooms 服务器，然后重新检查。"),
-      unavailable: t("Your Rooms server didn’t provide update information. Try again later or ask your server administrator.",
-        "Dein Rooms-Server hat keine Update-Informationen geliefert. Versuch es später erneut oder frag beim Betreiber nach.", "Rooms 服务器未提供更新信息，请稍后重试或联系服务器管理员。"),
+      unavailable: t("GitHub didn’t provide update information. To view private releases, sign in to GitHub in your browser.",
+        "GitHub hat keine Update-Informationen geliefert. Melde dich für private Releases im Browser bei GitHub an.", "GitHub 未提供更新信息。若要查看私有版本，请在浏览器中登录 GitHub。"),
       current: t("You’re using the latest version.", "Du verwendest die neueste Version.", "当前已是最新版本。"),
       available: (updateResult?.installer ? t("Version {version} is available.", "Version {version} ist verfügbar.", "{version} 版本已可用。")
         : t("Version {version} has been published. This release contains no installer for your platform.",
@@ -272,8 +270,8 @@ async function setup() {
     control("heading").textContent = t("Desktop update notifications", "Desktop-Update-Hinweise", "桌面版更新通知");
     control("description").textContent = t("Choose whether to check for new desktop versions.", "Du entscheidest, ob Rooms nach neuen Desktop-Versionen sucht.", "选择是否检查桌面版更新。");
     control("update-intro-details").textContent = t(
-      "Update checks are off by default. Turn them on in Desktop settings to check for new versions through your connected Rooms server.",
-      "Die Update-Prüfung ist standardmäßig aus. Schalte sie in den Desktop-Einstellungen ein, um über deinen verbundenen Rooms-Server nach neuen Versionen zu suchen.", "更新检查默认关闭。你可以在桌面设置中开启，通过已连接的 Rooms 服务器检查新版本。");
+      "Update checks are off by default. Turn them on in Desktop settings to check GitHub for new versions.",
+      "Die Update-Prüfung ist standardmäßig aus. Schalte sie in den Desktop-Einstellungen ein, um auf GitHub nach neuen Versionen zu suchen.", "更新检查默认关闭。你可以在桌面设置中开启，以便在 GitHub 上检查新版本。");
     const dismiss = control("dismiss-update-intro");
     const settings = control("open-update-settings");
     dismiss.textContent = t("Not now", "Jetzt nicht", "暂不");

@@ -13,7 +13,7 @@ const { hasRoomsPageHeaders, verifyInstance } = require("./instance.cjs");
 const { registerLinuxShareLink } = require("./linux-share-link.cjs");
 const { nativeHelper, installNativeCapture } = require("./native-capture.cjs");
 const { createRememberedLogin } = require("./remembered-login.cjs");
-const { checkIntervals, findUpdate, releasePage } = require("./release-updates.cjs");
+const { checkIntervals, findUpdate, latestReleasePage, releasePage } = require("./release-updates.cjs");
 const { parseShareLink, scheme: shareScheme, shareLinkFromArguments } = require("./share-link.cjs");
 const { trayHostAvailable, trayUsable } = require("./tray.cjs");
 
@@ -102,7 +102,7 @@ async function loadSettings() {
     if (Number.isSafeInteger(saved?.updateLastCheckedAt) && saved.updateLastCheckedAt > 0 && saved.updateLastCheckedAt <= Date.now()) {
       desktopSettings.updateLastCheckedAt = saved.updateLastCheckedAt;
     }
-    if (releasePage(desktopSettings.origin, saved?.updateNotified)) desktopSettings.updateNotified = saved.updateNotified;
+    if (releasePage(saved?.updateNotified)) desktopSettings.updateNotified = saved.updateNotified;
   } catch (error) {
     if (process.platform === "linux" && error.code === "ENOENT") return readLegacyLinuxSettings();
   }
@@ -169,14 +169,14 @@ function scheduleUpdateCheck() {
 
 function showUpdateNotification(version, installer) {
   const origin = currentOrigin;
-  const url = releasePage(origin, version);
+  const url = releasePage(version);
   if (!url || !Notification.isSupported()) return false;
   try {
     updateToast?.close();
     const toast = new Notification({
       title: text("ZeloteZ Rooms update available", "Update für ZeloteZ Rooms verfügbar", "ZeloteZ Rooms 有可用更新"),
-      body: (installer ? text("Version {version} is available from your Rooms server.", "Version {version} ist auf deinem Rooms-Server verfügbar.", "你的 Rooms 服务器已提供 {version} 版本。")
-        : text("Version {version} is available. Check your Rooms server for supported devices.", "Version {version} ist verfügbar. Auf deinem Rooms-Server findest du die unterstützten Geräte.", "{version} 版本已可用。请前往你的 Rooms 服务器查看支持的设备。"))
+      body: (installer ? text("Version {version} is available on GitHub.", "Version {version} ist auf GitHub verfügbar.", "GitHub 已提供 {version} 版本。")
+        : text("Version {version} is available. Check the release on GitHub for supported platforms.", "Version {version} ist verfügbar. Die unterstützten Plattformen stehen im Release auf GitHub.", "{version} 版本已发布。请在 GitHub 上查看支持的平台。"))
         .replace("{version}", version),
       icon: appIcon,
     });
@@ -201,9 +201,9 @@ function cancelUpdateCheck() {
 }
 
 function checkForUpdates(automatic) {
-  if (quitting || (automatic && !desktopSettings.updateChecks)) return Promise.resolve({ status: "cancelled" });
-  const origin = currentOrigin;
-  if (!origin || !roomsDocumentIsActive?.()) return Promise.resolve({ status: "instance" });
+  if (quitting || (automatic && (!desktopSettings.updateChecks || !roomsDocumentIsActive?.()))) {
+    return Promise.resolve({ status: "cancelled" });
+  }
   if (updateCheck) return updateCheck.result;
   clearTimeout(updateTimer);
   const controller = new AbortController();
@@ -211,9 +211,9 @@ function checkForUpdates(automatic) {
   lastUpdateAttempt = attempt;
   const result = (async () => {
     try {
-      const result = await findUpdate({ origin, installed: app.getVersion(), platform: process.platform,
+      const result = await findUpdate({ installed: app.getVersion(), platform: process.platform,
         arch: process.arch, signal: controller.signal });
-      if (controller.signal.aborted || origin !== currentOrigin || !roomsDocumentIsActive?.()) return { status: "cancelled" };
+      if (controller.signal.aborted || (automatic && !roomsDocumentIsActive?.())) return { status: "cancelled" };
       const changes = { updateLastCheckedAt: attempt };
       if (automatic && desktopSettings.updateChecks && result.status === "available" && result.version !== desktopSettings.updateNotified &&
           showUpdateNotification(result.version, result.installer)) changes.updateNotified = result.version;
@@ -355,16 +355,15 @@ ipcMain.handle("rooms:local-update-check", async event => {
   const local = settingsSender(event);
   if (!local) return { status: "unavailable" };
   const result = await checkForUpdates(false);
-  local.availableUpdate = result.status === "available" ? { origin: currentOrigin, version: result.version } : null;
+  local.updateVersion = result.status === "available" ? result.version : null;
   return result;
 });
 
 ipcMain.handle("rooms:local-update-open", event => {
   const local = settingsSender(event);
-  const update = local?.availableUpdate;
-  if (!update || update.origin !== currentOrigin || !roomsDocumentIsActive?.()) return;
-  const url = releasePage(update.origin, update.version);
-  if (url) return shell.openExternal(url).catch(() => {});
+  if (!local) return;
+  const url = releasePage(local.updateVersion) ?? latestReleasePage;
+  return shell.openExternal(url).catch(() => {});
 });
 
 ipcMain.handle("rooms:local-check", async (event, input) => {

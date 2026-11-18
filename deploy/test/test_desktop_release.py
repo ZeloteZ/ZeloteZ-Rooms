@@ -1,6 +1,5 @@
 import copy
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -13,10 +12,6 @@ DEPLOY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEPLOY))
 import desktop_release_manifest as release
 
-spec = importlib.util.spec_from_file_location("rooms_download_publisher", DEPLOY / "publish-desktop-downloads.py")
-publisher = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(publisher)
-
 
 class DesktopReleaseTests(unittest.TestCase):
     def setUp(self):
@@ -26,7 +21,6 @@ class DesktopReleaseTests(unittest.TestCase):
         self.keys = self.root / "operator"
         self.keys.mkdir(mode=0o700)
         self.private, self.public = self.key_pair("trusted")
-        self.published = self.root / "downloads"
 
     def key_pair(self, name, *, algorithm="ED25519"):
         private, public = self.keys / (name + ".pem"), self.keys / (name + ".pub")
@@ -55,66 +49,35 @@ class DesktopReleaseTests(unittest.TestCase):
         release.sign_release(version, folder, self.private)
         return folder
 
-    def publish(self, version, source):
-        publisher.publish(version, source, self.published, self.public)
-
-    def test_signed_release_publishes_exact_files_and_compatible_metadata(self):
+    def test_signed_release_verifies_both_installers(self):
         source = self.signed()
         manifest, data, signature = release.load_signed_release("0.1.33", source, self.public)
         self.assertEqual(len(signature), 64)
         self.assertEqual(manifest["schema"], 1)
+        self.assertEqual(data, release.canonical(manifest))
+        self.assertEqual([item["platform"] for item in manifest["artifacts"]], ["linux", "windows"])
         for artifact in manifest["artifacts"]:
             release.check_installer(source, artifact)
-        self.publish("0.1.33", source)
-        target = self.published / "0.1.33"
-        self.assertEqual({item.name for item in target.iterdir()},
-                         {release.MANIFEST_NAME, release.SIGNATURE_NAME, *[item["filename"] for item in manifest["artifacts"]]})
-        self.assertEqual((target / release.MANIFEST_NAME).read_bytes(), data)
-        self.assertEqual((target / release.SIGNATURE_NAME).read_bytes(), signature)
-        current = json.loads((self.published / "current.json").read_bytes())
-        descriptor = json.loads((self.published / "release.json").read_bytes())
-        self.assertEqual(set(current), {"version", "downloads", "manifestUrl", "signatureUrl"})
-        self.assertEqual(current["manifestUrl"], "/downloads/desktop/0.1.33/" + release.MANIFEST_NAME)
-        self.assertEqual(current["signatureUrl"], "/downloads/desktop/0.1.33/" + release.SIGNATURE_NAME)
-        self.assertEqual(set(descriptor), {"product", "protocol", "version", "artifacts"})
-        self.assertEqual(descriptor["artifacts"], ["linux-x64", "windows-x64"])
-        for item, artifact in zip(current["downloads"], manifest["artifacts"], strict=True):
-            self.assertEqual(item["sha256"], artifact["sha256"])
-            self.assertEqual(item["size"], artifact["size"])
-            self.assertEqual((target / artifact["filename"]).read_bytes(), (source / artifact["filename"]).read_bytes())
-        before = (self.published / "current.json").read_bytes()
-        self.publish("0.1.33", source)
-        self.assertEqual((self.published / "current.json").read_bytes(), before)
 
-    def test_unsigned_or_wrong_key_inputs_cannot_publish(self):
+    def test_unsigned_or_wrong_key_release_fails_verification(self):
         source = self.source("0.1.33")
         with self.assertRaises(OSError):
-            self.publish("0.1.33", source)
-        self.assertFalse(self.published.exists())
+            release.load_signed_release("0.1.33", source, self.public)
         release.sign_release("0.1.33", source, self.private)
         _, other_public = self.key_pair("other")
         with self.assertRaises(ValueError):
-            publisher.publish("0.1.33", source, self.published, other_public)
-        self.assertFalse(self.published.exists())
-        incoming_key = source / "public.pem"
-        incoming_key.write_bytes(self.public.read_bytes())
-        with self.assertRaisesRegex(ValueError, "outside"):
-            publisher.publish("0.1.33", source, self.published, incoming_key)
+            release.load_signed_release("0.1.33", source, other_public)
 
-    def test_changed_artifact_and_checksum_leave_published_release_untouched(self):
-        self.publish("0.1.33", self.signed())
-        before = {name: (self.published / name).read_bytes() for name in ["current.json", "release.json"]}
+    def test_changed_installer_and_checksum_fail_verification(self):
         source = self.signed("0.1.34")
-        name = release.artifacts_for("0.1.34")[1]["filename"]
+        manifest, _, _ = release.load_signed_release("0.1.34", source, self.public)
+        artifact = manifest["artifacts"][1]
+        name = artifact["filename"]
         data = b"MZ" + b"a different synthetic fixture\n"
         (source / name).write_bytes(data)
         (source / (name + ".sha256")).write_text(hashlib.sha256(data).hexdigest() + "  " + name + "\n")
         with self.assertRaises(ValueError):
-            self.publish("0.1.34", source)
-        self.assertFalse((self.published / "0.1.34").exists())
-        for name, expected in before.items():
-            self.assertEqual((self.published / name).read_bytes(), expected)
-        self.assertFalse(list(self.published.glob(".publish-*")))
+            release.check_installer(source, artifact)
 
     def test_signed_schema_is_strict_and_manifest_inputs_are_bounded(self):
         source = self.signed()
@@ -141,16 +104,6 @@ class DesktopReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.load_signed_release("0.1.33", source, self.public)
 
-    def test_immutable_versions_and_downgrade_check_preserve_current_release(self):
-        self.publish("0.1.34", self.signed("0.1.34"))
-        before = (self.published / "current.json").read_bytes()
-        with self.assertRaisesRegex(ValueError, "older"):
-            self.publish("0.1.33", self.signed("0.1.33"))
-        changed = self.signed("0.1.34", b"new fixture contents")
-        with self.assertRaisesRegex(ValueError, "Signed installer"):
-            self.publish("0.1.34", changed)
-        self.assertEqual((self.published / "current.json").read_bytes(), before)
-
     def test_key_protection_algorithm_and_symlinks_are_checked(self):
         source = self.signed()
         ec_private, ec_public = self.key_pair("wrong-algorithm", algorithm="EC")
@@ -175,8 +128,9 @@ class DesktopReleaseTests(unittest.TestCase):
         saved = self.root / "installer"
         artifact.rename(saved)
         artifact.symlink_to(saved)
+        manifest, _, _ = release.load_signed_release("0.1.33", source, self.public)
         with self.assertRaises(OSError):
-            self.publish("0.1.33", source)
+            release.check_installer(source, manifest["artifacts"][0])
 
     def test_cli_requires_explicit_trusted_key_and_verifies_signed_local_files(self):
         source = self.source("0.1.33")
@@ -187,7 +141,7 @@ class DesktopReleaseTests(unittest.TestCase):
         verified = subprocess.run([*command, "verify", "0.1.33", "--source", str(source), "--trusted-key", str(self.public)],
                                   capture_output=True, text=True, timeout=20)
         self.assertEqual(verified.returncode, 0, verified.stderr)
-        rejected = subprocess.run([sys.executable, str(DEPLOY / "publish-desktop-downloads.py"), "0.1.33", "--source", str(source)],
+        rejected = subprocess.run([*command, "verify", "0.1.33", "--source", str(source)],
                                   capture_output=True, text=True, timeout=20)
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("--trusted-key", rejected.stderr)
@@ -204,9 +158,6 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertEqual(selected.returncode, 0, selected.stderr)
         all_installers = subprocess.run(command, capture_output=True, text=True, timeout=20)
         self.assertNotEqual(all_installers.returncode, 0)
-        with self.assertRaises(OSError):
-            self.publish("0.1.33", source)
-        self.assertFalse((self.published / "0.1.33").exists())
         document = json.loads((source / release.MANIFEST_NAME).read_bytes())
         document["artifacts"][0]["filename"] = "wrong-linux-name.AppImage"
         data = release.canonical(document)

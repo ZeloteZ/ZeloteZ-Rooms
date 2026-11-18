@@ -1,6 +1,6 @@
 # Run ZeloteZ Rooms in one container
 
-The Rooms image contains the web gateway, the Rooms server, MediaMTX and FFmpeg. Use Docker Engine 28 or newer for loopback port publishing. The image is built for Linux amd64 and arm64. The host kernel must enable Landlock ABI 3 or later (Linux 6.2 or later, or a backport), and the container's seccomp profile must allow Landlock. Rooms checks this at startup. The gateway reads the web and download files, the API can write to the application and media volumes, and only MediaMTX can read the RTMPS key. FFmpeg runs with a separate, narrower policy.
+The Rooms image contains the web gateway, the Rooms server, MediaMTX and FFmpeg. Use Docker Engine 28 or newer for loopback port publishing. The image is built for Linux amd64 and arm64. The host kernel must enable Landlock ABI 3 or later (Linux 6.2 or later, or a backport), and the container's seccomp profile must allow Landlock. Rooms checks this at startup. The gateway reads the web files, the API can write to the application and media volumes, and only MediaMTX can read the RTMPS key. FFmpeg runs with a separate, narrower policy.
 
 ## First start
 
@@ -43,3 +43,5 @@ docker compose --project-directory . -f deploy/compose.image.yaml up -d --wait
 ```
 
 The container keeps the existing accounts and rooms by remounting the same volumes. Pin `ROOMS_IMAGE` to `ghcr.io/zelotez/zelotez-rooms:sha-<commit>` or an image digest to choose a specific build. Keep a pre-update backup for rollback if database migrations have run.
+
+The browser download page links to the official [GitHub releases](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest). If your custom Compose configuration includes a binding for `/srv/desktop-downloads`, you can remove it and the associated `ROOMS_DESKTOP_DOWNLOADS_DIR` setting.

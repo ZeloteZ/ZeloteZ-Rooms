@@ -40,7 +40,7 @@ RUN apk del nginx-module-xslt \
     && addgroup -g 1000 rooms \
     && adduser -S -D -H -u 1000 -G rooms rooms \
     && install -d -m 0700 -o rooms -g rooms /data /watch-data \
-    && install -d -m 0755 /srv/desktop-downloads /tls
+    && install -d -m 0755 /tls
 COPY --from=build /usr/local/bin/node /usr/local/bin/node
 COPY --from=build /backend/ /app/
 COPY --from=build /srv/www/ /srv/www/

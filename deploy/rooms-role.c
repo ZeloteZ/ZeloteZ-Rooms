@@ -96,10 +96,8 @@ int main(int argc, char **argv)
         allow_path(ruleset, "/data", write_tree);
         allow_path(ruleset, "/watch-data", write_tree);
     }
-    if (gateway) {
+    if (gateway)
         allow_path(ruleset, "/srv/www", read_tree);
-        allow_path(ruleset, "/srv/desktop-downloads", read_tree);
-    }
     if (media)
         allow_path(ruleset, "/tls", read_tree);
     if (scratch && strncmp(scratch, "/tmp/rooms-", 11) == 0)

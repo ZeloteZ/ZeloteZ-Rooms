@@ -4,13 +4,13 @@ The desktop app opens the same Rooms interface as the website. Enter your server
 
 Open **Desktop settings** from the app menu or with Ctrl+, to change local preferences while staying signed in. Friend requests, direct messages, mentions, and opted-in live alerts can also appear as system notifications. By default, the close button asks whether to keep Rooms running in the background or quit. Select **Don’t show this again** to minimize automatically on future clicks. Restore Rooms from the tray or taskbar, depending on your desktop. Change what X does in Desktop settings.
 
-Under **Desktop settings → Desktop updates**, turn on update notifications and choose the check frequency. Update checks start off. The app reads the version from your verified Rooms server. The alert opens that instance's download page in your browser, where you can download the update after signing in.
+Under **Desktop settings → Desktop updates**, turn on update notifications and choose the check frequency. Update checks start off. The app checks the official GitHub release. You can open the release in your browser from the alert or from desktop settings. For a private repository, use the GitHub link in settings and sign in with an account that has access.
 
 Upgrade the self-hosted gateway and server together before connecting a current desktop app. The app checks `/api/desktop/instance` and the `X-ZeloteZ-Rooms-Client` header on the main page. Any HTTPS reverse proxy in front of the gateway must pass through that response header.
 
 ## Windows and portable Linux
 
-On Windows x64, run the `ZeloteZ-Rooms-…-x64.exe` installer. On Linux x64, mark the AppImage as executable and open it. Use the KDE or GNOME ScreenCast portal and PipeWire for sharing on Wayland.
+Get the installer for your platform from the [latest GitHub release](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest). On Windows x64, run the `ZeloteZ-Rooms-…-x64.exe` installer. On Linux x64, mark the AppImage as executable and open it. Use the KDE or GNOME ScreenCast portal and PipeWire for sharing on Wayland.
 
 Rooms requires the Chromium sandbox on Linux. If you see a startup error about the sandbox, refresh any older desktop integration that adds `--no-sandbox` and check your distribution’s documentation for allowing unprivileged user namespaces for this app.
 
@@ -27,6 +27,16 @@ With the native capture packages installed, **Share screen** opens the bundled P
 Viewers get direct, low-latency playback when the WebRTC connection is available. The player can switch to buffered playback. On your own desktop, the local preview shows the selected output as it is captured.
 
 Use Alt to show the application menu on Windows or Linux.
+
+## Verify a desktop download
+
+The official GitHub release includes an Ed25519-signed manifest. Place the installer, `desktop-release-manifest.json` and `desktop-release-manifest.sig` in the same directory. On Linux use the verification helper and an independently obtained copy of the [release public key](release-public.pem).
+
+```bash
+python3 deploy/desktop-release-signature.py verify 0.1.35 --source /path/to/download --trusted-key /path/to/public.pem --platform linux
+```
+
+Use `--platform windows` for the Windows installer. For native Windows verification, OpenSSL can verify the manifest with `openssl pkeyutl -verify -pubin -rawin -inkey public.pem -in desktop-release-manifest.json -sigfile desktop-release-manifest.sig`. After a successful check, compare `Get-FileHash` (SHA-256) and the exact size and filename with the Windows entry in the manifest for the intended release.
 
 ## Native screen capture on Linux
 

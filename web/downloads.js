@@ -1,5 +1,8 @@
-import { locale, t } from "./i18n.js";
-import { api, button, el, status, tell } from "./ui.js";
+import { t } from "./i18n.js";
+import { el } from "./ui.js";
+
+const releases = "https://github.com/ZeloteZ/ZeloteZ-Rooms/releases";
+const versionPattern = /^(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}$/u;
 
 export function isDesktopApp() {
   return window.roomsDesktop === true || Boolean(window.webkit?.messageHandlers?.roomsCapture);
@@ -26,54 +29,44 @@ export async function suggestedDownloadPlatform(browserNavigator = navigator) {
   return /x86_64|amd64|Win64|WOW64|\bx64\b/iu.test(details) ? platform : null;
 }
 
-function releaseFilePath(url, path) {
-  if (typeof url !== "string") return false;
-  try {
-    const resolved = new URL(url, location.origin);
-    return resolved.origin === location.origin && resolved.pathname === path && !resolved.search && !resolved.hash &&
-      !resolved.username && !resolved.password;
-  } catch {
-    return false;
-  }
+async function bundledRelease(signal) {
+  const response = await fetch("/desktop-release.json", { signal, credentials: "omit", redirect: "error", cache: "no-store" });
+  if (!response.ok) return null;
+  const release = await response.json();
+  if (release?.product !== "zelotez-rooms" || release.protocol !== 1 ||
+      typeof release.version !== "string" || !versionPattern.test(release.version) || !Array.isArray(release.artifacts)) return null;
+  return release;
 }
 
-function downloadEntry(release, platform) {
-  const suffix = platform === "linux" ? "x86_64.AppImage" : "x64.exe";
-  const path = "/downloads/desktop/" + release.version + "/ZeloteZ-Rooms-" + release.version + "-" + suffix;
-  return release.downloads.find(entry => entry?.platform === platform && entry.arch === "x64" &&
-    Number.isSafeInteger(entry.size) && entry.size > 0 && releaseFilePath(entry.url, path));
+function releaseAsset(version, filename) {
+  return releases + "/download/v" + version + "/" + filename;
 }
 
-function downloadCard(platform, entry, suggested) {
+function downloadCard(platform, release, suggested) {
   const name = platform === "linux" ? "Linux" : "Windows";
   const description = platform === "linux"
     ? t("Make the AppImage executable, then open it.", "Markiere das AppImage als ausführbar und öffne es.")
     : t("Run the installer to install Rooms.", "Öffne das Installationsprogramm, um Rooms zu installieren.");
   const fileType = platform === "linux" ? "AppImage" : t("Installer", "Installationsprogramm");
-  const details = el("p", { class: "subtle" }, "x86-64 · " + fileType);
-  let action;
-  if (entry) {
-    const size = new Intl.NumberFormat(locale(), { style: "unit", unit: "megabyte", unitDisplay: "short",
-      maximumFractionDigits: 1 }).format(entry.size / 1_000_000);
-    details.append(" · " + size);
-    const label = platform === "linux" ? t("Download for Linux", "Für Linux herunterladen")
-      : t("Download for Windows", "Für Windows herunterladen");
-    action = el("a", { class: "button" + (suggested ? " primary" : ""), href: entry.url, download: "" }, label);
-  } else {
-    action = el("p", { class: "status", role: "status" }, t("This download is not available yet.", "Dieser Download ist noch nicht verfügbar."));
-  }
+  const label = platform === "linux" ? t("Download for Linux", "Für Linux herunterladen")
+    : t("Download for Windows", "Für Windows herunterladen");
+  const suffix = platform === "linux" ? "x86_64.AppImage" : "x64.exe";
+  const href = release?.artifacts.includes(platform + "-x64")
+    ? releaseAsset(release.version, "ZeloteZ-Rooms-" + release.version + "-" + suffix) : releases + "/latest";
+
   return el("section", { class: "panel download-card", "data-platform": platform },
     el("div", { class: "section-heading" }, el("h2", {}, name),
       suggested && el("span", { class: "tag" }, t("Suggested for this device", "Für dieses Gerät empfohlen"))),
-    details, el("p", { class: "muted" }, description), action);
+    el("p", { class: "subtle" }, "x86-64 · " + fileType), el("p", { class: "muted" }, description),
+    el("a", { class: "button" + (suggested ? " primary" : ""), href, rel: "noreferrer" }, label));
 }
 
 export function renderDownloads({ signal }) {
   const version = el("p", { class: "subtle", hidden: true });
   const cards = el("div", { class: "download-cards" });
   const verification = el("p", { class: "subtle", hidden: true });
-  const feedback = status();
-  const retry = button(t("Try again", "Erneut laden"), () => void load(), { hidden: true });
+  const latest = el("a", { href: releases + "/latest", rel: "noreferrer" },
+    t("Latest release on GitHub", "Neueste Version auf GitHub"));
   const intro = el("div", { class: "download-intro" },
     el("h2", {}, t("Get more with the ZeloteZ Rooms client:", "Mit dem ZeloteZ Rooms Client hast du viele Vorteile:")),
     el("ul", { class: "muted" },
@@ -85,49 +78,27 @@ export function renderDownloads({ signal }) {
         "Erhalte Systembenachrichtigungen bei Starts von Livestreams, Direktnachrichten und vielem mehr."))));
   const node = el("section", { class: "secondary-page downloads-page", "aria-labelledby": "downloads-heading" },
     el("header", { class: "page-heading" }, el("div", { class: "stack download-heading" },
-      el("h1", { id: "downloads-heading", tabindex: -1 }, t("Downloads", "Downloads")),
-      version)),
-    el("div", { class: "download-content" }, intro, feedback, retry, cards, verification));
-  let loading = false;
+      el("h1", { id: "downloads-heading", tabindex: -1 }, t("Downloads", "Downloads")), version), latest),
+    el("div", { class: "download-content" }, intro, cards, verification));
 
-  async function load() {
-    if (loading || signal.aborted) return;
-    loading = true;
-    retry.hidden = true;
-    tell(feedback, t("Loading downloads…", "Downloads werden geladen …"));
-    try {
-      const [release, suggested] = await Promise.all([api("desktop-downloads", { signal }), suggestedDownloadPlatform()]);
-      if (signal.aborted) return;
-      if (!release || typeof release.version !== "string" || !/^(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8})){2}$/u.test(release.version) ||
-          !Array.isArray(release.downloads)) throw new Error();
-      version.textContent = t("Version {version}", "Version {version}", { version: release.version });
-      version.hidden = false;
-      const platforms = suggested === "windows" ? ["windows", "linux"] : ["linux", "windows"];
-      cards.replaceChildren(...platforms.map(platform => {
-        const entry = downloadEntry(release, platform);
-        return downloadCard(platform, entry, Boolean(entry && suggested === platform));
-      }));
-      const { manifestUrl, signatureUrl } = release;
-      const proofBase = `/downloads/desktop/${release.version}/desktop-release-manifest.`;
-      verification.hidden = !releaseFilePath(manifestUrl, proofBase + "json") ||
-        !releaseFilePath(signatureUrl, proofBase + "sig");
-      if (!verification.hidden) {
-        verification.replaceChildren(
-          el("a", { href: manifestUrl, download: "" }, t("Release manifest", "Release-Manifest")),
-          " · ", el("a", { href: signatureUrl, download: "" }, t("Release signature", "Release-Signatur")));
-      }
-      tell(feedback, "");
-    } catch (error) {
-      if (signal.aborted) return;
-      tell(feedback, error.status === 404
-        ? t("This server has no desktop downloads yet.", "Auf diesem Server sind noch keine Desktop-Downloads verfügbar.")
-        : t("Downloads are temporarily unavailable.", "Die Downloads sind vorübergehend nicht verfügbar."), "error");
-      retry.hidden = false;
-    } finally {
-      loading = false;
-    }
+  function showCards(release, suggested) {
+    const platforms = suggested === "windows" ? ["windows", "linux"] : ["linux", "windows"];
+    cards.replaceChildren(...platforms.map(platform => downloadCard(platform, release, suggested === platform)));
   }
 
-  void load();
+  showCards(null, null);
+  void Promise.all([bundledRelease(signal).catch(() => null), suggestedDownloadPlatform()]).then(([release, suggested]) => {
+    if (signal.aborted) return;
+    showCards(release, suggested);
+    if (!release) return;
+    version.textContent = t("Version {version}", "Version {version}", { version: release.version });
+    version.hidden = false;
+    verification.append(
+      el("a", { href: releaseAsset(release.version, "desktop-release-manifest.json"), rel: "noreferrer" },
+        t("Release manifest", "Release-Manifest")),
+      " · ", el("a", { href: releaseAsset(release.version, "desktop-release-manifest.sig"), rel: "noreferrer" },
+        t("Release signature", "Release-Signatur")));
+    verification.hidden = false;
+  });
   return node;
 }

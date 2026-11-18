@@ -52,7 +52,7 @@ If your reverse proxy enforces request-body limits, allow 4 MiB chunks for the w
 
 ## Desktop app
 
-In your browser, sign in to Rooms and select **Client** next to your profile picture. The page suggests an installer for your system and offers both a Linux AppImage and a Windows installer for x64.
+In your browser, sign in to Rooms and select **Client** next to your profile picture. The page suggests a Linux AppImage or Windows installer for your x64 system and links to the official GitHub downloads. If the repository is private, sign in to GitHub with an account that has access. [Latest release](https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest)
 
 Desktop update notifications are optional. Enable them and choose a check interval in Desktop Settings. The app checks which version your verified Rooms instance has published and opens its download page in your browser.
 

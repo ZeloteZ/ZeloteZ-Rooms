@@ -1,13 +1,15 @@
 "use strict";
 
 const versionPattern = /^(?:0|[1-9]\d{0,8})(?:\.(?:0|[1-9]\d{0,8})){2}$/u;
-const artifactPattern = /^[a-z0-9]{1,12}(?:-[a-z0-9]{1,12}){1,2}$/u;
-const maxResponse = 2048;
+const repository = "ZeloteZ/ZeloteZ-Rooms";
+const releases = `https://github.com/${repository}/releases`;
+const latestReleasePage = `${releases}/latest`;
+const releaseEndpoint = `https://api.github.com/repos/${repository}/releases/latest`;
+const maxResponse = 256 * 1024;
 const checkIntervals = ["1", "6", "24", "168"];
 
-function releasePage(origin, version) {
-  return releaseEndpoint(origin) && typeof version === "string" && versionPattern.test(version)
-    ? origin + "/#/downloads" : null;
+function releasePage(version) {
+  return typeof version === "string" && versionPattern.test(version) ? `${releases}/tag/v${version}` : null;
 }
 
 function newerVersion(candidate, installed) {
@@ -18,23 +20,11 @@ function newerVersion(candidate, installed) {
   return difference > 0;
 }
 
-function artifactFor(platform, arch) {
-  if (platform === "linux") return "linux-" + arch;
-  if (platform === "win32") return "windows-" + arch;
-  if (platform === "darwin") return "macos-" + arch;
-  return "";
-}
-
-function releaseEndpoint(origin) {
-  if (typeof origin !== "string" || !origin) return null;
-  try {
-    const url = new URL(origin);
-    const loopback = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (url.origin !== origin || url.port === "0" || (url.protocol !== "https:" && !loopback)) return null;
-    return url.origin + "/api/desktop/release";
-  } catch {
-    return null;
-  }
+function installerName(platform, arch, version) {
+  if (arch !== "x64") return null;
+  if (platform === "linux") return `ZeloteZ-Rooms-${version}-x86_64.AppImage`;
+  if (platform === "win32") return `ZeloteZ-Rooms-${version}-x64.exe`;
+  return null;
 }
 
 async function readMetadata(response) {
@@ -54,28 +44,27 @@ async function readMetadata(response) {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size)));
 }
 
-async function findUpdate({ origin, installed, platform, arch, signal, fetchRelease = fetch }) {
-  const endpoint = releaseEndpoint(origin);
-  if (!endpoint) return { status: "instance" };
+async function findUpdate({ installed, platform, arch, signal, fetchRelease = fetch }) {
   const deadline = AbortSignal.timeout(8000);
   try {
-    const response = await fetchRelease(endpoint, {
+    const response = await fetchRelease(releaseEndpoint, {
       method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/vnd.github+json" },
     });
     const release = await readMetadata(response);
-    if (!release || Object.keys(release).length !== 4 || release.product !== "zelotez-rooms" || release.protocol !== 1 ||
-        !releasePage(origin, release.version) || !Array.isArray(release.artifacts) || release.artifacts.length > 16 ||
-        new Set(release.artifacts).size !== release.artifacts.length ||
-        release.artifacts.some(artifact => typeof artifact !== "string" || !artifactPattern.test(artifact))) {
+    const tag = release?.tag_name;
+    const version = typeof tag === "string" && tag.startsWith("v") ? tag.slice(1) : null;
+    if (!releasePage(version) || release.draft !== false || release.prerelease !== false || !Array.isArray(release.assets)) {
       return { status: "unavailable" };
     }
-    if (!newerVersion(release.version, installed)) return { status: "current" };
-    return { status: "available", version: release.version, installer: release.artifacts.includes(artifactFor(platform, arch)) };
+    if (!newerVersion(version, installed)) return { status: "current" };
+    const name = installerName(platform, arch, version);
+    return { status: "available", version,
+      installer: name !== null && release.assets.some(asset => asset?.name === name && asset.state === "uploaded") };
   } catch {
     return { status: signal?.aborted ? "cancelled" : "unavailable" };
   }
 }
 
-module.exports = { checkIntervals, findUpdate, releasePage };
+module.exports = { checkIntervals, findUpdate, latestReleasePage, releasePage };

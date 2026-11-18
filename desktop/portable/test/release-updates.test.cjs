@@ -2,64 +2,70 @@
 
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { findUpdate, releasePage } = require("../release-updates.cjs");
+const { findUpdate, latestReleasePage, releasePage } = require("../release-updates.cjs");
 const { parseShareLink, shareLinkFromArguments } = require("../share-link.cjs");
 
 const origin = "https://rooms.example.com";
 const releaseRequest = { origin, installed: "0.1.9", platform: "linux", arch: "x64" };
-const release = { product: "zelotez-rooms", protocol: 1, version: "0.1.15", artifacts: ["linux-x64"] };
+const release = { tag_name: "v0.1.15", draft: false, prerelease: false,
+  assets: [{ name: "ZeloteZ-Rooms-0.1.15-x86_64.AppImage", state: "uploaded" }] };
 
-test("desktop update checks use the configured Rooms origin without credentials and validate stable versions", async () => {
+test("desktop update checks use the official GitHub API without credentials and validate stable versions", async () => {
   const find = (data, changes = {}) => findUpdate({ ...releaseRequest, ...changes, async fetchRelease(url, init) {
-    assert.equal(url, origin + "/api/desktop/release");
+    assert.equal(url, "https://api.github.com/repos/ZeloteZ/ZeloteZ-Rooms/releases/latest");
     assert.equal(init.method, "GET");
     assert.equal(init.credentials, "omit");
     assert.equal(init.redirect, "error");
-    assert.deepEqual(init.headers, { Accept: "application/json" });
+    assert.deepEqual(init.headers, { Accept: "application/vnd.github+json" });
     return Response.json(data);
   } });
-  assert.deepEqual(await find(release), { status: "available", version: "0.1.15", installer: true });
+  assert.deepEqual(await find({ ...release, html_url: "https://example.net/update" }, { origin: "https://malicious-instance.example" }),
+    { status: "available", version: "0.1.15", installer: true });
   assert.deepEqual(await find(release, { platform: "win32" }), { status: "available", version: "0.1.15", installer: false });
+  assert.deepEqual(await find(release, { installed: "0.1.15" }), { status: "current" });
   assert.deepEqual(await find(release, { installed: "0.1.16" }), { status: "current" });
   for (const invalid of [
-    { ...release, version: "0.1.15-rc.1" },
-    { ...release, product: "another-app" },
-    { ...release, protocol: 2 },
-    { ...release, artifacts: ["linux-x64", "linux-x64"] },
-    { ...release, artifacts: ["https://example.com/file.exe"] },
-    { ...release, url: "https://example.com/file.exe" },
+    null, { ...release, tag_name: "v0.1.15-rc.1" }, { ...release, tag_name: "0.1.15" },
+    { ...release, tag_name: "v../other" }, { ...release, tag_name: "v0.1.15\n" },
+    { ...release, draft: true }, { ...release, prerelease: true }, { ...release, assets: {} },
   ]) assert.deepEqual(await find(invalid), { status: "unavailable" });
   assert.deepEqual(await findUpdate({ ...releaseRequest, fetchRelease: () => Response.redirect("https://example.net") }),
     { status: "unavailable" });
   assert.deepEqual(await findUpdate({ ...releaseRequest, fetchRelease: () => new Response(null, { status: 404 }) }),
     { status: "unavailable" });
-  assert.equal(releasePage(origin, "0.1.15"), origin + "/#/downloads");
-  assert.equal(releasePage(origin, "../example"), null);
+  assert.equal(latestReleasePage, "https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/latest");
+  assert.equal(releasePage("0.1.15"), "https://github.com/ZeloteZ/ZeloteZ-Rooms/releases/tag/v0.1.15");
+  assert.equal(releasePage("../example"), null);
 });
 
-test("Windows x64 and Linux x64 recognize their server-hosted installers and preserve other platforms", async () => {
-  const data = { ...release, artifacts: ["linux-x64", "windows-x64"] };
+test("Windows x64 and Linux x64 recognize exact uploaded release assets", async () => {
+  const data = { ...release, assets: [...release.assets, { name: "ZeloteZ-Rooms-0.1.15-x64.exe", state: "uploaded" }] };
   for (const [platform, arch, installer] of [
     ["win32", "x64", true], ["linux", "x64", true], ["win32", "arm64", false], ["darwin", "x64", false],
   ]) {
     assert.deepEqual(await findUpdate({ ...releaseRequest, platform, arch, fetchRelease: () => Response.json(data) }),
-      { status: "available", version: release.version, installer });
+      { status: "available", version: "0.1.15", installer });
   }
-  for (const invalid of ["", "http://example.com", origin + "/path", origin + "/", origin + "/?next=evil", "https://name@rooms.example.com"]) {
-    assert.equal(releasePage(invalid, release.version), null);
-  }
-  assert.equal(releasePage("http://127.0.0.1:8080", release.version), "http://127.0.0.1:8080/#/downloads");
+  const incomplete = { ...release, assets: [
+    null, { name: "ZeloteZ-Rooms-0.1.14-x86_64.AppImage", state: "uploaded" },
+    { ...release.assets[0], state: "starter" },
+  ] };
+  assert.deepEqual(await findUpdate({ ...releaseRequest, fetchRelease: () => Response.json(incomplete) }),
+    { status: "available", version: "0.1.15", installer: false });
 });
 
-test("desktop update checks do not contact an absent or malformed instance and bound the response", async () => {
-  for (const address of ["", "http://example.com", origin + "/other", "https://name@" + new URL(origin).host]) {
-    const result = await findUpdate({ ...releaseRequest, origin: address, fetchRelease: () => assert.fail("An instance is required") });
-    assert.deepEqual(result, { status: "instance" });
-  }
-  assert.deepEqual(await findUpdate({ ...releaseRequest, fetchRelease: () => Response.json({ ...release, artifacts: ["a".repeat(4096)] }) }),
+test("desktop update checks bound the GitHub response and respect cancellation", async () => {
+  assert.deepEqual(await findUpdate({ ...releaseRequest,
+    fetchRelease: () => Response.json({ ...release, body: "a".repeat(256 * 1024) }) }),
     { status: "unavailable" });
   assert.deepEqual(await findUpdate({ ...releaseRequest, fetchRelease: () => new Response(JSON.stringify(release)) }),
     { status: "unavailable" });
+  const controller = new AbortController();
+  controller.abort();
+  assert.deepEqual(await findUpdate({ ...releaseRequest, signal: controller.signal, fetchRelease: (_url, init) => {
+    init.signal.throwIfAborted();
+    return Response.json(release);
+  } }), { status: "cancelled" });
 });
 
 test("desktop handoff only parses one canonical instance and an exact YouTube video ID", () => {
