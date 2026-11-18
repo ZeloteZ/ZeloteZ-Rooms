@@ -38,7 +38,7 @@ test("Linux AppImage registers its actual file and refreshes an owned handler af
   const { env, directory, file, commands, execute } = await fixture(t);
   await registerLinuxShareLink(env, execute);
   const first = await readFile(file, "utf8");
-  assert.ok(first.includes('Exec="' + env.APPIMAGE + '" %u\n'));
+  assert.ok(first.includes('Exec=/usr/bin/env -- "' + env.APPIMAGE + '" %u\n'));
   assert.ok(first.includes("MimeType=" + mime + ";\n"));
   assert.ok(!first.includes("NoDisplay=true"));
   assert.deepEqual(commands.splice(0), [
@@ -51,7 +51,7 @@ test("Linux AppImage registers its actual file and refreshes an owned handler af
   env.APPIMAGE = path.join(env.HOME, "Rooms 0.2.AppImage");
   await writeFile(env.APPIMAGE, "", { mode: 0o700 });
   await registerLinuxShareLink(env, execute);
-  assert.ok((await readFile(file, "utf8")).includes('Exec="' + env.APPIMAGE + '" %u\n'));
+  assert.ok((await readFile(file, "utf8")).includes('Exec=/usr/bin/env -- "' + env.APPIMAGE + '" %u\n'));
   assert.deepEqual(commands, [["xdg-mime", "query", "default", mime], ["update-desktop-database", directory]]);
 });
 
@@ -153,7 +153,7 @@ X-ZeloteZ-Rooms-Managed=true
   await registerLinuxShareLink(env, execute);
   assert.deepEqual(await readdir(directory), [handler]);
   const registered = await readFile(file, "utf8");
-  assert.ok(registered.includes('Exec="' + env.APPIMAGE + '" %u'));
+  assert.ok(registered.includes('Exec=/usr/bin/env -- "' + env.APPIMAGE + '" %u'));
   assert.ok(registered.includes("Icon=de.zelotez.rooms.AppImage"));
   const localIcon = path.join(env.XDG_DATA_HOME, "icons/hicolor/512x512/apps/de.zelotez.rooms.AppImage.png");
   assert.deepEqual(await readFile(localIcon), await readFile(bundledIcon));

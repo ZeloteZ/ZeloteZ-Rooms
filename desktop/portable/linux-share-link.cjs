@@ -22,13 +22,12 @@ function desktopEntry(image, visible, icon) {
   // Escape for Exec argument quoting, then for the desktop key's string value.
   const executable = image.replace(/["`$\\]/gu, character => "\\" + character)
     .replace(/\\/gu, "\\\\").replace(/%/gu, "%%");
-  // GIO resolves the first token before unescaping field codes, including literal %%.
-  const prefix = image.includes("%") ? "Exec=/usr/bin/env -- " : "Exec=";
+  // xdg-mime needs an unquoted first token. GIO also resolves it before unescaping literal %%.
   return [
     "[Desktop Entry]",
     "Type=Application",
     "Name=" + appName,
-    prefix + '"' + executable + '" %u',
+    'Exec=/usr/bin/env -- "' + executable + '" %u',
     "Terminal=false",
     "Icon=" + icon,
     ...(visible ? [] : ["NoDisplay=true"]),
