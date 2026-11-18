@@ -5,6 +5,7 @@ import { assertOrigin, json, readJson, RequestError, transaction } from './http.
 import { createOwnerAccess, initializeOwnerAccess } from './owner-access.mjs'
 import { createAuthWork } from './auth-work.mjs'
 import { createAccountMfa, isTotpCode } from './account-mfa.mjs'
+import { activateSetup, initializeSetupState, sealSetup } from './setup.mjs'
 
 const secondsPerHour = 3600
 const sessionLifetime = 7 * 24 * secondsPerHour
@@ -40,7 +41,9 @@ function base64url(value, minLength, maxLength = minLength) {
 }
 
 export function initializeAuthSchema(db) {
-  db.exec(`
+  const initialize = () => {
+    const legacy = Boolean(db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'users'").get())
+    db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
@@ -81,7 +84,11 @@ export function initializeAuthSchema(db) {
       CHECK (used_at IS NULL OR revoked_at IS NULL)
     ) STRICT;
   `)
-  initializeOwnerAccess(db)
+    initializeOwnerAccess(db)
+    initializeSetupState(db, { legacy })
+  }
+  if (db.isTransaction) initialize()
+  else transaction(db, initialize)
 }
 
 function ownerExists(db) {
@@ -117,9 +124,11 @@ function issueInvite(db, publicOrigin, hours, createdBy, grantsAdmin) {
   return { ...inviteInfo(row), url: url.href }
 }
 
-export function bootstrapOwnerInvite(db, publicOrigin) {
+export function bootstrapOwnerInvite(db, publicOrigin, { browserSetup = false } = {}) {
   initializeAuthSchema(db)
   return transaction(db, () => {
+    if (browserSetup) activateSetup(db)
+    else sealSetup(db)
     if (ownerExists(db)) throw new Error('The site already has an owner.')
     db.prepare(`
       UPDATE invites SET revoked_at = ?
@@ -421,6 +430,7 @@ export function createAuth(db, { publicOrigin, trustProxyIp = false, profileFor 
       const id = randomUUID()
       const admin = invite.grants_admin === 1
       insertUser.run(id, username, name, passwordHash, admin ? 1 : 0, JSON.stringify(publicKey), JSON.stringify(identity), timestamp(now))
+      sealSetup(db)
       consumeInvite.run(now, id, invite.id)
       return { user: { id, username, displayName: name, admin, publicKey, identity }, cookie: startSession(req, id) }
     })

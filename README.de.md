@@ -36,6 +36,17 @@ Der temporäre Livechat verschlüsselt Nachrichten auch für eingeladene Gäste.
 
 ## Selbst hosten
 
+Das Rooms-Image bündelt Weboberfläche und Streaming-Dienste. Starte es vom Projektordner aus und hole den Einrichtungsschlüssel aus der Serverkonsole.
+
+```sh
+docker compose --project-directory . -f deploy/compose.image.yaml up -d --wait
+docker compose --project-directory . -f deploy/compose.image.yaml exec -T rooms node bootstrap.mjs --setup-key
+```
+
+Öffne [http://127.0.0.1:8080](http://127.0.0.1:8080). Der Assistent fragt nach dem Schlüssel, führt dich zum Betreiberkonto und zeigt den QR-Code für die Zwei-Faktor-Anmeldung. Für eine öffentliche Installation konfigurierst du die HTTPS-Adresse und Medienports vor dem Start. [Erststart](deploy/README.md#first-start) · [Öffentliche Instanz](deploy/README.md#public-instance) · [Updates](deploy/README.md#updates) · [Migration](deploy/README.md#move-an-existing-three-container-deployment)
+
+### Bestehende Installation mit drei Containern
+
 Kopiere für die Erstinstallation [`.env.example`](.env.example) nach `.env` und passe die Werte an deine Umgebung an.
 
 | Einstellung | Wofür sie gebraucht wird |

@@ -116,6 +116,15 @@ input[type="file"]::file-selector-button { color: #dce2ff; background: #28304f; 
 .auth-banner p { color: #d8daee; max-width: 32ch; }
 .auth-form-area { display: grid; align-content: center; gap: 18px; padding: clamp(21px, 4vw, 65px); }
 .auth-form-area .button { justify-self: start; }
+.setup-progress { display: flex; flex-wrap: wrap; gap: 7px 13px; padding: 0; list-style: none; color: var(--faint); font-size: .78rem; }
+.setup-progress li { display: inline-flex; align-items: center; gap: 6px; }
+.setup-progress [aria-current] { color: var(--accent); font-weight: 650; }
+.setup-step-number { display: grid; place-items: center; inline-size: 23px; block-size: 23px; border: 1px solid var(--line-strong); border-radius: 50%; }
+.setup-progress [aria-current] .setup-step-number { border-color: var(--accent); }
+.setup-key-help { min-inline-size: 0; color: var(--muted); font-size: .84rem; }
+.setup-key-help summary { cursor: pointer; }
+.setup-key-help > div { margin-block-start: 12px; gap: 9px; }
+.setup-key-help code { overflow-wrap: anywhere; color: #e0e3f2; }
 .topic-card {
   position: relative; min-width: 0; isolation: isolate; display: grid; align-content: end; min-height: 168px;
   overflow: hidden; border: 1px solid #3f4660; border-radius: 16px; background: #1c1f34; transition: transform .2s, border-color .2s;

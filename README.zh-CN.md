@@ -27,6 +27,10 @@
 
 ## 自行托管
 
+新服务器可以[启动 Rooms 镜像并在浏览器中完成设置](deploy/README.md#first-start)。一个镜像包含网站和串流服务。部署指南还介绍了[更新](deploy/README.md#updates)和[从现有部署迁移](deploy/README.md#move-an-existing-three-container-deployment)。
+
+### 现有的三容器部署
+
 1. **配置实例。** 将 `.env.example` 复制为 `.env`。将 `PUBLIC_ORIGIN` 设置为网站的 HTTPS 源地址，将 `STREAM_INGEST_BASE` 设置为 RTMPS 推流端点。这些地址不应包含路径。将 `VOICE_ICE_HOST` 设置为客户端可以访问的主机名或 IP 地址。[配置示例](.env.example)
 2. **设置 HTTPS 和 RTMPS。** 将 HTTPS 反向代理指向 `WEB_PORT` 配置的本机回环端口。让代理使用可信的客户端 IP 覆盖 `X-Real-IP`。将 `fullchain.pem` 和 `privkey.pem` 放入 `RTMPS_CERT_DIR`，并为推流端点使用单独的 TLS 私钥。
 3. **开放所需端口。** HTTPS 由反向代理处理。原生 RTMPS 推流默认使用 TCP 1936。WebRTC 默认使用 UDP 8189，并可回退到同一端口上的 TCP。

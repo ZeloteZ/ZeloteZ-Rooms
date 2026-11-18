@@ -1,0 +1,45 @@
+services:
+  rooms:
+    image: ${ROOMS_IMAGE:-ghcr.io/zelotez/zelotez-rooms:latest}
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://127.0.0.1:${WEB_PORT:-8080}}
+      TRUST_PROXY_IP: ${TRUST_PROXY_IP:-0}
+      STREAM_INGEST_BASE: ${STREAM_INGEST_BASE:-}
+      VOICE_ICE_HOST: ${VOICE_ICE_HOST:-}
+      VOICE_ICE_PORT: ${VOICE_ICE_PORT:-8189}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080/tcp"
+      - "${INGEST_IP:-127.0.0.1}:${INGEST_PORT:-1936}:1936/tcp"
+      - "${VOICE_ICE_IP:-127.0.0.1}:${VOICE_ICE_PORT:-8189}:${VOICE_ICE_PORT:-8189}/udp"
+      - "${VOICE_ICE_IP:-127.0.0.1}:${VOICE_ICE_PORT:-8189}:${VOICE_ICE_PORT:-8189}/tcp"
+    volumes:
+      - community:/data
+      - watch-media:/watch-data
+      - type: bind
+        source: ${ROOMS_DESKTOP_DOWNLOADS_DIR:-./desktop-downloads}
+        target: /srv/desktop-downloads
+        read_only: true
+      - type: bind
+        source: ${RTMPS_CERT_DIR:-./deploy/tls}
+        target: /tls
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: "${ROOMS_CPUS:-4.0}"
+    mem_limit: 3072m
+    pids_limit: 512
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  community:
+    name: ${ROOMS_DATA_VOLUME:-rooms-data}
+  watch-media:
+    name: ${ROOMS_WATCH_VOLUME:-rooms-watch-media}

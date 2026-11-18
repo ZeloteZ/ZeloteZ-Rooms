@@ -6,6 +6,6 @@ RUN install -d -m 0700 -o node -g node /data /watch-data
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY qrcode-generator-license.json ./node_modules/qrcode-generator/LICENSE.json
-COPY server.mjs account-mfa.mjs appearance.mjs auth.mjs auth-work.mjs bootstrap.mjs channel-management.mjs community.mjs desktop-handoff.mjs direct.mjs history.mjs http.mjs locale.mjs notifications.mjs owner-access.mjs presence.mjs quick-chat.mjs quick-rooms.mjs reactions.mjs stream-chat.mjs streams.mjs tutorials.mjs voice.mjs watch-parties.mjs ./
+COPY server.mjs account-mfa.mjs appearance.mjs auth.mjs auth-work.mjs bootstrap.mjs channel-management.mjs community.mjs desktop-handoff.mjs direct.mjs history.mjs http.mjs locale.mjs notifications.mjs owner-access.mjs presence.mjs quick-chat.mjs quick-rooms.mjs reactions.mjs setup.mjs stream-chat.mjs streams.mjs tutorials.mjs voice.mjs watch-parties.mjs ./
 USER node
 CMD ["node", "server.mjs"]

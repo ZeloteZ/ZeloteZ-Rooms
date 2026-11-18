@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { bootstrapOwnerInvite, initializeAuthSchema } from './auth.mjs'
 import { preferredLanguage, translateError } from './locale.mjs'
 import { issueOwnerRecovery, provisionOwnerMfa } from './owner-access.mjs'
+import { ensureSetupKey } from './setup.mjs'
 
 const locale = (process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '').split('.')[0].replaceAll('_', '-')
 const language = preferredLanguage(locale)
@@ -44,10 +45,16 @@ const db = new DatabaseSync(join(dataDir, 'community.sqlite'), { timeout: 5000 }
 try {
   initializeAuthSchema(db)
   const [option, ...extra] = process.argv.slice(2)
-  if (extra.length || (option && !['--if-needed', '--setup-owner-mfa', '--recover-owner'].includes(option))) {
-    throw new Error('Usage: node bootstrap.mjs [--if-needed | --setup-owner-mfa | --recover-owner]')
+  if (extra.length || (option && !['--if-needed', '--setup-owner-mfa', '--recover-owner', '--setup-key', '--ensure-setup-key'].includes(option))) {
+    throw new Error('Usage: node bootstrap.mjs [--if-needed | --setup-owner-mfa | --recover-owner | --setup-key | --ensure-setup-key]')
   }
-  if (option === '--setup-owner-mfa') {
+  if (option === '--setup-key' || option === '--ensure-setup-key') {
+    const key = ensureSetupKey(db)
+    if (option === '--setup-key') {
+      if (!key) throw new Error('Die Ersteinrichtung ist nicht verfügbar. Nutze für eine bestehende Instanz die lokale Betreiber-Wiederherstellung.')
+      console.log(key)
+    }
+  } else if (option === '--setup-owner-mfa') {
     const { default: qrcode } = await import('qrcode-generator')
     let qr
     const { key, uri } = provisionOwnerMfa(db, origin.origin, setup => {

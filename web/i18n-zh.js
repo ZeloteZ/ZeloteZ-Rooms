@@ -629,5 +629,18 @@ export default Object.freeze({
   "ZeloteZ Rooms is currently unavailable.": "ZeloteZ Rooms 暂时不可用。",
   "The screen sharing settings are invalid. Choose your source again.": "屏幕共享设置无效。请重新选择来源。",
   "The selected region is too small. Choose a larger area.": "所选区域太小。请选择更大的区域。",
-  "The screen preview is unavailable. Choose your source again.": "屏幕预览不可用。请重新选择来源。"
+  "The screen preview is unavailable. Choose your source again.": "屏幕预览不可用。请重新选择来源。",
+  "Setup progress": "设置进度",
+  "Access": "访问",
+  "Account": "账户",
+  "Security": "安全",
+  "Enter the setup key from your server terminal. You'll choose a separate password for your account in the next step.": "请输入服务器终端显示的设置密钥。下一步将为你的账户设置单独的密码。",
+  "Setup key": "设置密钥",
+  "Where do I find the setup key?": "在哪里获取设置密钥？",
+  "On your Docker host, run:": "在 Docker 主机上运行：",
+  "With Docker Compose, use the same Compose options you used to start Rooms:": "如果使用 Docker Compose，请采用启动 Rooms 时相同的 Compose 选项：",
+  "For other installations, run this in the Rooms server folder:": "对于其他安装方式，请在 Rooms 服务器目录中运行：",
+  "The setup response was invalid. Please try again.": "设置响应无效，请重试。",
+  "Set up Rooms": "设置 Rooms",
+  "Create the owner account. You'll secure it with an authenticator next.": "创建站点所有者账户。随后将通过身份验证器保护该账户。"
 });

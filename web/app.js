@@ -3,6 +3,7 @@ import { renderAdmin, renderFriends } from "./people.js";
 import { renderDirect } from "./direct.js";
 import { editProfile } from "./appearance.js";
 import { showAccountSecurity } from "./account-security.js";
+import { setupIsAvailable, setupKeyForm, setupProgress } from "./setup.js";
 import { renderHowItWorks } from "./how-it-works.js";
 import { isDesktopApp, renderDownloads } from "./downloads.js";
 import { renderGuestViewer } from "./guest-viewer.js";
@@ -62,6 +63,8 @@ let tutorials;
 let vaultLocked = false;
 let pendingRecovery = takeLinkToken("recover");
 let pendingInvite = pendingRecovery === null ? takeLinkToken("invite") : null;
+let setupAvailable = false;
+let setupInvite = false;
 
 const routes = { topics: "rooms", themen: "rooms", freunde: "friends", einladungen: "invites", "so-funktionierts": "help" };
 const navLabels = {
@@ -88,7 +91,7 @@ function languageChooser() {
   picker.addEventListener("change", () => {
     setLanguage(picker.value);
     window.webkit?.messageHandlers?.roomsCapture?.postMessage({ action: "language", language: picker.value });
-    if (pendingInvite !== null || pendingRecovery !== null) {
+    if ((!setupInvite && pendingInvite !== null) || pendingRecovery !== null) {
       const url = new URL(location.href);
       url.hash = new URLSearchParams(pendingRecovery !== null ? { recover: pendingRecovery } : { invite: pendingInvite }).toString();
       history.replaceState(null, "", url);
@@ -358,6 +361,8 @@ async function showWorkspace(nextUser, unlocked = true) {
   mountNotifications(notificationDock, signal, render);
   if (unlocked) startHistorySharing(signal, user.id);
   pendingInvite = null;
+  setupAvailable = false;
+  setupInvite = false;
   auth.replaceChildren();
   auth.hidden = true;
   bootstrap.hidden = true;
@@ -408,6 +413,28 @@ function showAuthPage(title, ...content) {
     el("div", { class: "auth-form-area" }, el("h2", {}, title), content, languageChooser()));
 }
 
+function focusAuthHeading() {
+  const heading = auth.querySelector(".auth-form-area h2");
+  heading.tabIndex = -1;
+  heading.focus({ preventScroll: true });
+}
+
+function showSetup() {
+  if (setupInvite) pendingInvite = null;
+  setupInvite = false;
+  enterAuth();
+  showAuthPage(t("Set up Rooms", "Rooms einrichten"), setupKeyForm({
+    onClaim(invite) {
+      pendingInvite = invite;
+      setupInvite = true;
+      showAuth("", "", true);
+      focusAuthHeading();
+    },
+    onSignIn() { showAuth(); focusAuthHeading(); },
+  }));
+  focusAuthHeading();
+}
+
 function showAuth(note = "", preset = "", showInvite = false) {
   enterAuth();
   const startRegister = showInvite && pendingInvite !== null;
@@ -426,6 +453,10 @@ function showAuth(note = "", preset = "", showInvite = false) {
   username.addEventListener("input", factor.clear);
   const remember = desktopLogin && !startRegister && el("input", { type: "checkbox", name: "remember" });
   const authForm = form([
+    startRegister && setupInvite && setupProgress(2),
+    startRegister && setupInvite && el("p", { class: "muted" }, t(
+      "Create the owner account. You'll secure it with an authenticator next.",
+      "Erstelle das Betreiberkonto. Anschließend sicherst du es mit einem Authenticator ab.")),
     startRegister && field(t("Display name", "Anzeigename"), name),
     field(t("Username", "Benutzername"), username),
     field(t("Password", "Passwort"), password),
@@ -474,8 +505,10 @@ function showAuth(note = "", preset = "", showInvite = false) {
       "Rooms konnte die Anmeldung nicht sicher auf diesem Gerät speichern. Melde dich beim nächsten Start erneut an."));
   });
   showAuthPage(authAction, authForm,
-    pendingInvite !== null && button(startRegister ? t("Back to sign in", "Zum Login") : t("Accept invitation", "Einladung annehmen"),
-      () => showAuth("", "", !startRegister), { class: "ghost" }));
+    setupInvite ? button(t("Back", "Zurück"), showSetup, { class: "ghost" })
+      : pendingInvite !== null && button(startRegister ? t("Back to sign in", "Zum Login") : t("Accept invitation", "Einladung annehmen"),
+        () => showAuth("", "", !startRegister), { class: "ghost" }),
+    setupAvailable && !startRegister && !setupInvite && button(t("Set up Rooms", "Rooms einrichten"), showSetup, { class: "ghost" }));
 }
 
 function sameChatIdentity(account, current) {
@@ -737,7 +770,10 @@ async function start() {
     const session = await api("auth/session");
     if (!session.user) await desktopLogin?.discard().catch(() => {});
     if (pendingInvite !== null) return showAuth("", "", true);
-    if (!session.user) return showAuth();
+    if (!session.user) {
+      setupAvailable = await setupIsAvailable();
+      return setupAvailable ? showSetup() : showAuth();
+    }
     if (await globalThis.ClubCrypto?.unlock(session.user)) return showWorkspace(session.user);
     const savedVault = await desktopLogin?.load(session.user.id).catch(() => null);
     if (savedVault && await globalThis.ClubCrypto?.unlock(session.user, undefined, savedVault)) return showWorkspace(session.user);

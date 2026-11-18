@@ -6,6 +6,11 @@
 !deploy/nginx.conf
 !deploy/player.package.json
 !deploy/player.package-lock.json
+!deploy/mediamtx.yml
+!deploy/rooms-entrypoint.mjs
 !server/
 server/**
 !server/qrcode-generator-license.json
+!server/package.json
+!server/package-lock.json
+!server/*.mjs

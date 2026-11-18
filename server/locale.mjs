@@ -17,6 +17,10 @@ const catalogs = {
   },
   'zh-CN': {
     messages: {
+      'Die Ersteinrichtung ist nicht verfügbar. Nutze für eine bestehende Instanz die lokale Betreiber-Wiederherstellung.': '首次设置不可用。对于现有站点，请使用服务器本地的站点所有者恢复命令。',
+      'Der Einrichtungsschlüssel ist ungültig.': '设置密钥无效。',
+      'Der Einrichtungsschlüssel muss aus 32 zufälligen Bytes im Base64url-Format bestehen.': '设置密钥必须为 32 个随机字节的 Base64url 编码。',
+      'Die Datei für den Einrichtungsschlüssel muss eine private reguläre Datei sein (0600).': '设置密钥文件必须为权限为 0600 的私有普通文件。',
       'Benutzername oder Passwort stimmt nicht.': '用户名或密码不正确。',
       'Dafür fehlt dir die Berechtigung.': '你没有执行此操作的权限。',
       'Das angemeldete Konto hat sich geändert.': '当前登录的账户已更改。',
@@ -166,8 +170,8 @@ const catalogs = {
       'Create the site owner account first.': '请先创建站点所有者账户。',
       'The site already has an owner.': '此站点已有所有者。',
       'PUBLIC_ORIGIN must be an HTTPS address or a local test address.': 'PUBLIC_ORIGIN 必须是 HTTPS 地址或本地测试地址。',
-      'Usage: node bootstrap.mjs [--if-needed | --setup-owner-mfa | --recover-owner]':
-        '用法：node bootstrap.mjs [--if-needed | --setup-owner-mfa | --recover-owner]',
+      'Usage: node bootstrap.mjs [--if-needed | --setup-owner-mfa | --recover-owner | --setup-key | --ensure-setup-key]':
+        '用法：node bootstrap.mjs [--if-needed | --setup-owner-mfa | --recover-owner | --setup-key | --ensure-setup-key]',
       'Add this time-based secret to your authenticator (six digits, 30 seconds). All owner sessions were revoked.':
         '请将此基于时间的密钥添加到身份验证器中（6 位验证码，每 30 秒更新）。站点所有者的所有会话已撤销。',
       'Scan the QR code below. Enlarge the terminal or reduce its font size if needed.':
@@ -186,6 +190,10 @@ const catalogs = {
   },
   en: {
     messages: {
+      'Die Ersteinrichtung ist nicht verfügbar. Nutze für eine bestehende Instanz die lokale Betreiber-Wiederherstellung.': 'First-run setup is unavailable. For an existing instance, use the local owner recovery command.',
+      'Der Einrichtungsschlüssel ist ungültig.': 'The setup key is invalid.',
+      'Der Einrichtungsschlüssel muss aus 32 zufälligen Bytes im Base64url-Format bestehen.': 'The setup key must contain 32 random bytes encoded as Base64url.',
+      'Die Datei für den Einrichtungsschlüssel muss eine private reguläre Datei sein (0600).': 'The setup key file must be a private regular file (0600).',
       'Benutzername oder Passwort stimmt nicht.': 'The username or password is incorrect.',
       'Dafür fehlt dir die Berechtigung.': 'You do not have permission to do this.',
       'Das angemeldete Konto hat sich geändert.': 'The signed-in account has changed.',

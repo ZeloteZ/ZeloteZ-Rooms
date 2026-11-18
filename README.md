@@ -21,6 +21,10 @@ A private place for friends to chat, talk, and share their screens. Host an invi
 
 ## Self-hosting
 
+For a new server, [start the Rooms image and complete the browser wizard](deploy/README.md#first-start). It bundles the web and streaming services. The same guide covers [updates](deploy/README.md#updates) and [moving an existing deployment](deploy/README.md#move-an-existing-three-container-deployment).
+
+### Existing three-container deployment
+
 1. **Configure the instance.** Copy [`.env.example`](.env.example) to `.env`. Set `PUBLIC_ORIGIN` to your HTTPS origin and `STREAM_INGEST_BASE` to your RTMPS endpoint. Use addresses without paths. Set `VOICE_ICE_HOST` to a hostname or IP address your clients can reach.
 2. **Set up HTTPS and RTMPS.** Point your HTTPS reverse proxy at the loopback port configured by `WEB_PORT`. Have the proxy overwrite `X-Real-IP` with the trusted client address. Put `fullchain.pem` and `privkey.pem` in `RTMPS_CERT_DIR`, using a separate TLS key for the ingest endpoint.
 3. **Open the ports your group needs.** HTTPS terminates at your reverse proxy. The media defaults are TCP 1936 for native RTMPS ingest and UDP 8189 with a TCP fallback on the same port for WebRTC.

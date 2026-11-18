@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createAppearance } from './appearance.mjs'
-import { createAuth } from './auth.mjs'
+import { bootstrapOwnerInvite, createAuth, requestAddress } from './auth.mjs'
 import { createCommunity } from './community.mjs'
 import { createChannelManagement } from './channel-management.mjs'
 import { createDesktopHandoff } from './desktop-handoff.mjs'
@@ -19,6 +19,7 @@ import { createStreamChat } from './stream-chat.mjs'
 import { createTutorials } from './tutorials.mjs'
 import { createVoice } from './voice.mjs'
 import { createWatchParties } from './watch-parties.mjs'
+import { configuredSetupKey, createSetup } from './setup.mjs'
 
 const origin = new URL(process.env.PUBLIC_ORIGIN ?? 'http://127.0.0.1:8080')
 const localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
@@ -40,6 +41,9 @@ const desktopHandoff = createDesktopHandoff()
 const auth = createAuth(db, { publicOrigin: origin.origin, trustProxyIp, profileFor: appearance.selfProfile,
   revokeBroadcasts: userId => streams.revokeUser(userId) })
 const { requireSession } = auth
+const setup = createSetup(db, { publicOrigin: origin.origin, setupKey: configuredSetupKey(db),
+  ipFor: request => requestAddress(request, trustProxyIp),
+  bootstrap: () => bootstrapOwnerInvite(db, origin.origin, { browserSetup: true }) })
 const tutorials = createTutorials(db, { requireSession })
 const recordMentions = input => notifications.recordMentions(input)
 const community = createCommunity(db, { requireSession, appearance, recordMentions,
@@ -120,6 +124,7 @@ const publicApi = service(async (request, response) => {
   if (request.method === 'GET' && path === '/_internal/guest-stream-view') return quickRooms.checkGuestViewer(request, response)
   if (path.startsWith('/api/')) {
     if (!['GET', 'HEAD'].includes(request.method)) assertOrigin(request, origin.origin)
+    if (await setup.handle(request, response, path)) return
     if (path.startsWith('/api/guest/')) {
       if (await quickRooms.handleGuest(request, response, path)) return
       return json(response, 404, { error: 'Nicht gefunden.' })
