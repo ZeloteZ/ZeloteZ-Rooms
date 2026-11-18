@@ -42,7 +42,7 @@ export function createPlaybackStats(video) {
   video.addEventListener("playing", () => {
     if (playingSince === null) playingSince = performance.now();
   }, { signal: lifetime.signal });
-  for (const event of ["pause", "waiting", "stalled", "ended", "emptied"]) {
+  for (const event of ["pause", "waiting", "ended", "emptied"]) {
     video.addEventListener(event, stopClock, { signal: lifetime.signal });
   }
 

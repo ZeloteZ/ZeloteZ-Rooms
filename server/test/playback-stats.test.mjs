@@ -92,6 +92,7 @@ test('HLS rates count received media bytes while decoded FPS and viewing time fo
   advance(2000)
   assert.deepEqual(await stats.sample(), { elapsed: 1, width: 1920, height: 1080, fps: 0, mbps: 0 })
   video.play()
+  video.dispatchEvent(new Event('stalled'))
   advance(3000)
   video.frames = 90
   events.get('loaded')('loaded', { frag: { type: 'main' }, part: { stats: { loaded: 500000 } } })
